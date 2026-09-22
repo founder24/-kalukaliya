@@ -62,6 +62,42 @@ beforeAll(async () => {
         '[{"title":"Newton laws","title_as":"  ","slug":"newton-laws"}]'
       )
     `),
+    env.DB.prepare(`
+      INSERT INTO subjects (id, stream_id, name, slug, is_published)
+      VALUES ('empty-subject', 'stream', 'Empty Subject', 'empty-subject', 1)
+    `),
+    env.DB.prepare(`
+      INSERT INTO subjects (id, stream_id, name, slug, is_published)
+      VALUES ('index-subject', 'stream', 'Index Subject', 'index-subject', 1)
+    `),
+    env.DB.prepare(`
+      INSERT INTO subjects (id, stream_id, name, slug, is_published)
+      VALUES ('hidden-subject', 'stream', 'Hidden Subject', 'hidden-subject', 0)
+    `),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, slug, status, published_topics
+      ) VALUES (
+        'indexed', 'index-subject', 'Indexed Topics', 'indexed-topics', 'published',
+        '[{"title":"Energy","slug":"energy"},{"title":"Missing slug"},{"name":"Named topic","slug":"named-topic"}]'
+      )
+    `),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, slug, status, published_topics
+      ) VALUES (
+        'draft-topics', 'subject', 'Draft Topics', 'draft-topics', 'draft',
+        '[{"title":"Draft only","slug":"draft-only"}]'
+      )
+    `),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, slug, status, published_topics
+      ) VALUES (
+        'hidden-draft', 'hidden-subject', 'Hidden Draft', 'hidden-draft', 'draft',
+        '[{"title":"Hidden only","slug":"hidden-only"}]'
+      )
+    `),
   ]);
 });
 
@@ -152,6 +188,84 @@ describe('Assamese public content metadata', () => {
         { title: 'Acceleration', title_as: '  ', slug: 'acceleration' },
       ],
       total: 2,
+    });
+  });
+
+  it('builds a hierarchy-aware topic index and filters non-citable topics', async () => {
+    const response = await get('/api/v1/content/subjects/subject/topic-index');
+    expect(response.status).toBe(200);
+
+    const payload = await response.json() as {
+      subject_id: string;
+      total_topics: number;
+      chapters: Array<{
+        chapter_id: string;
+        chapter_url: string;
+        topics: Array<{
+          topic_slug: string;
+          deep_link_path: string;
+        }>;
+      }>;
+    };
+    expect(payload.subject_id).toBe('subject');
+    expect(payload.total_topics).toBe(3);
+
+    const motion = payload.chapters.find((chapter) => chapter.chapter_id === 'translated');
+    expect(motion).toMatchObject({
+      chapter_url: '/ahsec/class-12/science/physics/motion',
+    });
+    expect(motion?.topics[0]).toMatchObject({
+      topic_slug: 'velocity',
+      deep_link_path: '/ahsec/class-12/science/physics/motion/topic/velocity',
+    });
+
+    expect(payload.chapters.some((chapter) => chapter.chapter_id === 'draft-topics')).toBe(false);
+
+    const indexedResponse = await get('/api/v1/content/subjects/index-subject/topic-index');
+    expect(indexedResponse.status).toBe(200);
+    const indexedPayload = await indexedResponse.json() as {
+      chapters: Array<{
+        chapter_url: string;
+        topics: Array<{ topic_slug: string; deep_link_path: string }>;
+      }>;
+      total_topics: number;
+    };
+    expect(indexedPayload.total_topics).toBe(2);
+    expect(indexedPayload.chapters[0]).toMatchObject({
+      chapter_url: '/ahsec/class-12/science/index-subject/indexed-topics',
+      topics: [
+        {
+          topic_slug: 'energy',
+          deep_link_path: '/ahsec/class-12/science/index-subject/indexed-topics/topic/energy',
+        },
+        { topic_slug: 'named-topic' },
+      ],
+    });
+  });
+
+  it('returns stable empty indexes without exposing unpublished or unknown chapters', async () => {
+    const empty = await get('/api/v1/content/subjects/empty-subject/topic-index');
+    expect(empty.status).toBe(200);
+    await expect(empty.json()).resolves.toEqual({
+      subject_id: 'empty-subject',
+      chapters: [],
+      total_topics: 0,
+    });
+
+    const hidden = await get('/api/v1/content/subjects/hidden-subject/topic-index');
+    expect(hidden.status).toBe(200);
+    await expect(hidden.json()).resolves.toEqual({
+      subject_id: 'hidden-subject',
+      chapters: [],
+      total_topics: 0,
+    });
+
+    const unknown = await get('/api/v1/content/subjects/does-not-exist/topic-index');
+    expect(unknown.status).toBe(200);
+    await expect(unknown.json()).resolves.toEqual({
+      subject_id: 'does-not-exist',
+      chapters: [],
+      total_topics: 0,
     });
   });
 });

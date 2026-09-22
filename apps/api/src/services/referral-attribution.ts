@@ -4,6 +4,10 @@ import {
   REFERRAL_POLICY_VERSION,
   type ReferralEvidenceGate,
 } from '../contracts/referral-policy';
+import {
+  awardVerifiedVisitorPoints,
+  recordConsumerReferralVisit,
+} from './consumer-referrals';
 
 export const REFERRAL_IDENTITY_COOKIE = 'syrabit_referral_identity';
 export const REFERRAL_EVENT_RETENTION_SECONDS = 180 * 24 * 60 * 60;
@@ -568,11 +572,40 @@ export async function recordReferralVisit(
     WHERE referral_code = ? AND status = 'active'
     LIMIT 1
   `).bind(referralCode).first<InfluencerRow>();
-  if (!influencer) {
+  const consumer = !influencer
+    ? await db.prepare(`
+        SELECT id FROM users
+        WHERE consumer_referral_code = ? AND deleted_at IS NULL
+        LIMIT 1
+      `).bind(referralCode).first<{ id: string }>()
+    : null;
+  if (!influencer && !consumer) {
     return { destination, setCookie: null, attribution: 'invalid-code', claimId: null };
   }
 
   const identity = await resolveReferralIdentity(request, secret);
+  if (consumer) {
+    const visitorKey = await hmacHex(
+      secret,
+      `consumer-visitor:${identity.identityHash}`,
+    );
+    const credited = await recordConsumerReferralVisit(
+      db,
+      consumer.id,
+      visitorKey,
+      identity.confidence,
+      occurredAt,
+    );
+    return {
+      destination,
+      setCookie: identity.setCookie,
+      attribution: credited ? 'credited' : identity.confidence === 'low' ? 'accrual-disabled' : 'repeat',
+      claimId: null,
+    };
+  }
+  if (!influencer) {
+    return { destination, setCookie: null, attribution: 'invalid-code', claimId: null };
+  }
   const week = await openWeek(db, occurredAt);
   if (!week) {
     await recordBoundedEvent(db, {
@@ -614,13 +647,18 @@ export async function recordReferralVisit(
     identity.identityHash,
     week.id,
   );
+  const consumerIdentityKey = await hmacHex(
+    secret,
+    `consumer-visitor:${identity.identityHash}`,
+  );
   const proposedClaimId = crypto.randomUUID();
   const claim = await db.prepare(`
     INSERT INTO referral_weekly_claims
-      (id, week_id, identity_hash, credited_influencer_slot, identity_confidence,
+      (id, week_id, identity_hash, consumer_identity_key,
+       credited_influencer_slot, identity_confidence,
        state, first_seen_at, last_seen_at, event_count, accrual_generation,
        policy_version, expires_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, 1, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(week_id, identity_hash) DO UPDATE SET
       first_seen_at = CASE
         WHEN referral_weekly_claims.state = 'pending'
@@ -649,6 +687,7 @@ export async function recordReferralVisit(
     proposedClaimId,
     week.id,
     identityHash,
+    consumerIdentityKey,
     influencer.slot_no,
     identity.confidence,
     occurredAt,
@@ -1348,6 +1387,7 @@ export async function matureReferralClaim(
       maturityToken,
     ),
   ]);
+  await awardVerifiedVisitorPoints(db, claimId, maturityToken, maturedAt);
   await rebalanceProvisionalAdvancedPositions(db, maturedAt);
 
   const claim = await db.prepare(`

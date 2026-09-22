@@ -471,7 +471,7 @@ export default function PYQUploadPanel({
         className="rounded-xl border border-blue-500/20 bg-blue-500/5 overflow-hidden mb-3"
         data-testid="chapter-pyq-pages-panel"
       >
-        <div className="px-4 py-3 border-b border-blue-500/10 flex items-center justify-between gap-3">
+        <div className="px-3 sm:px-4 py-3 border-b border-blue-500/10 flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
             <ImagePlus size={16} className="text-blue-500 flex-shrink-0" />
             <div className="min-w-0">
@@ -487,7 +487,7 @@ export default function PYQUploadPanel({
           <button
             onClick={() => pageInputRef.current?.click()}
             disabled={pageUploading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0"
+            className="w-full sm:w-auto justify-center flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex-shrink-0"
             data-testid="upload-pyq-pages"
           >
             {pageUploading ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />}
@@ -503,14 +503,14 @@ export default function PYQUploadPanel({
           />
         </div>
 
-        <div className="px-4 py-3 space-y-2">
+        <div className="px-3 sm:px-4 py-3 space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
             <label className="text-[11px] text-gray-500">Page label prefix</label>
             <input
               value={pageLabel}
               onChange={(e) => setPageLabel(e.target.value)}
               placeholder="Optional, e.g. HS 2025"
-              className="h-8 flex-1 min-w-[180px] px-2.5 rounded-lg text-xs text-gray-900 bg-white border border-gray-200 outline-none focus:border-blue-400"
+              className="h-9 flex-1 min-w-0 px-2.5 rounded-lg text-xs text-gray-900 bg-white border border-gray-200 outline-none focus:border-blue-400"
             />
             <span className="text-[10px] text-gray-400">Year uses the selected {examYear} value below.</span>
           </div>
@@ -535,7 +535,7 @@ export default function PYQUploadPanel({
                   <button
                     onClick={() => deleteChapterPage(page.id)}
                     title="Delete image page"
-                    className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/90 text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1.5 right-1.5 p-2 rounded-md bg-white/90 text-red-500 shadow-sm opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                   >
                     <Trash2 size={11} />
                   </button>

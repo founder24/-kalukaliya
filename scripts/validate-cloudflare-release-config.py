@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 import tomllib
 
@@ -58,9 +59,19 @@ def main() -> int:
         errors.append("Edge Workers AI binding AI is missing")
 
     excluded = set(routes.get("exclude", []))
-    for route in ("/feed.xml", "/feed.json", "/feed/*", "/llms.txt", "/llms-full.txt", "/robots.txt"):
+    for route in (
+        "/feed.xml",
+        "/feed.json",
+        "/feed/*",
+        "/llms.txt",
+        "/llms-full.txt",
+        "/robots.txt",
+        "/sitemap-topics.xml",
+    ):
         if route in excluded:
             errors.append(f"Pages route {route} must reach the custom Worker")
+    if re.search(r"Link:\s*</assets/[^>]+>\s*;\s*rel=preload", (ROOT / "apps/frontend/public/_headers").read_text(), re.I):
+        errors.append("Pages _headers must not preload hashed assets during edge convergence")
     for marker in ("SEO_PASSTHROUGH_RE", "bot-render-not-found", "env.ASSETS.fetch"):
         if marker not in worker:
             errors.append(f"Pages custom Worker is missing required behavior marker: {marker}")

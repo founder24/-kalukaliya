@@ -523,11 +523,12 @@ test.describe('Staff panel — sidebar sections', () => {
   // Helpers
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** Navigate to /staff and wait until the sidebar appears (guard passed). */
+  /** Navigate to /staff and wait until the authenticated staff shell appears. */
   async function gotoStaff(p: import('@playwright/test').Page) {
     await p.goto('/staff');
-    // <aside> is only rendered when StaffGuard is satisfied (user.role===staff)
-    await p.waitForSelector('aside', { timeout: 20_000 });
+    // The desktop sidebar is hidden at mobile widths, so use the shared shell
+    // marker rather than requiring a visible desktop-only element.
+    await p.waitForSelector('[data-testid="admin-dashboard"]', { timeout: 20_000 });
   }
 
   /** Click a sidebar nav button by its visible label. */
@@ -1073,6 +1074,43 @@ test.describe('Staff panel — sidebar sections', () => {
     expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
     expect(fixture.hasRequest('DELETE', '/api/v1/staff/content/chapter/chapter-1/pyq-papers/chapter-page-1')).toBeTruthy();
     expect(consoleErrors, 'No uncaught console errors during the Content Editor regression').toHaveLength(0);
+  });
+
+  test('mobile Content Editor keeps navigation, formatting, and image pages reachable', async ({ page }) => {
+    const fixture = await setupContentEditorFixture(page, { includeSecondChapter: true });
+    staffMocks.enableStrictUnexpectedApiRequests();
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await gotoStaff(page);
+    await expect(page.getByTestId('admin-mobile-menu')).toBeVisible();
+    await page.getByTestId('admin-mobile-menu').click();
+    await expect(page.getByTestId('admin-mobile-nav-contenthub')).toBeVisible();
+    await page.getByTestId('admin-mobile-nav-contenthub').click();
+
+    await page.getByTestId('mobile-select-board').selectOption('board-1');
+    await page.getByTestId('mobile-select-class').selectOption('class-1');
+    await page.getByTestId('mobile-select-stream').selectOption('stream-1');
+    await page.getByTestId('mobile-select-subject').selectOption('subject-1');
+    await expect(page.getByText('Chapters (2)')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+
+    await page.getByTestId('edit-chapter-chapter-1').click();
+    await expect(page.getByTestId('ai-format-button')).toBeVisible();
+    await page.getByTestId('ai-format-button').click();
+    await expect(page.getByText('Formatted Motion', { exact: false })).toBeVisible();
+
+    const pagesPanel = page.getByTestId('chapter-pyq-pages-panel');
+    await expect(pagesPanel.getByTestId('upload-pyq-pages')).toBeVisible();
+    await pagesPanel.locator('input[type="file"]').setInputFiles({
+      name: 'mobile-page.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from('mobile-pyq-page'),
+    });
+    await expect(pagesPanel.getByAltText('HS 2025 Page 1')).toBeVisible();
+
+    expect(fixture.hasRequest('POST', '/api/v1/admin/content/format-text')).toBeTruthy();
+    expect(fixture.hasRequest('POST', '/api/v1/staff/content/chapter/chapter-1/pyq-papers')).toBeTruthy();
+    expect(consoleErrors, 'No uncaught console errors in the mobile Content Editor').toHaveLength(0);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

@@ -223,6 +223,9 @@ export const saveOnboarding = (data) =>
 export const getReferralExperience = () =>
   axios.get(`${API_BASE}/referrals/me`, authConfig());
 
+export const redeemReferralPoints = (benefit) =>
+  axios.post(`${API_BASE}/referrals/me/redeem`, { benefit }, authConfig());
+
 export const getReferralStatements = () =>
   axios.get(`${API_BASE}/referrals/me/statements`, authConfig());
 
@@ -994,7 +997,7 @@ export const adminSeoResolveDuplicate = (token, pairId, action = 'ignore') =>
 
 
 export const seoRelatedByChapter = (chapterId, excludeTopicId = null, limit = 5) =>
-  axios.get(`${API_BASE}/seo/related-by-chapter/${chapterId}`, {
+  axios.get(`${API_BASE}/content/chapters/${chapterId}/topics-related`, {
     params: { limit, ...(excludeTopicId ? { exclude_topic_id: excludeTopicId } : {}) },
   });
 

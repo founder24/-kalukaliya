@@ -6,10 +6,12 @@ import {
   activateReferralApplication,
   getReferralExperience,
   getReferralStatements,
+  redeemReferralPoints,
   submitReferralApplication,
 } from '@/utils/api';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
+import { setAdsPlan } from '@/utils/adsConfig';
 import {
   ArrowUpRight, Check, Clipboard, Clock3, ExternalLink, Info, Link2,
   LockKeyhole, RefreshCw, ShieldCheck, UsersRound, WalletCards,
@@ -51,6 +53,7 @@ export default function ReferralExperience() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [redeeming, setRedeeming] = useState('');
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -74,6 +77,7 @@ export default function ReferralExperience() {
 
   const policy = experience?.policy || {};
   const program = experience?.program || {};
+  const consumer = experience?.consumer;
   const application = experience?.application;
   const dashboard = experience?.dashboard;
   const isPaused = program.state === 'paused';
@@ -111,6 +115,33 @@ export default function ReferralExperience() {
     if (navigator.share) await navigator.share({ title: 'Study with Syrabit', text: 'A focused AI study space for students.', url: dashboard.referral.link });
     else await copy();
   };
+  const redeem = async (benefit) => {
+    if (!consumer || redeeming) return;
+    setRedeeming(benefit);
+    try {
+      const result = unwrap(await redeemReferralPoints(benefit));
+      setExperience((current) => ({ ...current, consumer: result.consumer }));
+      if (benefit === 'ads_free') {
+        setAdsPlan(user?.plan, result.consumer?.ads_free?.until);
+      }
+      toast.success(benefit === 'upgrade'
+        ? 'Your 30-day chat upgrade is active.'
+        : 'Ads are disabled for the next 30 days.');
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || 'Points could not be redeemed.');
+    } finally {
+      setRedeeming('');
+    }
+  };
+  const copyConsumerLink = async () => {
+    if (!consumer?.referral_link) return;
+    try {
+      await navigator.clipboard.writeText(consumer.referral_link);
+      toast.success('Referral link copied.');
+    } catch {
+      toast.error('Could not copy the referral link.');
+    }
+  };
 
   if (loading) return <AppLayout pageTitle="Referrals"><div className="mx-auto max-w-5xl space-y-5 p-6 animate-pulse"><div className="h-40 rounded-[1.5rem] bg-violet-100/70" /><div className="grid gap-5 md:grid-cols-2"><div className="h-72 rounded-[1.5rem] bg-white/70" /><div className="h-72 rounded-[1.5rem] bg-white/70" /></div></div></AppLayout>;
   if (error) return <AppLayout pageTitle="Referrals"><div className="mx-auto max-w-lg p-10 text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-50 text-rose-600"><Info /></div><h1 className="text-xl font-bold text-slate-900">Referral details are unavailable</h1><p className="my-2 text-sm text-slate-500">{error}</p><button onClick={load} data-testid="button-retry-referrals" className="mt-4 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white"><RefreshCw size={15} /> Try again</button></div></AppLayout>;
@@ -125,6 +156,41 @@ export default function ReferralExperience() {
           <div className="relative max-w-2xl"><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Help a classmate study. Earn when their visit is verified.</h1><p className="mt-3 max-w-xl text-sm leading-6 text-violet-100/80">A transparent program for eligible students. No pressure to share, no public identity, and no promise until the server verifies a visit.</p></div>
           <div className="relative mt-6 flex flex-wrap gap-2 text-xs font-semibold text-violet-100"><span className="rounded-full bg-white/10 px-3 py-2">Policy {policy.version || 'current'}</span><span className="rounded-full bg-white/10 px-3 py-2">Server-verified earnings</span><span className="rounded-full bg-white/10 px-3 py-2">Program pauses are visible</span></div>
         </header>
+
+         {consumer && <Card data-testid="consumer-referral-points" className="border-emerald-200 bg-emerald-50/70">
+           <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+             <div>
+               <p className="text-[11px] font-bold uppercase tracking-[.18em] text-emerald-700">Visitor points</p>
+               <h2 className="mt-1 text-2xl font-bold text-slate-900">{consumer.points} points</h2>
+               <p className="mt-1 text-sm text-slate-600">
+                 Earn {consumer.policy?.points_per_verified_visitor || 1} point for each unique visitor after Syrabit verifies the visit.
+                 {consumer.verified_visitors ? ` ${consumer.verified_visitors} verified visitors so far.` : ''}
+               </p>
+               {consumer.referral_link && <div className="mt-3 flex max-w-full items-center gap-2">
+                 <code className="min-w-0 flex-1 truncate rounded-lg bg-white px-2.5 py-2 text-xs text-slate-600">{consumer.referral_link}</code>
+                 <button type="button" onClick={copyConsumerLink} className="shrink-0 rounded-lg border border-emerald-200 bg-white px-2.5 py-2 text-xs font-bold text-emerald-800 hover:border-emerald-400">Copy</button>
+               </div>}
+             </div>
+             <div className="grid gap-2 sm:min-w-[280px]">
+               {[
+                 ['upgrade', `Upgrade to ${consumer.policy?.upgrade_monthly_chat_limit || 100} chats/month`, consumer.policy?.upgrade_points || 500, consumer.upgrade?.active ? `Active until ${date(consumer.upgrade.until)}` : '30 days'],
+                 ['ads_free', 'Go ad-free', consumer.policy?.ad_free_points || 500, consumer.ads_free?.active ? `Active until ${date(consumer.ads_free.until)}` : '30 days'],
+               ].map(([benefit, label, cost, duration]) => (
+                 <button
+                   key={benefit}
+                   type="button"
+                   disabled={redeeming || consumer.points < cost}
+                   onClick={() => redeem(benefit)}
+                   data-testid={`button-redeem-${benefit}`}
+                   className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-white px-3 py-2.5 text-left text-xs font-bold text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                 >
+                   <span><span className="block">{redeeming === benefit ? 'Redeeming…' : label}</span><span className="mt-0.5 block text-[11px] font-medium text-slate-500">{cost} points · {duration}</span></span>
+                   <ArrowUpRight size={15} />
+                 </button>
+               ))}
+             </div>
+           </div>
+         </Card>}
 
         {isPaused && <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><Clock3 className="mt-0.5 shrink-0" size={18} /><div><b>Referrals are paused{program.pause_effective_at ? ` since ${date(program.pause_effective_at)}` : ''}.</b><p className="mt-1 text-amber-800">Your progress is preserved and new earnings stop during the pause. We will show a new activation date here when the program resumes.</p></div></div>}
 
