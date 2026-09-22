@@ -3,6 +3,7 @@
 # otherwise reference content-hashed CSS/JS files that no longer exist.
 /*
   Cache-Control: public, max-age=0, must-revalidate
+  X-Syrabit-Hashed-Preload: disabled
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://pagead2.googlesyndication.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://*.syrabit.ai https://us.i.posthog.com https://pagead2.googlesyndication.com; frame-src 'self' https://googleads.g.doubleclick.net https://tpc.googlesyndication.com; frame-ancestors 'none'
@@ -16,12 +17,10 @@
   Cross-Origin-Resource-Policy: same-origin
   Cross-Origin-Embedder-Policy: credentialless
 
-# NOTE: `Link: rel=preload` headers for the critical JS/CSS chunks are NOT
-# listed here because Vite uses content-hash filenames that change every build.
-# They are injected into dist/_headers at build time by the Vite plugin:
-#   vite-plugins/preload-headers-inject.js  (Task #79)
-# The plugin appends a `/*` block with the correct hashed paths after each
-# `vite build` run, enabling Cloudflare to emit 103 Early Hints responses.
+# NOTE: Hashed JS/CSS files are intentionally not emitted as Link preload
+# headers. Cloudflare Early Hints can outlive the HTML response during edge
+# convergence, which lets an older release preload bundles deleted by the
+# current release. The HTML modulepreload links remain release-local.
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
