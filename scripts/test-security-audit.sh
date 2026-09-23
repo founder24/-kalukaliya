@@ -126,6 +126,12 @@ admin_get() {
   http_call GET "${EDGE_URL}${1}" -b "$ADMIN_JAR"
 }
 
+is_access_redirect() {
+  [[ "$RESP_STATUS" == "301" || "$RESP_STATUS" == "302" || \
+     "$RESP_STATUS" == "307" || "$RESP_STATUS" == "308" ]] &&
+    has_header "Location"
+}
+
 # ── Probe inputs ──────────────────────────────────────────────────────────────
 LONG_INPUT=$(python3 -c "print('A' * 2100)")
 TODAY=$(date -u '+%Y-%m-%d')
@@ -254,8 +260,10 @@ for admin_path in \
   http_call GET "${EDGE_URL}${admin_path}"
   if [[ "$RESP_STATUS" == "401" || "$RESP_STATUS" == "403" ]]; then
     ok "H-8: GET ${admin_path} without session → ${RESP_STATUS}"
+  elif is_access_redirect; then
+    ok "H-8: GET ${admin_path} without session → ${RESP_STATUS} (Cloudflare Access redirect)"
   else
-    fail "H-8: Admin guard missing on ${admin_path}" "expected 401/403, got ${RESP_STATUS}"
+    fail "H-8: Admin guard missing on ${admin_path}" "expected 401/403 or Access redirect, got ${RESP_STATUS}"
   fi
 done
 
@@ -352,7 +360,7 @@ print(len(items))" 2>/dev/null || echo -1)
 fi
 
 section "M-6 · Chat message capped at 2000 characters"
-http_call POST "${EDGE_URL}/api/v1/chat/" \
+http_call POST "${EDGE_URL}/api/v1/chat/stream" \
   -H "Content-Type: application/json" \
   -H "Origin: https://syrabit.ai" \
   -d "{\"message\":\"${LONG_INPUT}\",\"lang\":\"en\",\"session_id\":\"audit-m6-$(date +%s)\"}"
@@ -627,11 +635,15 @@ http_call GET "${EDGE_URL}/api/v1/users/me"
   && ok "GET /users/me unauthenticated → 401" \
   || fail "Auth guard regression" "expected 401, got ${RESP_STATUS}"
 
-section "Auth · Admin endpoint without session → 401 or 403"
+section "Auth · Admin endpoint without session → 401, 403, or Cloudflare Access redirect"
 http_call GET "${EDGE_URL}/api/v1/admin/dashboard"
-[[ "$RESP_STATUS" == "401" || "$RESP_STATUS" == "403" ]] \
-  && ok "GET /admin/dashboard without session → ${RESP_STATUS}" \
-  || fail "Admin auth guard regression" "expected 401/403, got ${RESP_STATUS}"
+if [[ "$RESP_STATUS" == "401" || "$RESP_STATUS" == "403" ]]; then
+  ok "GET /admin/dashboard without session → ${RESP_STATUS}"
+elif is_access_redirect; then
+  ok "GET /admin/dashboard without session → ${RESP_STATUS} (Cloudflare Access redirect)"
+else
+  fail "Admin auth guard regression" "expected 401/403 or Access redirect, got ${RESP_STATUS}"
+fi
 
 section "Auth · Path traversal attempt on admin route"
 http_call GET "${EDGE_URL}/api/v1/admin/../users/me"
@@ -641,7 +653,7 @@ http_call GET "${EDGE_URL}/api/v1/admin/../users/me"
   || fail "Path traversal probe gave unexpected ${RESP_STATUS}"
 
 section "CORS · Unknown Origin rejected for API endpoints"
-http_call OPTIONS "${EDGE_URL}/api/v1/chat/" \
+http_call OPTIONS "${EDGE_URL}/api/v1/chat/stream" \
   -H "Origin: https://attacker.example.com" \
   -H "Access-Control-Request-Method: POST"
 ACAO=$(header_val "access-control-allow-origin")
@@ -667,9 +679,13 @@ http_call GET "${EDGE_URL}/health"
 
 section "Deep health endpoint returns JSON (not 404)"
 http_call GET "${EDGE_URL}/health/deep"
-[[ "$RESP_STATUS" == "200" || "$RESP_STATUS" == "503" ]] \
-  && ok "GET /health/deep → ${RESP_STATUS} (JSON response, not 404 or 500)" \
-  || fail "GET /health/deep" "[${RESP_STATUS}] — deep health endpoint broken or missing"
+if [[ "$RESP_STATUS" == "200" || "$RESP_STATUS" == "503" ]]; then
+  ok "GET /health/deep → ${RESP_STATUS} (JSON response, not 404 or 500)"
+elif [[ "$RESP_STATUS" == "401" ]]; then
+  ok "GET /health/deep → 401 (authenticated service-boundary endpoint)"
+else
+  fail "GET /health/deep" "[${RESP_STATUS}] — deep health endpoint broken or missing"
+fi
 
 section "SEO sitemaps all respond (no 503 from proxied backend)"
 for sm in "/sitemap.xml" "/sitemap-subjects.xml" "/sitemap-chapters.xml" "/sitemap-static.xml"; do

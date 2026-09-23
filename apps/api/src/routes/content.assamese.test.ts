@@ -192,6 +192,24 @@ describe('Assamese public content metadata', () => {
     });
   });
 
+  it('rejects oversized search queries before database work', async () => {
+    const response = await get(`/api/v1/content/search?q=${'A'.repeat(201)}`);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      detail: 'Search query must be 200 characters or fewer',
+    });
+  });
+
+  it('falls back to the default search limit for a non-numeric limit', async () => {
+    const response = await get('/api/v1/content/search?q=physics&limit=not-a-number');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      query: 'physics',
+      total: 2,
+      available: true,
+    });
+  });
+
   it('localizes the topics-published query and preserves English fallbacks', async () => {
     const response = await get('/api/v1/content/chapters/translated/topics-published?lang=as');
     expect(response.status).toBe(200);

@@ -30,6 +30,8 @@ import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
 
+const MAX_SEARCH_QUERY_LENGTH = 200;
+
 // Every public content response, including a not-found response, should have
 // an explicit cache policy. Successful handlers set their tighter route-
 // specific policy below; this middleware covers early 404 returns before a
@@ -1052,9 +1054,20 @@ contentRouter.get('/chapters/:chapterId/flashcards', (c) => {
 
 contentRouter.get('/search', async (c) => {
   const db = createDb(c.env.DB);
-  const q     = (c.req.query('q') ?? '').trim().slice(0, 200);
+  const rawQuery = c.req.query('q') ?? '';
+  if (rawQuery.length > MAX_SEARCH_QUERY_LENGTH) {
+    c.header('Cache-Control', 'no-store');
+    return c.json({
+      detail: `Search query must be ${MAX_SEARCH_QUERY_LENGTH} characters or fewer`,
+    }, 400);
+  }
+
+  const q     = rawQuery.trim();
   const board = c.req.query('board');
-  const limit = Math.min(20, Math.max(1, parseInt(c.req.query('limit') ?? '10', 10)));
+  const requestedLimit = Number.parseInt(c.req.query('limit') ?? '10', 10);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(20, Math.max(1, requestedLimit))
+    : 10;
 
   if (q.length < 2) {
     return c.json({ query: q, results: [], total: 0, available: true });
