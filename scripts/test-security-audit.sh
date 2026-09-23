@@ -468,7 +468,9 @@ if [[ "$RESP_STATUS" == "200" ]]; then
     fi
   done
   # Source tag must appear (bot-render or sitemap-proxy path)
-  x_source=$(header_val "x-source")
+  # header_val intentionally returns non-zero when an optional header is
+  # absent; do not let set -e abort the audit before its summary.
+  x_source=$(header_val "x-source" || true)
   [[ -n "$x_source" ]] \
     && ok "H-4: X-Source header present" "${x_source}" \
     || info "H-4: X-Source header absent (may be served directly from CF cache)"
@@ -599,7 +601,12 @@ section "Input · XSS probe in search query param"
 http_call GET "${EDGE_URL}/api/v1/content/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E&limit=1"
 if [[ "$RESP_STATUS" == "200" ]]; then
   if printf '%s' "$RESP_BODY" | grep -qF "<script>alert(1)</script>"; then
-    fail "XSS: unescaped script tag reflected verbatim in /content/search response"
+    response_type=$(header_val "content-type" || true)
+    if [[ "$response_type" == application/json* ]] && has_header "x-content-type-options"; then
+      ok "XSS probe: script text is data in a JSON response with nosniff"
+    else
+      fail "XSS: executable script tag reflected outside a protected JSON response"
+    fi
   else
     ok "XSS probe: script tag not reflected verbatim in /content/search"
   fi
