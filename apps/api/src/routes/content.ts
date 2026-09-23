@@ -22,13 +22,24 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { eq, and, ne, inArray } from 'drizzle-orm';
+import { eq, and, ne, inArray, asc } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
+
+// Every public content response, including a not-found response, should have
+// an explicit cache policy. Successful handlers set their tighter route-
+// specific policy below; this middleware covers early 404 returns before a
+// handler has resolved a database row.
+contentRouter.use('*', async (c, next) => {
+  await next();
+  if (!c.res.headers.has('Cache-Control')) {
+    c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
+  }
+});
 
 // ── Boards ─────────────────────────────────────────────────────────────────────
 // GET /api/v1/content/boards → [{ id, name, slug, status }]
@@ -214,6 +225,85 @@ contentRouter.get('/subjects/:id', async (c) => {
   });
 });
 
+// GET /api/v1/content/subjects/:subjectId/topic-index
+// → { subject_id, chapters: [{ chapter_id, chapter_title, chapter_url,
+//      topics: [{ topic_id, topic_slug, title, deep_link_path }] }],
+//      total_topics }
+//
+// This is an optional SEO/pillar-page payload. Keep it public and return a
+// stable empty list for a published subject with no citable topics; callers
+// should not need a second legacy SEO service just to render the subject page.
+contentRouter.get('/subjects/:subjectId/topic-index', async (c) => {
+  const db = createDb(c.env.DB);
+  const subjectId = c.req.param('subjectId');
+
+  const rows = await db.select({
+    subjectId: subjects.id,
+    subjectSlug: subjects.slug,
+    subjectPublished: subjects.isPublished,
+    boardSlug: boards.slug,
+    classSlug: classes.slug,
+    streamSlug: streams.slug,
+    chapterId: chapters.id,
+    chapterTitle: chapters.title,
+    chapterSlug: chapters.slug,
+    chapterNumber: chapters.chapterNumber,
+    publishedTopics: chapters.publishedTopics,
+  }).from(chapters)
+    .innerJoin(subjects, eq(chapters.subjectId, subjects.id))
+    .innerJoin(streams, eq(subjects.streamId, streams.id))
+    .innerJoin(classes, eq(streams.classId, classes.id))
+    .innerJoin(boards, eq(classes.boardId, boards.id))
+    .where(and(
+      eq(chapters.subjectId, subjectId),
+      eq(chapters.status, 'published'),
+      eq(subjects.isPublished, 1),
+    ))
+    .orderBy(asc(chapters.chapterNumber));
+
+  const grouped = [];
+  let totalTopics = 0;
+  for (const row of rows) {
+    const subjectPath = [
+      row.boardSlug,
+      row.classSlug,
+      row.streamSlug,
+      row.subjectSlug,
+    ].filter(Boolean).join('/');
+    const chapterUrl = `/${subjectPath}/${row.chapterSlug}`;
+    const rawTopics = safeParse<unknown[]>(row.publishedTopics) ?? [];
+    const topics = rawTopics.flatMap((raw) => {
+      if (!raw || typeof raw !== 'object') return [];
+      const topic = raw as Record<string, unknown>;
+      const slug = String(topic.topic_slug ?? topic.slug ?? '').trim();
+      const title = String(topic.title ?? topic.name ?? slug).trim();
+      if (!slug || !title) return [];
+      const topicId = String(topic.topic_id ?? topic.id ?? slug);
+      return [{
+        topic_id: topicId,
+        topic_slug: slug,
+        title,
+        deep_link_path: `${chapterUrl}/topic/${encodeURIComponent(slug)}`,
+      }];
+    });
+    if (topics.length === 0) continue;
+    totalTopics += topics.length;
+    grouped.push({
+      chapter_id: row.chapterId,
+      chapter_title: row.chapterTitle,
+      chapter_url: chapterUrl,
+      topics,
+    });
+  }
+
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return c.json({
+    subject_id: subjectId,
+    chapters: grouped,
+    total_topics: totalTopics,
+  });
+});
+
 // ── Chapters list ──────────────────────────────────────────────────────────────
 // GET /api/v1/content/chapters/:subjectId
 // → [{ id, chapter_id, title, title_as, slug, chapter_number,
@@ -369,7 +459,7 @@ async function resolveChapterBySlug(
     createdAt: chapters.createdAt,
     updatedAt: chapters.updatedAt,
   }).from(chapters)
-    .where(and(eq(chapters.subjectId, subjectRow.id), ne(chapters.status, 'archived')))
+    .where(and(eq(chapters.subjectId, subjectRow.id), eq(chapters.status, 'published')))
     .orderBy(chapters.chapterNumber);
 
   // Match chapter by slug or slug_as
@@ -764,6 +854,7 @@ contentRouter.get('/chapters/:chapterId/topics-related', async (c) => {
   const db = createDb(c.env.DB);
   const chapterId = c.req.param('chapterId') as string;
   const limit = Math.min(50, parseInt(c.req.query('limit') ?? '12', 10));
+  const excludeTopicId = c.req.query('exclude_topic_id') ?? '';
 
   const ch = await db.select({ id: chapters.id, subjectId: chapters.subjectId, publishedTopics: chapters.publishedTopics })
     .from(chapters).where(eq(chapters.id, chapterId)).get();
@@ -775,12 +866,20 @@ contentRouter.get('/chapters/:chapterId/topics-related', async (c) => {
     .where(and(eq(chapters.subjectId, ch.subjectId), eq(chapters.status, 'published')))
     .limit(20);
 
-  type TopicEntry = { title?: string; slug?: string; chapter_id?: string; chapter_title?: string };
+  type TopicEntry = {
+    title?: string;
+    slug?: string;
+    topic_slug?: string;
+    chapter_id?: string;
+    chapter_title?: string;
+  };
   const relatedTopics: TopicEntry[] = [];
   for (const sib of siblings) {
     if (sib.id === chapterId) continue;
     const tops = safeParse<TopicEntry[]>(sib.publishedTopics) ?? [];
     for (const t of tops.slice(0, 3)) {
+      const topicId = String(t.slug ?? t.topic_slug ?? '');
+      if (excludeTopicId && topicId === excludeTopicId) continue;
       relatedTopics.push({ ...t, chapter_id: sib.id, chapter_title: sib.title });
       if (relatedTopics.length >= limit) break;
     }
