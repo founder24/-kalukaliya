@@ -12,6 +12,7 @@ import {
   LIBRARY_SEO_URL,
 } from '@/lib/librarySeo';
 import { Analytics } from '@/utils/analytics';
+import { groupLibrarySubjects } from '@/utils/librarySubjectGrouping';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
@@ -515,35 +516,17 @@ export default function LibraryPage() {
       chaptersBySubject, activeBoardId, streamMap, classMap, enrichedSubjects,
       searchScore, deferredQuery]);
 
-  const groupBrowserSubjects = useCallback((subjectsToGroup) => {
-    const groups = [
-      ['hs 1st year', 'class 11'],
-      ['hs 2nd year', 'class 12'],
-      ['1st semester'],
-      ['3rd semester'],
-      ['5th semester'],
-    ];
-
-    return groups.flatMap((classNames) => subjectsToGroup
-      .filter((subject) => {
-        const stream = streamMap.get(subject.stream_id);
-        const cls = classMap.get(stream?.class_id);
-        return classNames.includes(String(cls?.name || '').trim().toLowerCase());
-      })
-      .slice(0, 10));
-  }, [streamMap, classMap]);
-
   // Keep the SSR-visible cards in filtered API order for the lifetime of the
   // current filter/search result. Personalization may reorder only the
   // below-fold remainder after hydration. This prevents React from replacing
   // an already-painted LCP card when localStorage ranking becomes available.
   const stableBrowserSubjects = useMemo(
-    () => groupBrowserSubjects(filteredSubjects),
-    [filteredSubjects, groupBrowserSubjects],
+    () => groupLibrarySubjects(filteredSubjects, streamMap, classMap),
+    [filteredSubjects, streamMap, classMap],
   );
   const rankedBrowserSubjects = useMemo(
-    () => groupBrowserSubjects(rankedSubjects),
-    [rankedSubjects, groupBrowserSubjects],
+    () => groupLibrarySubjects(rankedSubjects, streamMap, classMap),
+    [rankedSubjects, streamMap, classMap],
   );
   const browserSubjects = useMemo(() => {
     const stableFirstChunk = stableBrowserSubjects.slice(0, VIRTUAL_CHUNK);
