@@ -208,10 +208,9 @@ describe('LibraryPage — axe accessibility audit', () => {
 
     const firstChunkIds = [...container.querySelectorAll('[data-testid="library-subject-card"]')]
       .map((card) => card.getAttribute('data-subject-id'));
-    expect(firstChunkIds).toEqual([
-      ...subjects.slice(0, 10),
-      ...subjects.slice(11, 21),
-    ].map((subject) => subject.id));
+    expect(firstChunkIds).toEqual(
+      subjects.slice(0, 20).map((subject) => subject.id),
+    );
   });
 
   it('cancels pending search analytics when the page unmounts', async () => {
