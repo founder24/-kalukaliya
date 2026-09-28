@@ -1,6 +1,6 @@
 # Staging release-gate discovery
 
-**Checked:** 2026-09-28  
+**Checked:** 2026-09-28
 **Result:** Blocked — no staging release candidate or approved evaluation set was available. No audit score was changed.
 
 ## Scope and safety

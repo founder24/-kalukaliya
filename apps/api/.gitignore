@@ -1,2 +1,2 @@
-# Wrangler / Miniflare local state (generated at dev/test time — never commit)
-.wrangler/state/
+# Wrangler / Miniflare generated state and temporary bundles are local-only.
+.wrangler/
