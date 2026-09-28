@@ -13,11 +13,9 @@
  *   2. Pages that have richer page-card content link to /chat with
  *      a `seedContext` string passed via react-router Link `state`
  *      (currently PersonalizedCmsPage's "Ask AI about this plan"
- *      button). The seed is treated as the highest-priority block
- *      and prepended above the subject summary so the LLM treats
- *      the originating page's content as authoritative — matches
- *      the parent-page-and-content-card prioritisation contract
- *      the rag.py library branch enforces.
+ *      button). It is included as bounded supplemental page data.
+ *      The API wraps `card_context` as untrusted input; curriculum
+ *      retrieval remains the source of authoritative evidence.
  *
  * Returns null when there is nothing to ground on (no subject and
  * no seed) so the chat call falls back to its non-grounded path.
@@ -56,11 +54,9 @@ export function buildCardContext({
     const parts = [boardLabel, user?.class_name, user?.stream_name].filter(Boolean);
     if (parts.length) lines.push(`Board/Class: ${parts.join(' | ')}`);
 
-    // When a specific chapter is active, surface its full content
-    // first so the LLM and the vector retrieval both weight it
-    // highest — same wording the original ChatPage useMemo used so
-    // the rag.py library branch (which keys off "Active chapter
-    // (priority context):") keeps working.
+    // Keep the selected chapter ahead of the broader syllabus summary.
+    // The API still treats this whole card_context value as untrusted
+    // supplemental data; this label is retained for its legacy parser.
     if (sourceSection && _SECTION_NAMES[sourceSection]) {
       lines.push(`Content section: ${_SECTION_NAMES[sourceSection]}`);
     }
@@ -104,9 +100,9 @@ export function buildCardContext({
  * truncates to a reasonable budget that leaves room for the
  * backend's library-branch boilerplate.
  *
- * The header line "PERSONALIZED STUDY PLAN (priority context):"
- * mirrors the rag.py library branch's wording so on-call can grep
- * for it in chat logs when a plan-scoped turn answers off-topic.
+ * The header is retained for existing plan-context parsing and log search.
+ * The API passes the resulting string as untrusted supplemental page data,
+ * not as instructions or authoritative curriculum evidence.
  */
 export function buildPlanSeedContext(doc) {
   if (!doc || typeof doc !== 'object') return '';

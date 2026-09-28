@@ -56,7 +56,10 @@ export default function ChatPage() {
   const location = useLocation();
   const convId      = searchParams.get('id');
   const subjectId   = searchParams.get('subject');
-  const documentId  = searchParams.get('document_id');
+  // `document_id` is accepted only as a legacy UI hint for saved links. It is
+  // not a Worker chat input; new links use the explicit boolean marker.
+  const hasDocument = searchParams.get('has_document') === '1'
+    || Boolean(searchParams.get('document_id'));
   const chapterId   = searchParams.get('chapter');
   const sourceSection = searchParams.get('section') || null;
 
@@ -444,7 +447,7 @@ export default function ChatPage() {
       board_id: user?.board_id || null, board_name: user?.board_name || null,
       class_id: user?.class_id || null, class_name: user?.class_name || null,
       stream_name: user?.stream_name || null, model,
-      card_context: cardContext || null, document_id: documentId || null,
+      card_context: cardContext || null,
       // Task #37 — language selector is the SINGLE source of truth for
       // provider chain + Pinecone namespace + embed provider, so always
       // send it (not only when non-English). Backend's `chat_router`
@@ -1137,7 +1140,7 @@ export default function ChatPage() {
           <div className="max-w-3xl mx-auto px-3 sm:px-4 md:px-6 py-3 sm:py-4">
             {messages.length === 0 && (
               <div style={{ minHeight: 'min(420px, calc(100dvh - 240px))' }}>
-                <EmptyState subject={subject} documentId={documentId} defaultPrompts={defaultPrompts} setInput={setInput} textareaRef={textareaRef} />
+                <EmptyState subject={subject} hasDocument={hasDocument} defaultPrompts={defaultPrompts} setInput={setInput} textareaRef={textareaRef} />
               </div>
             )}
               {(() => {

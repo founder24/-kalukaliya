@@ -17,7 +17,6 @@ description: How this monorepo is configured to run in the Replit environment
 ## Key config
 - `apps/backend/.env` sets `APP_ENV=development` and `TRUST_EDGE_AUTH=False` — required for dev startup without errors
 - Vite config already has `host: '0.0.0.0'`, `allowedHosts: true`, port 5000 — no changes needed
-- Vite proxies `/api/*` to `localhost:8000` (BACKEND_TARGET default)
 - Backend health returns "degraded" in dev (Redis + Vertex AI not configured) — this is expected and non-fatal
 
 ## Dependencies

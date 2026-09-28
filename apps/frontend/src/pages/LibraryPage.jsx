@@ -346,7 +346,7 @@ export default function LibraryPage() {
   const handleAskAI = useCallback((subjectId, hasDocument = false, subjectName = '', section = null, chapterId = null) => {
     try { Analytics.chatStart(subjectId, subjectName, 'openai/gpt-oss-20b'); } catch {}
     const params = new URLSearchParams({ subject: subjectId });
-    if (hasDocument) params.set('document_id', subjectId);
+    if (hasDocument) params.set('has_document', '1');
     if (section) params.set('section', section);
     if (chapterId) params.set('chapter', chapterId);
     const chatContext = {

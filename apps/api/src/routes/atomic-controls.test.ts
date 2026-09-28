@@ -8,6 +8,7 @@ import { revokedRtKey, signAccessToken, signRefreshToken } from '../middleware/a
 import type { Env } from '../types';
 import { authRouter } from './auth';
 import { anonymousQuotaKey } from '../services/anonymous';
+import { adminContentRouter } from './admin-content';
 import {
   chatRouter,
   fetchMatchedChunkContext,
@@ -468,6 +469,84 @@ describe('atomic quota controls', () => {
     );
 
     expect(chunks).toEqual([]);
+  });
+});
+
+describe('D1-backed authentication rate limits', () => {
+  it('admits ten concurrent login attempts and stores only a hashed client IP', async () => {
+    const clientIp = '198.51.100.181';
+    const nowMs = (Math.floor(Date.now() / 60_000) + 2) * 60_000 + 1234;
+    const request = () => new Request('https://api.example/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': clientIp,
+        'X-Forwarded-For': '203.0.113.250',
+      },
+      body: JSON.stringify({ email: 'unknown-auth-limit@example.test', password: 'invalid' }),
+    });
+
+    const outcomes = await Promise.all(
+      Array.from({ length: 12 }, () => authRouter.fetch(request(), env)),
+    );
+    const blocked = outcomes.filter(response => response.status === 429);
+
+    expect(outcomes.filter(response => response.status === 401)).toHaveLength(10);
+    expect(blocked).toHaveLength(2);
+    expect(blocked.every(response => response.headers.has('Retry-After'))).toBe(true);
+
+    const stored = await env.DB.prepare(
+      `SELECT bucket_key, request_count
+       FROM auth_rate_limits
+       WHERE bucket_key LIKE 'auth:login:%'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+    ).first<{ bucket_key: string; request_count: number }>();
+    expect(stored?.request_count).toBe(11);
+    expect(stored?.bucket_key).not.toContain(clientIp);
+    expect(stored?.bucket_key).not.toContain('203.0.113.250');
+  });
+
+  it('applies the stricter independent admin-login limit', async () => {
+    const nowMs = (Math.floor(Date.now() / 60_000) + 2) * 60_000 + 1234;
+    const adminEmail = `auth-limit-${crypto.randomUUID()}@example.test`;
+    const outcomes = await Promise.all(
+      Array.from({ length: 6 }, () => adminContentRouter.fetch(
+        new Request('https://api.example/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'CF-Connecting-IP': '198.51.100.182',
+          },
+          body: JSON.stringify({ email: adminEmail, password: 'invalid' }),
+        }),
+        env,
+      )),
+    );
+    const blocked = outcomes.filter(response => response.status === 429);
+
+    expect(outcomes.filter(response => response.status === 401)).toHaveLength(5);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]?.status).toBe(429);
+  });
+
+  it('fails closed without Cloudflare client IP instead of trusting forwarded headers', async () => {
+    const response = await authRouter.fetch(
+      new Request('https://api.example/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '198.51.100.183',
+        },
+        body: JSON.stringify({ email: 'unknown-auth-limit@example.test', password: 'invalid' }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error_code: 'rate_limit_storage_unavailable',
+    });
   });
 });
 

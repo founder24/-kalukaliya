@@ -240,7 +240,7 @@ describe('ChatPage transport recovery', () => {
 
   it('sends page seed context and the selected content section to chat', async () => {
     mockSearchParams.mockReturnValue([
-      new URLSearchParams('subject=physics&chapter=chapter-1&section=qa'),
+      new URLSearchParams('subject=physics&chapter=chapter-1&section=qa&has_document=1'),
       vi.fn(),
     ]);
     mockLocationState.mockReturnValue({
@@ -256,6 +256,8 @@ describe('ChatPage transport recovery', () => {
     const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(payload.card_context).toContain('PERSONALIZED STUDY PLAN');
     expect(payload.source_type).toBe('qa');
+    expect(payload).not.toHaveProperty('document_id');
+    expect(payload).not.toHaveProperty('has_document');
   });
 
   it('keeps partial text visible when a terminal SSE error arrives', async () => {

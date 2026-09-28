@@ -81,9 +81,13 @@ jobs:
         run: |
           set +e
           OUTPUT=$(pytest --tb=short -q --cov=app --cov-report=term-missing 2>&1)
+          TEST_EXIT_CODE=$?
+          set -e
           echo "$OUTPUT"
-          # Only fail if coverage drops below 45% (pre-existing failures from
-          # missing retired commerce/Beanie/admin services are expected in CI)
+          if [ "$TEST_EXIT_CODE" -ne 0 ]; then
+            echo "::error::pytest exited with status ${TEST_EXIT_CODE}"
+            exit "$TEST_EXIT_CODE"
+          fi
           COV_PCT=$(echo "$OUTPUT" | grep -oP 'TOTAL.*?(\d+)%' | grep -oP '\d+' | tail -1 || echo "0")
           if [ "${COV_PCT:-0}" -lt "45" ]; then
             echo "::error::Coverage ${COV_PCT}% is below minimum 45%"

@@ -12,6 +12,7 @@ import { createDb } from '../db/client';
 import { boards, classes, chapters, publishJobs, seedRuns, streams, subjects, users } from '../db/schema';
 import { extractBearer, isSessionValid, sessionIssuedAt, signAdminToken, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { generate } from '../services/ai';
+import { enforceAuthRateLimit } from '../services/auth-rate-limit';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import type { Env } from '../types';
@@ -97,6 +98,9 @@ function slugify(value: string): string {
 // Native session lifecycle for the existing AdminGuard. Keeping it here means
 // all operational admin paths share exactly the same D1 identity source.
 adminContentRouter.post('/login', async c => {
+  const rateLimitResponse = await enforceAuthRateLimit(c.env.DB, c.req.raw, 'admin-login');
+  if (rateLimitResponse) return rateLimitResponse;
+
   const body = await safeBody(c);
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const password = typeof body.password === 'string' ? body.password : '';
