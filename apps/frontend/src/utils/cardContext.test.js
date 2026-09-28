@@ -78,6 +78,11 @@ describe('buildCardContext — subject path (legacy SubjectCard / SubjectPage fl
     const out = buildCardContext({ subject: fat, scopedChapters: CHAPTERS, user: USER });
     expect(out.length).toBeLessThanOrEqual(4000);
   });
+
+  it('labels the PYQ alias as the Question Paper section', () => {
+    const out = buildCardContext({ subject: SUBJECT, sourceSection: 'pyq' });
+    expect(out).toContain('Content section: Question Paper');
+  });
 });
 
 describe('buildCardContext — seedContext path (Task #409 PersonalizedCmsPage flow)', () => {

@@ -1,10 +1,10 @@
 ---
-name: Auth rate limit MongoDB migration
-description: _check_rate_limit in auth.py was Redis-only; migrated to MongoDB; TTL index details
+name: Auth rate-limit MongoDB failure policy
+description: MongoDB-backed auth limiter keys, expiry, and fail-closed behavior
 ---
 
 ## Rule
-`_check_rate_limit` in `apps/backend/app/api/v1/auth.py` must NOT import from `app.db.redis`. Redis (Upstash) was removed from the stack on June 11, 2026. The function now uses MongoDB `auth_rate_limit` collection via `get_mongo_client()`.
+`_check_rate_limit` in `apps/backend/app/api/v1/auth.py` must NOT import from `app.db.redis`. Redis (Upstash) was removed from the stack on June 11, 2026. The function uses MongoDB's `auth_rate_limit` collection via `get_mongo_client()` and returns a generic HTTP 503 if the limiter is unavailable outside development. Development still bypasses rate limiting; exceeded counts still return HTTP 429.
 
 ## Pattern
 ```python
@@ -18,6 +18,6 @@ result = await db.auth_rate_limit.find_one_and_update(
 
 TTL index on `auth_rate_limit.expires_at` (expireAfterSeconds=0) in `mongo.py create_indexes()`.
 
-**Why:** Redis removed June 11, 2026. Every login/signup in production was logging `WARNING: Rate limiting unavailable (signup), failing open: RuntimeError`. CF WAF and bcrypt still provide outer brute-force protection when rate-limit DB is down.
+**Why:** Allowing authentication attempts through when only the limiter operation fails leaves login, signup, password-reset, refresh, and admin login open to unbounded abuse. An edge WAF is not a replacement for the per-IP application limit.
 
-**How to apply:** Never re-add `from app.db.redis import get_redis` to auth.py. If rate-limit storage needs to change again, update the MongoDB approach or use a different provider — never Redis unless Upstash is re-added to the SM secrets.
+**How to apply:** Never re-add `from app.db.redis import get_redis` to auth.py. Preserve the atomic endpoint/IP/minute upsert and 90-second TTL. Keep the development bypass, return a generic 503 for storage errors without leaking driver details, and ensure every caller propagates 429/503 instead of continuing authentication on limiter failure.

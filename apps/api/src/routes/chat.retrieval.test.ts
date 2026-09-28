@@ -5,6 +5,8 @@ import {
   detectCurriculumClass,
   fetchAuthoritativeIntentContext,
   fetchChapterContent,
+  fetchMatchedChunkContext,
+  normalizeChatSourceType,
   detectAuthoritativeIntent,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
@@ -15,6 +17,16 @@ import {
 } from './chat';
 
 describe('chapter-scoped chat retrieval', () => {
+  it.each([
+    ['notes', 'notes'],
+    ['qa', 'qa'],
+    ['question_paper', 'pyq'],
+    ['PYQ', 'pyq'],
+    [' unexpected ', null],
+  ] as const)('normalizes the selected content section: %s', (input, expected) => {
+    expect(normalizeChatSourceType(input)).toBe(expected);
+  });
+
   it.each([
     ['Show the Physics syllabus', 'syllabus'],
     ['Give me the chapter list', 'syllabus'],
@@ -153,5 +165,73 @@ describe('chapter-scoped chat retrieval', () => {
     expect(query).toContain('rag_sections_en');
     expect(query).not.toContain('rag_sections_as');
     expect(query).not.toContain('notes_as');
+  });
+
+  it('uses chapter Q&A rather than notes for an explicit Q&A request', async () => {
+    let query = '';
+    const first = vi.fn(async () => ({
+      qaAs: '[]',
+      qaEn: JSON.stringify([{ question: 'Question from Q&A', answer: 'Answer from Q&A' }]),
+    }));
+    const d1 = {
+      prepare: vi.fn((sql: string) => {
+        query = sql;
+        return { bind: vi.fn(() => ({ first })) };
+      }),
+    };
+
+    const result = await fetchChapterContent(
+      d1 as unknown as D1Database,
+      'chapter-qa',
+      'as',
+      'physics',
+      'qa',
+    );
+
+    expect(query).toContain('qa_as');
+    expect(query).toContain('qa_en');
+    expect(query).not.toContain('notes_en');
+    expect(result).toEqual({
+      content: 'Q: Question from Q&A\nA: Answer from Q&A',
+      language: 'english',
+    });
+  });
+
+  it('does not substitute chapter notes for image-only PYQ content', async () => {
+    const d1 = { prepare: vi.fn() };
+
+    await expect(fetchChapterContent(
+      d1 as unknown as D1Database,
+      'chapter-pyq',
+      'en',
+      'physics',
+      'pyq',
+    )).resolves.toBeNull();
+    expect(d1.prepare).not.toHaveBeenCalled();
+  });
+
+  it('rejects vector matches from another content section', async () => {
+    const d1 = { prepare: vi.fn() };
+    const matches = [{
+      id: 'notes-vector',
+      score: 0.99,
+      metadata: {
+        chapterId: 'chapter-1',
+        subjectId: 'physics',
+        sourceType: 'notes',
+        medium: 'english',
+        content: 'Notes must not satisfy a Q&A request.',
+      },
+    }];
+
+    await expect(fetchMatchedChunkContext(
+      d1 as unknown as D1Database,
+      matches as unknown as Parameters<typeof fetchMatchedChunkContext>[1],
+      'chapter-1',
+      'en',
+      'physics',
+      'qa',
+    )).resolves.toEqual([]);
+    expect(d1.prepare).not.toHaveBeenCalled();
   });
 });

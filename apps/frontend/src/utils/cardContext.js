@@ -22,7 +22,12 @@
  * Returns null when there is nothing to ground on (no subject and
  * no seed) so the chat call falls back to its non-grounded path.
  */
-const _SECTION_NAMES = { notes: 'Notes', qa: 'Q&A', question_paper: 'Question Paper' };
+const _SECTION_NAMES = {
+  notes: 'Notes',
+  qa: 'Q&A',
+  pyq: 'Question Paper',
+  question_paper: 'Question Paper',
+};
 
 export function buildCardContext({
   subject,

@@ -10,6 +10,7 @@
  *   GET /classes?board_id=
  *   GET /streams?class_id=
  *   GET /subjects?stream_id=&board_id=
+ *   GET /subjects-by-course-type?board_id=
  *   GET /subjects/:id
  *   GET /chapters/:subjectId        ← Cloud Run lists chapters by SUBJECT id
  *   GET /chapter-by-slug/:board/:classSlug/:subjectSlug/:chapterSlug
@@ -31,6 +32,17 @@ import type { Env } from '../types';
 export const contentRouter = new Hono<{ Bindings: Env }>();
 
 const MAX_SEARCH_QUERY_LENGTH = 200;
+const COURSE_TYPE_SLUGS = ['major', 'minor', 'sec', 'vac', 'mdc', 'aec'] as const;
+type CourseTypeSlug = typeof COURSE_TYPE_SLUGS[number];
+
+const COURSE_TYPE_ICONS: Record<CourseTypeSlug, string> = {
+  major: 'target',
+  minor: 'book',
+  sec: 'zap',
+  vac: 'sparkles',
+  mdc: 'globe',
+  aec: 'brain',
+};
 
 // Every public content response, including a not-found response, should have
 // an explicit cache policy. Successful handlers set their tighter route-
@@ -183,6 +195,71 @@ contentRouter.get('/subjects', async (c) => {
     thumbnail_url: r.imageUrl ?? null,
     tags: [],
   })));
+});
+
+// ── Degree course types ────────────────────────────────────────────────────────
+// GET /api/v1/content/subjects-by-course-type?board_id=
+// → [{ slug, name, description, icon, subject_count, subjects: [{ id, name }] }]
+
+contentRouter.get('/subjects-by-course-type', async (c) => {
+  const boardId = c.req.query('board_id');
+  if (!boardId) {
+    return c.json({ detail: 'board_id is required' }, 400);
+  }
+
+  const rows = await createDb(c.env.DB).select({
+    courseTypeSlug: streams.slug,
+    courseTypeName: streams.name,
+    subjectId: subjects.id,
+    subjectName: subjects.name,
+  }).from(streams)
+    .innerJoin(classes, eq(streams.classId, classes.id))
+    .leftJoin(
+      subjects,
+      and(eq(subjects.streamId, streams.id), eq(subjects.isPublished, 1)),
+    )
+    .where(and(
+      eq(classes.boardId, boardId),
+      inArray(streams.slug, [...COURSE_TYPE_SLUGS]),
+    ))
+    .orderBy(asc(streams.slug), asc(subjects.name));
+
+  type CourseTypeGroup = {
+    slug: CourseTypeSlug;
+    name: string;
+    description: null;
+    icon: string;
+    subject_count: number;
+    subjects: Array<{ id: string; name: string }>;
+  };
+  const groups = new Map<CourseTypeSlug, CourseTypeGroup>();
+
+  for (const row of rows) {
+    const slug = row.courseTypeSlug as CourseTypeSlug;
+    let group = groups.get(slug);
+    if (!group) {
+      group = {
+        slug,
+        name: row.courseTypeName,
+        description: null,
+        icon: COURSE_TYPE_ICONS[slug],
+        subject_count: 0,
+        subjects: [],
+      };
+      groups.set(slug, group);
+    }
+
+    if (row.subjectId !== null && row.subjectName !== null) {
+      group.subjects.push({ id: row.subjectId, name: row.subjectName });
+      group.subject_count += 1;
+    }
+  }
+
+  c.header('Cache-Control', 'public, max-age=300, s-maxage=600');
+  return c.json(COURSE_TYPE_SLUGS.flatMap(slug => {
+    const group = groups.get(slug);
+    return group ? [group] : [];
+  }));
 });
 
 // ── Subject detail ─────────────────────────────────────────────────────────────

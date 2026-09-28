@@ -490,9 +490,8 @@ async def get_current_user_optional(
 async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) -> None:
     """
     IP-based rate limiting using MongoDB (auth_rate_limit collection, TTL-keyed).
-    Raises HTTP 429 if limit exceeded. Fails open (logs warning, allows request)
-    if MongoDB is unavailable — blocking auth entirely is worse than a brief burst.
-    In development mode, rate limiting is skipped entirely so local/Replit dev works.
+    Raises HTTP 429 if the limit is exceeded and HTTP 503 if the limiter is
+    unavailable. In development mode, rate limiting is skipped entirely.
     """
     if settings.APP_ENV == "development":
         return
@@ -534,13 +533,13 @@ async def _check_rate_limit(request: Request, endpoint: str, max_attempts: int) 
     except HTTPException:
         raise
     except Exception as e:
-        # Fail-open: MongoDB unavailable → log and allow the request through.
-        # Blocking auth entirely when DB is down is worse than a brief burst;
-        # bcrypt cost still throttles brute-force and Cloudflare WAF provides
-        # an outer rate-limit layer.
-        logger.warning(
-            f"Auth rate limiting unavailable ({endpoint}), failing open: {type(e).__name__}"
+        logger.error(
+            f"Auth rate limiting unavailable ({endpoint}): {type(e).__name__}"
         )
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication temporarily unavailable. Please try again shortly.",
+        ) from e
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────

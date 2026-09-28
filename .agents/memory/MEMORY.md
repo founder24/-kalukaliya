@@ -1,5 +1,5 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
-- [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, 3-section model (Notes/Q&A/Question Paper), content_type field, translation pipeline
+- [Syrabit content architecture](syrabit-content-arch.md) — Chapter sections, degree course types stored as stream slugs, and bilingual content flow
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
@@ -22,7 +22,7 @@
 - [JWT RS256→HS256 migration fallback](jwt-migration-fallback.md) — During RS256→HS256 migration, logout decode must try HS256 then fall back to RS256 for live tokens; use _decode_token_with_fallback()
 - [CF_WORKER_AI_TOKEN vs CF_API_TOKEN](cf-worker-ai-token.md) — Cloud Run env var is CF_WORKER_AI_TOKEN; cloudflare_client.api_token must resolve CF_WORKER_AI_TOKEN ?? CF_API_TOKEN; both fields needed in config.py
 - [Redis disabled health check](redis-disabled-health.md) — When Upstash creds absent, health check returns "disabled" not "unhealthy"; smoke test must accept "disabled" as pass
-- [Auth rate limit MongoDB migration](auth-rate-limit-mongo.md) — _check_rate_limit was Redis-only; migrated to MongoDB auth_rate_limit collection with 90s TTL + TTL index on expires_at; eliminates RuntimeError on every prod login/signup
+- [Auth rate-limit MongoDB failure policy](auth-rate-limit-mongo.md) — MongoDB remains the atomic limiter; fail closed with 503 outside development.
 - [Upstash must stay optional in cloudbuild.yaml](upstash-optional-secret.md) — Upstash secrets don't exist in SM; putting them in mandatory --update-secrets causes SecretsAccessCheckFailed; always keep in Step 5 optional probe + add to --remove-secrets to clean stale refs
 - [React lazy SSR with renderToString](react-lazy-ssr.md) — React.lazy() _status is -1 until first render; pre-importing modules does NOT help renderToString; only fix is static imports OR renderToPipeableStream
 - [Gunicorn SIGABRT on Cloud Run](gunicorn-sigabrt.md) — Gunicorn timeout=30s caused SIGABRT on long AI requests; set timeout=120 for async AI workloads; graceful_timeout can stay at 30
