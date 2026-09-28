@@ -15,7 +15,6 @@
 - No staging-specific Replit variables or secrets were present in shared, development, or production environments.
 - The GitHub repository has `prod` and `production` environments, but no `staging` environment or staging deployment. No staging-named repository variables or Actions secrets were found.
 - The only Cloudflare Workers are `syrabit-api-prod` and `syrabitworker-prod`; no staging Worker, staging route, or staging Access app was found.
-- Cloudflare currently lists only the production API and edge Workers. No staging Worker exists, so there is no staging D1 binding to verify.
 - `syrabit-content-preview` exists and has a content-oriented schema, but no staging Worker is bound to it and it has no auth/user table. It is not a complete staging database.
 - Preview KV namespaces exist, but the API and edge Wrangler configs do not define a staging environment. Their `CONTENT_KV` preview binding points to the same namespace ID as production, so Wrangler preview is not an isolated staging substitute.
 - No staging-named Vectorize index was found.
