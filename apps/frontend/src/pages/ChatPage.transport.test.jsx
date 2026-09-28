@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 
 const mockSearchParams = vi.fn(() => [new URLSearchParams(), vi.fn()]);
+const mockLocationState = vi.fn(() => null);
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
@@ -11,7 +12,7 @@ vi.mock('react-router-dom', () => ({
     pathname: '/chat',
     search: '',
     hash: '',
-    state: null,
+    state: mockLocationState(),
     key: 'transport-test',
   }),
 }));
@@ -175,6 +176,7 @@ describe('ChatPage transport recovery', () => {
     vi.useRealTimers();
     HTMLElement.prototype.scrollIntoView = vi.fn();
     mockSearchParams.mockReturnValue([new URLSearchParams(), vi.fn()]);
+    mockLocationState.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -234,6 +236,28 @@ describe('ChatPage transport recovery', () => {
     expect(screen.getAllByText('Explain gravity')).toHaveLength(1);
 
     expect(await screen.findByText('Gravity attracts masses.')).toBeInTheDocument();
+  });
+
+  it('sends page seed context and the selected content section to chat', async () => {
+    mockSearchParams.mockReturnValue([
+      new URLSearchParams('subject=physics&chapter=chapter-1&section=qa&has_document=1'),
+      vi.fn(),
+    ]);
+    mockLocationState.mockReturnValue({
+      seedCardContext: 'PERSONALIZED STUDY PLAN: review the selected topics.',
+    });
+    const fetchMock = vi.fn(async () => completedStream());
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+    await screen.findByTestId('assistant-content');
+
+    const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(payload.card_context).toContain('PERSONALIZED STUDY PLAN');
+    expect(payload.source_type).toBe('qa');
+    expect(payload).not.toHaveProperty('document_id');
+    expect(payload).not.toHaveProperty('has_document');
   });
 
   it('keeps partial text visible when a terminal SSE error arrives', async () => {

@@ -18,6 +18,7 @@ export interface RateLimitResult {
 // consumers do not drift back to the retired daily/30-message contract.
 export const CHAT_REQUESTS_PER_MINUTE = 6;
 export const CHAT_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+export const AUTH_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 interface RateLimitCommand {
   limit: number;
@@ -226,6 +227,34 @@ export async function checkRateLimit(
   }
 
   return response.json<RateLimitResult>();
+}
+
+/**
+ * Limit public authentication attempts by the client IP provided by
+ * Cloudflare. Hash the IP before it becomes part of a Durable Object name.
+ */
+export async function checkAuthRateLimit(
+  namespace: DurableObjectNamespace,
+  request: Request,
+  route: string,
+  limit: number,
+): Promise<RateLimitResult> {
+  const clientIp = request.headers.get('CF-Connecting-IP')?.trim();
+  if (!clientIp) throw new Error('Trusted client IP unavailable');
+
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(clientIp),
+  );
+  const ipHash = hex(digest);
+
+  return checkRateLimit(
+    namespace,
+    `auth-ip:${ipHash}`,
+    `auth:${route}`,
+    limit,
+    AUTH_RATE_LIMIT_WINDOW_MS,
+  );
 }
 
 /**

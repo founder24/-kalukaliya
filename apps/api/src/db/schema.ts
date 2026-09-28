@@ -870,6 +870,15 @@ export const referralVisitRateLimits = sqliteTable('referral_visit_rate_limits',
   index('referral_visit_rate_limits_expiry_idx').on(t.expiresAt),
 ]);
 
+export const authRateLimits = sqliteTable('auth_rate_limits', {
+  bucketKey: text('bucket_key').primaryKey(),
+  requestCount: integer('request_count').notNull().default(1),
+  expiresAt: integer('expires_at').notNull(),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  index('auth_rate_limits_expiry_idx').on(t.expiresAt),
+]);
+
 export const referralWeeklyEnvelopes = sqliteTable('referral_weekly_envelopes', {
   weekId: text('week_id').primaryKey().references(() => referralWeeks.id),
   worstCaseExposureInr: integer('worst_case_exposure_inr').notNull().default(37000),

@@ -3,16 +3,18 @@
  *
  * Request pipeline:
  *   1. CORS preflight
- *   2. JWT verification (all /api/ except public paths)
- *   3. Bot heuristic tagging (for ISR routing and analytics)
- *   4. Per-language rate limiting (chat POST endpoints)
- *   5. Route to backend proxy or R2 assets
+ *   2. Authentication rate limiting
+ *   3. JWT verification (all /api/ except public paths)
+ *   4. Bot heuristic tagging (for ISR routing and analytics)
+ *   5. Per-language rate limiting (chat POST endpoints)
+ *   6. Route to backend proxy or R2 assets
  */
 
 import { getCorsHeaders, applyCorsHeaders } from './middleware/cors';
 import { verifyJWT } from './middleware/jwt';
 import {
   anonymousNetworkRateLimitIdentity,
+  checkAuthRateLimit,
   checkRateLimit,
   RATE_LIMIT_CLEANUP_HEALTH_KEY,
   rateLimitHeaders,
@@ -39,6 +41,13 @@ const TTS_RATE_LIMIT = 20;
 const OCR_RATE_LIMIT = 10;
 const REFERRAL_VISIT_RATE_LIMIT = 60;
 const REFERRAL_VISIT_RATE_WINDOW_MS = 60_000;
+const AUTH_POST_RATE_LIMITS: Record<string, { bucket: string; limit: number }> = {
+  '/api/v1/auth/login': { bucket: 'login', limit: 10 },
+  '/api/v1/auth/signup': { bucket: 'signup', limit: 5 },
+  '/api/v1/auth/reset-password/request': { bucket: 'reset-request', limit: 3 },
+  '/api/v1/auth/reset-password/confirm': { bucket: 'reset-confirm', limit: 10 },
+  '/api/v1/admin/login': { bucket: 'admin-login', limit: 5 },
+};
 
 /**
  * Read only a small prefix of the cloned chat body for rate-limit bucketing.
@@ -149,7 +158,58 @@ export default {
       return unavailable;
     }
 
-    // ── 2. JWT Verification (all /api/ routes except public) ──
+    // ── 2. Public authentication rate limits ──
+    const authRateLimitPolicy = request.method === 'POST'
+      ? AUTH_POST_RATE_LIMITS[url.pathname]
+      : undefined;
+    if (authRateLimitPolicy) {
+      if (!env.RATE_LIMIT_DO) {
+        console.error('RATE_LIMIT_DO binding not available - failing authentication closed');
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return finalize(unavailable);
+      }
+
+      let authLimit: Awaited<ReturnType<typeof checkAuthRateLimit>>;
+      try {
+        authLimit = await checkAuthRateLimit(
+          env.RATE_LIMIT_DO,
+          request,
+          authRateLimitPolicy.bucket,
+          authRateLimitPolicy.limit,
+        );
+      } catch (error) {
+        console.error('Authentication rate-limit storage unavailable:', error);
+        const unavailable = jsonResponse(503, {
+          error: 'Rate limit service unavailable',
+          error_code: 'rate_limit_storage_unavailable',
+        });
+        unavailable.headers.set('X-Request-ID', requestId);
+        applyCorsHeaders(unavailable.headers, request.headers.get('Origin') || '');
+        return finalize(unavailable);
+      }
+
+      if (!authLimit.allowed) {
+        const limited = jsonResponse(429, {
+          error: 'Too many authentication attempts',
+          error_code: 'auth_rate_limited',
+        });
+        limited.headers.set('X-Request-ID', requestId);
+        for (const [name, value] of Object.entries(
+          rateLimitHeaders(authLimit, authRateLimitPolicy.limit),
+        )) {
+          limited.headers.set(name, value);
+        }
+        applyCorsHeaders(limited.headers, request.headers.get('Origin') || '');
+        return finalize(limited);
+      }
+    }
+
+    // ── 3. JWT Verification (all /api/ routes except public) ──
     if (
       url.pathname.startsWith('/api/')
       && !isInternalGeneration
@@ -186,7 +246,7 @@ export default {
       }
     }
 
-    // ── 3. Bot Heuristic Tagging (for ISR routing and analytics) ──
+    // ── 4. Bot Heuristic Tagging (for ISR routing and analytics) ──
     // NOTE: Bots are NOT blocked here - they are tagged only (X-Bot-Detected header)
     // for ISR routing and analytics. Edge never returns 403 for bot-detected requests.
     if (url.pathname.startsWith('/api/')) {
@@ -198,7 +258,7 @@ export default {
       }
     }
 
-    // ── 4. Per-Language Rate Limiting (chat POST only) ──
+    // ── 5. Per-Language Rate Limiting (chat POST only) ──
     if (
       url.pathname.startsWith('/api/v1/chat')
       && url.pathname !== '/api/v1/chat/tts'
@@ -331,7 +391,7 @@ export default {
       }
     }
 
-    // ── 5. Routing ──
+    // ── 6. Routing ──
 
     // Block scanner-bait and sensitive paths immediately — never proxy or redirect these.
     // Cloudflare Pages SPA returns 200 for unknown routes (SPA fallback), so these paths

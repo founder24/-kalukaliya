@@ -14,6 +14,16 @@ function env(apiFetch: (request: Request) => Promise<Response>): Env {
     EDGE_SHARED_SECRET: 'edge-cookie-test-secret-at-least-32-characters',
     ALLOWED_ORIGIN: 'https://syrabit.ai',
     API_WORKER: { fetch: apiFetch },
+    RATE_LIMIT_DO: {
+      idFromName: (name: string) => name,
+      get: () => ({
+        fetch: async () => Response.json({
+          allowed: true,
+          remaining: 4,
+          resetAt: Date.now() + 60_000,
+        }),
+      }),
+    },
   } as unknown as Env;
 }
 

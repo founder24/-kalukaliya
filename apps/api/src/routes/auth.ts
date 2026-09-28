@@ -18,6 +18,7 @@ import {
   sessionIssuedAt,
 } from '../middleware/auth';
 import { reconcileReferralAccount } from '../services/referral-attribution';
+import { enforceAuthRateLimit } from '../services/auth-rate-limit';
 import type { Env } from '../types';
 
 export const authRouter = new Hono<{ Bindings: Env }>();
@@ -31,6 +32,9 @@ export const REFRESH_TOKEN_KV_BRIDGE_ENABLED = true;
 
 // ── POST /v1/auth/signup ──────────────────────────────────────────────────────
 authRouter.post('/signup', async (c) => {
+  const rateLimitResponse = await enforceAuthRateLimit(c.env.DB, c.req.raw, 'signup');
+  if (rateLimitResponse) return rateLimitResponse;
+
   const db = createDb(c.env.DB);
   let body: { email?: string; password?: string; name?: string };
 
@@ -105,6 +109,9 @@ authRouter.post('/signup', async (c) => {
 
 // ── POST /v1/auth/login ───────────────────────────────────────────────────────
 authRouter.post('/login', async (c) => {
+  const rateLimitResponse = await enforceAuthRateLimit(c.env.DB, c.req.raw, 'login');
+  if (rateLimitResponse) return rateLimitResponse;
+
   const db = createDb(c.env.DB);
   let body: { email?: string; password?: string };
 
@@ -472,6 +479,13 @@ authRouter.get('/me', async (c) => {
 
 // ── POST /v1/auth/reset-password/request ─────────────────────────────────────
 authRouter.post('/reset-password/request', async (c) => {
+  const rateLimitResponse = await enforceAuthRateLimit(
+    c.env.DB,
+    c.req.raw,
+    'reset-password-request',
+  );
+  if (rateLimitResponse) return rateLimitResponse;
+
   const db = createDb(c.env.DB);
   let body: { email?: string; cutover_nonce?: string };
 
@@ -533,6 +547,13 @@ authRouter.post('/reset-password/request', async (c) => {
 
 // ── POST /v1/auth/reset-password/confirm ─────────────────────────────────────
 authRouter.post('/reset-password/confirm', async (c) => {
+  const rateLimitResponse = await enforceAuthRateLimit(
+    c.env.DB,
+    c.req.raw,
+    'reset-password-confirm',
+  );
+  if (rateLimitResponse) return rateLimitResponse;
+
   let body: { token?: string; password?: string; cutover_nonce?: string };
 
   try {
