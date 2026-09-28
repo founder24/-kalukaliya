@@ -304,4 +304,24 @@ describe('Assamese public content metadata', () => {
     expect(missingSubject.status).toBe(404);
     expect(missingSubject.headers.get('Cache-Control')).toBe('public, max-age=60, s-maxage=300');
   });
+
+  it('keeps slim library chapter counts aligned with the full bundle', async () => {
+    const fullResponse = await get('/api/v1/content/library-bundle');
+    const slimResponse = await get('/api/v1/content/library-bundle?slim=1');
+    expect(fullResponse.status).toBe(200);
+    expect(slimResponse.status).toBe(200);
+
+    const full = await fullResponse.json() as {
+      subjects: Array<{ id: string; chapter_count: number }>;
+    };
+    const slim = await slimResponse.json() as {
+      subjects: Array<{ id: string; chapter_count: number; chapters?: unknown[] }>;
+    };
+    const fullSubject = full.subjects.find(subject => subject.id === 'subject');
+    const slimSubject = slim.subjects.find(subject => subject.id === 'subject');
+
+    expect(fullSubject?.chapter_count).toBeGreaterThan(0);
+    expect(slimSubject?.chapter_count).toBe(fullSubject?.chapter_count);
+    expect(slimSubject).not.toHaveProperty('chapters');
+  });
 });

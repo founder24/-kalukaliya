@@ -22,7 +22,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { eq, and, ne, inArray, asc } from 'drizzle-orm';
+import { eq, and, ne, inArray, asc, count } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
@@ -644,6 +644,20 @@ contentRouter.get('/library-bundle', async (c) => {
     }).from(chapters).where(inArray(chapters.status, ['published', 'active']));
   }
 
+  // Slim mode omits chapter rows, but subject cards still need chapter counts.
+  const chapterCountBySubject = new Map<string, number>();
+  if (slim) {
+    const chapterCounts = await db.select({
+      subjectId: chapters.subjectId,
+      chapterCount: count(),
+    }).from(chapters)
+      .where(inArray(chapters.status, ['published', 'active']))
+      .groupBy(chapters.subjectId);
+    for (const row of chapterCounts) {
+      chapterCountBySubject.set(row.subjectId, row.chapterCount);
+    }
+  }
+
   // Build chapter maps: subjectId → chapter list
   const chaptersBySubject = new Map<string, unknown[]>();
   const allPublishedSubjectIds = new Set(allSubjects.map(s => s.id));
@@ -689,7 +703,7 @@ contentRouter.get('/library-bundle', async (c) => {
       gradient: null,
       thumbnail_url: sub.imageUrl ?? null,
       tags: [],
-      chapter_count: chaps.length,
+      chapter_count: slim ? (chapterCountBySubject.get(sub.id) ?? 0) : chaps.length,
       pyq_papers: safeParse(sub.pyqPapers) ?? [],
       ...(includeChapters ? { chapters: chaps } : {}),
     };

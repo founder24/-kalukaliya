@@ -524,6 +524,12 @@ export default function SubjectLandingPage() {
               const chPath = ch.slug
                 ? `${chapterBasePath}/${ch.slug}`
                 : `${basePath}`;
+              const hasNotesInLanguage = contentLang === 'as'
+                ? Boolean(ch.has_assamese)
+                : Boolean(ch.notes_generated);
+              const hasAssameseOnlyNotes = contentLang === 'en'
+                && !ch.notes_generated
+                && ch.has_assamese;
 
               const card = (
                 <div
@@ -551,8 +557,16 @@ export default function SubjectLandingPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {ch.notes_generated && (
+                      {hasNotesInLanguage && (
                         <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700">Notes</span>
+                      )}
+                      {hasAssameseOnlyNotes && (
+                        <span
+                          className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-teal-500/10 text-teal-700"
+                          data-testid={`badge-assamese-notes-${ch.id}`}
+                        >
+                          Assamese notes
+                        </span>
                       )}
                       {ch.has_qa && (
                         <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-700">Q&amp;A</span>
@@ -560,7 +574,7 @@ export default function SubjectLandingPage() {
                       {ch.has_pyq && (
                         <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">PYQ</span>
                       )}
-                      {!ch.notes_generated && !ch.has_qa && !ch.has_pyq && (
+                      {!hasNotesInLanguage && !hasAssameseOnlyNotes && !ch.has_qa && !ch.has_pyq && (
                         <span className="hidden sm:inline text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Content soon</span>
                       )}
                       <ChevronRight size={16} className="text-muted-foreground/40 group-hover/ch:text-violet-600 transition-colors" />

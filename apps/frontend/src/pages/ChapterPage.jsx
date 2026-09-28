@@ -634,9 +634,8 @@ export default function ChapterPage() {
   }, [setSearchParams]);
 
   const isQuestionPaper = data?.content_type === 'question_paper' || data?.content_type === 'pyq';
-  // Assamese notes are coming soon — always show the "coming soon" placeholder.
-  // Flip this back to `data?.has_assamese || false` once AS content is ready.
-  const hasAssamese = false;
+  // The chapter API marks Assamese notes only when validated content exists.
+  const hasAssamese = Boolean(data?.has_assamese);
   const displayContent = useMemo(() => {
     if (!data) return '';
     if (isQuestionPaper) return data.content;
@@ -1366,8 +1365,20 @@ export default function ChapterPage() {
                     <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
                       {contentLang === 'as'
                         ? 'এই অধ্যায়ৰ নোট সোনকালে আহিব।'
-                        : 'Notes for this chapter are being prepared.'}
+                        : hasAssamese
+                          ? 'English notes are not available yet. Assamese notes are available.'
+                          : 'Notes for this chapter are being prepared.'}
                     </p>
+                    {contentLang === 'en' && hasAssamese && (
+                      <button
+                        type="button"
+                        data-testid="button-view-assamese-notes"
+                        onClick={() => switchLang('as')}
+                        className="inline-flex items-center justify-center rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+                      >
+                        View Assamese notes
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <>
