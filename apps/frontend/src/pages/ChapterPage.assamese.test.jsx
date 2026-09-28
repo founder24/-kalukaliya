@@ -7,11 +7,10 @@
  *  1. A visible "Assamese not yet available" notice is shown (not a blank tab).
  *  2. The English content fallback is rendered, so the reader is never blank.
  *  3. Switching to the English tab shows full English content without any notice.
- *  4. While the Assamese reader rollout is paused, even populated Assamese
- *     content remains behind the "coming soon" fallback.
+ *  4. Populated Assamese notes render when the API marks them available.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 // ─── router mock (must be defined before component import) ──────────────────
@@ -229,7 +228,7 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
     expect(screen.getByTestId('notes-content')).toBeTruthy();
   });
 
-  it('keeps populated Assamese content behind the coming-soon fallback while rollout is paused', async () => {
+  it('renders populated Assamese notes when the API marks them available', async () => {
     mockContentLang = 'as';
     const chapter = makeChapter({
       has_assamese: true,
@@ -241,13 +240,10 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
       render(<ChapterPage />);
     });
 
-    // The reader deliberately ignores has_assamese until the rollout resumes.
-    expect(screen.getByTestId('assamese-unavailable-notice')).toBeTruthy();
-
-    // English remains the safe fallback; unpublished Assamese is not exposed.
+    expect(screen.queryByTestId('assamese-unavailable-notice')).toBeNull();
     const content = screen.getByTestId('notes-content');
-    expect(content.textContent).toContain('Introduction');
-    expect(content.textContent).not.toContain('পৰিচয়');
+    expect(content.textContent).toContain('পৰিচয়');
+    expect(content.textContent).not.toContain('Introduction');
   });
 
   it('English tab remains fully usable when has_assamese is false', async () => {
@@ -314,5 +310,26 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
     expect(emptyState).toBeTruthy();
     // In Assamese mode the label is in Assamese.
     expect(emptyState.textContent).toContain('নোট');
+  });
+
+  it('offers the available Assamese notes when English notes are missing', async () => {
+    const chapter = makeChapter({
+      content: '',
+      has_assamese: true,
+      content_as: '## পৰিচয়\n\nঅসমীয়া বিষয়বস্তু।',
+    });
+    seedPreload(chapter);
+
+    await act(async () => {
+      render(<ChapterPage />);
+    });
+
+    expect(screen.getByTestId('notes-empty-state').textContent)
+      .toContain('Assamese notes are available');
+    const viewAssameseButton = screen.getByTestId('button-view-assamese-notes');
+    await act(async () => {
+      fireEvent.click(viewAssameseButton);
+    });
+    expect(mockSwitchLang).toHaveBeenCalledWith('as');
   });
 });

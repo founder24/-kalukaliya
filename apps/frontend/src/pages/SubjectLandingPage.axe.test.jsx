@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe, toHaveNoViolations } from 'jest-axe';
-import { render, act } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import React from 'react';
 
 expect.extend(toHaveNoViolations);
@@ -118,5 +118,26 @@ describe('SubjectLandingPage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('marks Assamese-only chapters as available instead of showing Content soon', async () => {
+    vi.mocked(useResolveSubject).mockReturnValue({ data: SAMPLE_SUBJECT, isLoading: false, error: null });
+    vi.mocked(useChapters).mockReturnValue({
+      data: [{
+        ...SAMPLE_CHAPTERS[0],
+        notes_generated: false,
+        has_assamese: true,
+        has_qa: false,
+        has_pyq: false,
+      }],
+      isLoading: false,
+    });
+
+    await act(async () => {
+      render(<SubjectLandingPage />);
+    });
+
+    expect(screen.getByTestId('badge-assamese-notes-ch1')).toBeTruthy();
+    expect(screen.queryByText('Content soon')).toBeNull();
   });
 });
