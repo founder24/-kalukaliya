@@ -1,0 +1,124 @@
+Perform a thorough, read-only audit of the Syrabit application. Find and report every verified issue that prevents a defensible 100/100 quality score across deployment health, code, workflow, logic, functionality, content delivery, security, and user experience.
+
+Audit these areas end to end:
+1. GitHub codebase and deployed Cloudflare stack
+2. Staff panel and staff API
+3. Library page, including AHSEC and Degree content
+4. Chat page, retrieval behavior, and answer accuracy
+5. Profile page and academic preference flows
+
+SAFETY RULES — DO NOT VIOLATE
+- Do not edit files, install packages, change workflows, create commits, deploy, or alter Cloudflare settings.
+- Do not write to production D1, RAG, Vectorize, KV, R2, profiles, chat history, quotas, or other application state.
+- Do not submit production chat prompts. Chat may reserve quota or persist conversations.
+- Do not save profile changes, edit content, publish/unpublish chapters, reindex, or exercise staff write actions in production.
+- Before calling a GET endpoint, inspect whether its handler writes to KV, warms a cache, logs a durable event, or otherwise mutates state. Do not call it if it has a write side effect unless that exact side effect has been explicitly approved.
+- Do not translate, rewrite, or generate Assamese content. You may inspect availability flags and metadata, but do not expose private user data.
+- Never print, copy, or request secrets, tokens, passwords, cookies, or credentials. Use approved integrations and secret-handling tools only.
+- Do not bypass Cloudflare Access or authentication. If an approved authenticated account or safe test environment is unavailable, mark that flow “blocked/unverified” and continue with code review and safe public checks.
+- Do not claim a feature is healthy merely because its endpoint returns 200, a workflow is green, or a page shell loads.
+
+DEPLOYMENT PROVENANCE
+- Identify the GitHub repository, current main SHA, workspace branch/SHA, latest successful Cloudflare deployment SHA, and any differences between them.
+- Determine whether the live Pages assets and API Worker can be tied to the deployment SHA. If there is no public version marker, say so.
+- Do not treat local, PR, or workspace-branch fixes as deployed unless deployment evidence confirms it.
+- Review recent GitHub Actions runs for deploy, uptime, analytics, accuracy, security, build, and test workflows. Distinguish “workflow succeeded” from “report/test actually ran”; inspect skipped steps.
+- Confirm that generated build artifacts or temporary files are not accidentally included in pending branch changes.
+
+AUDIT METHOD
+Use evidence from both:
+A. Safe live checks that have no production write side effects.
+B. Static review of the exact deployed GitHub SHA and its frontend/API contracts.
+
+For every test, record the environment, deployed SHA if known, route or workflow, timestamp, expected result, actual result, and evidence. Compare production behavior with the exact deployed source. Separate findings into:
+- Confirmed live
+- Confirmed by deployed-source inspection, not safely testable live
+- Suspected; needs additional evidence
+- Blocked/unverified
+
+CHECK THESE AREAS
+
+1. Cloudflare and deployment health
+- DNS, redirects, TLS, canonical host, Pages routes, API Worker health, CORS, cache headers, uptime, rate limits, and dependency health for D1, KV, Vectorize, R2, and Workers AI.
+- Check for 4xx/5xx responses, latency outliers, stale or inconsistent deployments, missing bindings, unhealthy dependencies, and differences between custom domains and Worker URLs.
+- Review Cloudflare-related workflow failures and explain whether they affect user traffic or only monitoring.
+- Verify that a “healthy” status is supported by meaningful checks, not just a shallow health endpoint.
+
+2. Staff panel and authorization
+- Verify the Access boundary and API authentication without bypassing either.
+- Compare UI visibility/capability checks with server-side authorization for every staff role and capability.
+- Inspect direct API routes for least-privilege enforcement, including content edit/publish/delete, analytics, referral operations, history, and RAG reindex.
+- Identify sections that are placeholders, unavailable, broken, or misleadingly shown as functional.
+- Review staff GET handlers for hidden write side effects; do not exercise production write controls.
+- Mark authenticated end-to-end behavior unverified if no approved safe staff session is available.
+
+3. Library page and AHSEC/Degree content
+- Test the public library flow: board → class/semester → stream → subject → chapter, search/filter/sort, language selection, chapter counts, empty states, links, and back/forward navigation.
+- Compare slim, boot, and full library-bundle responses for consistent subject and chapter counts.
+- For AHSEC and Degree, report subjects and chapter rows by class/semester, chapters with notes, Assamese-availability flags, Q&A flags, question papers, and empty subjects.
+- Treat availability flags as metadata only; do not infer that notes or Q&A are factually correct without reviewing approved source material.
+- Safely test representative published chapter detail routes only when the handler has no write side effect. Do not use guessed unpublished IDs against production.
+- Review all public chapter-related endpoints for publication gates, including topics, Q&A/PYQ, images, FAQ, and related-topic resources.
+- Check frontend/API response shapes for silent failures, particularly on client-side navigation.
+
+4. Chat behavior and answer accuracy
+- Review the full frontend-to-Worker request path, auth and anonymous quota handling, curriculum scoping, retrieval, source cards, language selection, streaming, cancellation, retries, persistence, and error states.
+- Compare every context field sent by the frontend with fields actually read by the deployed Worker. Identify ignored or mismatched context.
+- Do not run production chat tests. Use a staging environment or a non-persisting evaluation harness only if one exists and is safe.
+- For accuracy, use a documented gold set with authoritative answer keys and citations. Measure correctness, grounding, citation support, refusal behavior, language handling, and hallucination rate. Do not present user satisfaction or a skipped report as factual-accuracy evidence.
+- If there is no safe evaluation environment or verified gold set, report accuracy as unverified—not passed.
+
+5. Profile page end to end
+- Review page loading, authentication, profile reads, board/class/stream/subject selectors, course-type selection, validation, empty/error states, and persistence.
+- Verify that every frontend API call has a deployed backend route and matching response shape.
+- Do not log in, create a session, or PATCH a production profile unless the user has explicitly approved the exact test account and operation. Otherwise, mark save behavior blocked and inspect the code path.
+
+6. Quality and reliability
+- Review build/test/type/lint results for the deployed commit and current workspace branch separately.
+- Inspect browser console errors, broken links, loading/error states, responsive behavior, keyboard access, semantic markup, and accessibility where safe.
+- Check caching correctness, stale-data behavior, error handling, race conditions, retries, and performance regressions.
+- Separate code-review risks from live-confirmed failures; do not imply a static finding was reproduced in production.
+
+RECHECK THESE PRIOR AUDIT LEADS AGAINST THE CURRENT DEPLOYED SHA
+These are leads, not conclusions. Confirm, refute, or mark unverified:
+- `/content/subjects?board_id=...` returned 500 for AHSEC and Degree.
+- `/content/subjects-by-course-type?board_id=...` returned 404, while the profile selector appeared to call it.
+- The deployed slim library bundle appeared to return zero chapter counts; the workspace branch appeared to contain a fix not present on deployed main.
+- Deployed ChapterPage source appeared to hardcode Assamese availability off despite API availability flags; a workspace-branch change appeared to enable it.
+- Degree entries appeared concentrated in semesters 2 and 4, with many subjects reporting zero chapters.
+- Staff API capability enforcement appeared broader than the frontend capability checks.
+- Some public chapter subresource endpoints appeared not to enforce published status.
+- ChapterPage and API response shapes appeared inconsistent for related topics and FAQ data.
+- ChatPage appeared to send `card_context` and `document_id` fields that the Worker might ignore.
+- Accuracy-report jobs appeared to skip their report steps; Cloudflare Analytics monitoring appeared repeatedly red.
+
+SCORING
+Score these categories with weights totaling 100:
+- Deployment provenance and health: 15
+- Security, auth, and staff authorization: 15
+- Library functionality and AHSEC/Degree coverage: 20
+- Chat behavior and factual accuracy: 20
+- Profile flow: 10
+- UX, accessibility, and performance: 10
+- CI, observability, caching, and reliability: 10
+
+For each category, list tested assertions, passed/failed/blocked counts, evidence, and score. Do not give 100/100 if any critical or high finding remains, any required flow is blocked, or chat accuracy lacks valid evidence. Do not convert unknowns into passes. Explain the scoring deductions and avoid double-counting one root cause.
+
+FINAL REPORT
+1. Executive summary and overall score.
+2. Deployment provenance: GitHub main SHA, workspace SHA, deployed SHA evidence, and any mismatch.
+3. Findings ranked Critical / High / Medium / Low. For each include:
+   - Status: live-confirmed, code-confirmed, suspected, or unverified
+   - Affected route, workflow, role, or page
+   - Reproduction steps that are safe to repeat
+   - Expected vs actual behavior
+   - User/security impact
+   - Evidence and confidence
+   - Recommended fix direction and a clear acceptance criterion
+   - Score impact
+4. A flow-by-flow pass/fail/blocked matrix for staff, library, AHSEC, Degree, chat, and profile.
+5. Health and workflow summary, including skipped tests and monitoring failures.
+6. Exact safety limitations: what could not be tested and why.
+7. Explicit statement of any cache side effects caused by safe checks, and confirmation that no prohibited data or production state was changed.
+
+Do not implement fixes or deploy anything. The goal is an evidence-backed audit, not a claim that every possible defect has been found.
