@@ -55,10 +55,19 @@ async def test_protected_endpoint_without_token(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_protected_subscription_without_token(client: AsyncClient):
-    """Test subscription endpoint requires auth"""
-    response = await client.get("/api/v1/subscription/status")
-    assert response.status_code in [401, 403]
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/v1/subscription/status"),
+        ("POST", "/api/v1/subscription/create-order"),
+    ],
+)
+async def test_retired_subscription_routes_remain_unmounted(
+    client: AsyncClient, method: str, path: str
+):
+    """Legacy Python payment routes stay outside the Cloudflare-native API."""
+    response = await client.request(method, path)
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
@@ -79,16 +88,6 @@ async def test_refresh_with_malformed_token(client: AsyncClient):
     response = await client.post(
         "/api/v1/auth/refresh",
         json={"refresh_token": "completely.invalid.token"},
-    )
-    assert response.status_code == 401
-
-
-@pytest.mark.anyio
-async def test_subscription_create_order_with_invalid_token(client: AsyncClient):
-    """Test that subscription create-order with invalid token returns 401"""
-    response = await client.post(
-        "/api/v1/subscription/create-order",
-        headers={"Authorization": "Bearer bad.token.here"},
     )
     assert response.status_code == 401
 

@@ -88,7 +88,7 @@
 - [GitHub audit access](github-audit-access.md) — public PR/check data is available, but security alerts and branch protection require a working authenticated token
 - [Playwright route fixture matching](playwright-route-fixtures.md) — collection and nested REST URLs need separate route globs in stateful browser fixtures.
 - [Playwright runtime preflight](playwright-runtime-preflight.md) — validate the separately downloaded headless shell directly; regular Chromium checks can miss loader failures.
-- [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — local dry-runs need the PEP 668 install flag and the locked PyMuPDF dependency.
+- [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — avoid the read-only Nix Python site; use user-scoped installs or isolated uv, with test tools kept out of runtime deps.
 - [Referral settlement controls](referral-settlement-controls.md) — fund and settle only frozen mature-claim statements with private payout evidence and immutable pause cutoffs
 - [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes
 - [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials
