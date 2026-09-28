@@ -7,6 +7,7 @@
     "dev": "wrangler dev",
     "build": "tsc --noEmit",
     "deploy": "wrangler deploy --env production",
+    "deploy:staging": "wrangler deploy --env staging",
     "test": "vitest run && pnpm run test:runtime",
     "test:ci": "vitest run && pnpm run test:runtime",
     "test:runtime": "vitest run --config vitest.runtime.config.mts"

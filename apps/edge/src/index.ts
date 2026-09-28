@@ -25,6 +25,7 @@ import {
 import { proxyToApiWorker, pingApiWorkerHealth } from './routes/worker-proxy';
 import { handleContentKV } from './routes/content-kv';
 import { handleISR } from './routes/isr';
+import { stagingGateFailure } from './middleware/staging-gate';
 
 export { RateLimitDurableObject } from './middleware/rate-limit';
 
@@ -126,8 +127,12 @@ export default {
     // ── 1. CORS Preflight ──
     if (request.method === 'OPTIONS') {
       const origin = request.headers.get('Origin') || 'https://syrabit.ai';
+      const corsHeaders = getCorsHeaders(origin);
+      if (env.APP_ENV === 'staging') {
+        corsHeaders['Access-Control-Allow-Headers'] += ', X-Syrabit-Staging-Token';
+      }
       return new Response(null, {
-        headers: getCorsHeaders(origin),
+        headers: corsHeaders,
       });
     }
 
@@ -142,6 +147,21 @@ export default {
     const reqIdHeaders = new Headers(request.headers);
     reqIdHeaders.set('X-Request-ID', requestId);
     request = new Request(request, { headers: reqIdHeaders });
+
+    // A staging workers.dev URL is public by default. Fail closed unless every
+    // request carries the secret gate header; the Vite dev proxy adds it
+    // server-side so it never enters the browser bundle.
+    const stagingFailure = stagingGateFailure(request, env);
+    if (stagingFailure) {
+      stagingFailure.headers.set('X-Request-ID', requestId);
+      applyCorsHeaders(stagingFailure.headers, request.headers.get('Origin') || '');
+      return finalize(stagingFailure);
+    }
+    if (env.APP_ENV === 'staging') {
+      const stageHeaders = new Headers(request.headers);
+      stageHeaders.delete('X-Syrabit-Staging-Token');
+      request = new Request(request, { headers: stageHeaders });
+    }
 
     // API and backend health traffic is available only through the private
     // service binding. Never fall back to a public backend URL.

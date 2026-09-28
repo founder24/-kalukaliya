@@ -90,6 +90,47 @@ crons = [
   "0 0 * * *",
 ]
 
+# ── Isolated staging environment ───────────────────────────────────────────────
+# Never use the top-level/default bindings for staging: they intentionally
+# remain attached to the production resources.
+[env.staging]
+name = "syrabit-api-staging"
+workers_dev = false
+
+[env.staging.vars]
+ALLOWED_ORIGINS = "http://localhost:5000"
+APP_ENV = "staging"
+WEB_SEARCH_ENABLED = "false"
+REFERRAL_PROGRAM_RUNTIME_ENABLED = "false"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "syrabit-db-staging"
+database_id = "4d4840d6-5acc-4bee-bf13-2f64eaea24a0"
+migrations_dir = "drizzle/migrations"
+
+[[env.staging.r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "CONTENT_KV"
+id = "2e7df499ca5e48838c9afae928a4d504"
+
+[[env.staging.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "f8ddefe50e7b4b46a8a4289bb9702fb2"
+
+[[env.staging.vectorize]]
+binding = "VECTORIZE"
+index_name = "syrabit-rag-staging"
+
+[env.staging.ai]
+binding = "AI"
+
+[env.staging.triggers]
+crons = []
+
 # ── Required Secrets (wrangler secret put <NAME> --env production) ────────────
 # Commercial payment secrets are intentionally not provisioned: the public
 # payment, subscription, and webhook routes are retired while D1 history remains.

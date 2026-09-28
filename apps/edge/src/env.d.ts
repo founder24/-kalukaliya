@@ -43,6 +43,8 @@ interface Env {
 
   // ── Variables (defined in wrangler.toml [vars]) ──
   ALLOWED_ORIGIN: string;
+  APP_ENV?: string;
+  STAGING_ACCESS_TOKEN?: string;
 
   // Optional: bound service-to-service response-header timeout (milliseconds).
   SERVICE_BINDING_TIMEOUT_MS?: string;

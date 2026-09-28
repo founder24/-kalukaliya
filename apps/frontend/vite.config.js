@@ -14,7 +14,30 @@ const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY
 // Local previews use the production-native API Worker by default. Set
 // VITE_BACKEND_URL, BACKEND_PROXY_URL, or VITE_CHAT_API_ORIGIN only when
 // deliberately targeting an isolated staging Worker.
-const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || 'https://api.syrabit.ai';
+const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || BACKEND_TARGET;
+const STAGING_ACCESS_HOST = (process.env.STAGING_ACCESS_HOST || '').toLowerCase();
+
+// The staging gate token is server-only. Require an explicit exact workers.dev
+// host match so it cannot be forwarded to production or another proxy target.
+function stagingProxyHeaders(target) {
+  const token = process.env.STAGING_ACCESS_TOKEN;
+  if (!token || !STAGING_ACCESS_HOST) return {};
+  try {
+    const hostname = new URL(target).hostname.toLowerCase();
+    if (hostname !== STAGING_ACCESS_HOST || !hostname.endsWith('.workers.dev')) return {};
+  } catch {
+    return {};
+  }
+  return { 'X-Syrabit-Staging-Token': token };
+}
+
+function workerProxyOptions(target) {
+  return {
+    target,
+    changeOrigin: true,
+    headers: stagingProxyHeaders(target),
+  };
+}
 
 // ─── CANONICAL BOT REGEX — DO NOT DRIFT ─────────────────────────────────────
 // This regex MUST stay aligned with three other locations:
@@ -645,15 +668,19 @@ export default defineConfig(({ mode }) => ({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api/v1/chat/stream': { target: CHAT_WORKER_TARGET, changeOrigin: true },
-      '/api': { target: BACKEND_TARGET, changeOrigin: true },
-      '/health': { target: BACKEND_TARGET, changeOrigin: true },
-      '/docs': { target: BACKEND_TARGET, changeOrigin: true },
-      '/openapi.json': { target: BACKEND_TARGET, changeOrigin: true },
+      '/api/v1/chat/stream': workerProxyOptions(CHAT_WORKER_TARGET),
+      '/api': workerProxyOptions(BACKEND_TARGET),
+      '/health': workerProxyOptions(BACKEND_TARGET),
+      '/docs': workerProxyOptions(BACKEND_TARGET),
+      '/openapi.json': workerProxyOptions(BACKEND_TARGET),
       '/assets': {
-        target: 'https://api.syrabit.ai',
+        target: BACKEND_TARGET,
         changeOrigin: true,
-        headers: { origin: 'https://syrabit.ai', referer: 'https://syrabit.ai/' },
+        headers: {
+          origin: 'https://syrabit.ai',
+          referer: 'https://syrabit.ai/',
+          ...stagingProxyHeaders(BACKEND_TARGET),
+        },
       },
     },
   },
@@ -664,11 +691,11 @@ export default defineConfig(({ mode }) => ({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api/v1/chat/stream': { target: CHAT_WORKER_TARGET, changeOrigin: true },
-      '/api': { target: BACKEND_TARGET, changeOrigin: true },
-      '/health': { target: BACKEND_TARGET, changeOrigin: true },
-      '/docs': { target: BACKEND_TARGET, changeOrigin: true },
-      '/openapi.json': { target: BACKEND_TARGET, changeOrigin: true },
+      '/api/v1/chat/stream': workerProxyOptions(CHAT_WORKER_TARGET),
+      '/api': workerProxyOptions(BACKEND_TARGET),
+      '/health': workerProxyOptions(BACKEND_TARGET),
+      '/docs': workerProxyOptions(BACKEND_TARGET),
+      '/openapi.json': workerProxyOptions(BACKEND_TARGET),
     },
   },
 

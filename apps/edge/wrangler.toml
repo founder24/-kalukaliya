@@ -103,3 +103,50 @@ service = "syrabit-api-prod"
 ALLOWED_ORIGIN = "https://syrabit.ai"
 RATE_LIMIT_CLEANUP_ALERT_THRESHOLD = "3"
 RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES = "60"
+
+# ── Isolated staging Worker ────────────────────────────────────────────────────
+# The API service binding and every stateful binding target staging-only resources.
+# STAGING_ACCESS_TOKEN is a Worker secret and is intentionally not stored here.
+[env.staging]
+name = "syrabitworker-staging"
+workers_dev = true
+
+[env.staging.vars]
+APP_ENV = "staging"
+ALLOWED_ORIGIN = "http://localhost:5000"
+RATE_LIMIT_CLEANUP_ALERT_THRESHOLD = "3"
+RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES = "60"
+
+[[env.staging.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "f8ddefe50e7b4b46a8a4289bb9702fb2"
+
+[[env.staging.kv_namespaces]]
+binding = "ISR_CACHE_KV"
+id = "da52862834ec4d53839de590279f64e7"
+
+[[env.staging.kv_namespaces]]
+binding = "CONTENT_KV"
+id = "2e7df499ca5e48838c9afae928a4d504"
+
+[[env.staging.r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "syrabit-assets-staging"
+
+[env.staging.ai]
+binding = "AI"
+
+[[env.staging.durable_objects.bindings]]
+name = "RATE_LIMIT_DO"
+class_name = "RateLimitDurableObject"
+
+[[env.staging.migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimitDurableObject"]
+
+[[env.staging.services]]
+binding = "API_WORKER"
+service = "syrabit-api-staging"
+
+[env.staging.triggers]
+crons = []
