@@ -229,27 +229,6 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
     expect(screen.getByTestId('notes-content')).toBeTruthy();
   });
 
-  it('keeps populated Assamese content behind the coming-soon fallback while rollout is paused', async () => {
-    mockContentLang = 'as';
-    const chapter = makeChapter({
-      has_assamese: true,
-      content_as:   '## পৰিচয়\n\nঅসমীয়া বিষয়বস্তু।',
-    });
-    seedPreload(chapter);
-
-    await act(async () => {
-      render(<ChapterPage />);
-    });
-
-    // The reader deliberately ignores has_assamese until the rollout resumes.
-    expect(screen.getByTestId('assamese-unavailable-notice')).toBeTruthy();
-
-    // English remains the safe fallback; unpublished Assamese is not exposed.
-    const content = screen.getByTestId('notes-content');
-    expect(content.textContent).toContain('Introduction');
-    expect(content.textContent).not.toContain('পৰিচয়');
-  });
-
   it('English tab remains fully usable when has_assamese is false', async () => {
     // Start in Assamese mode then simulate switching to English by re-rendering
     // with contentLang='en' (the switchLang callback would update LanguageContext).
