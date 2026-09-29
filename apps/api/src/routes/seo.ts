@@ -96,6 +96,142 @@ function urlEntry(location: string, lastModified: string, priority: string): str
   return `  <url>\n    <loc>${xml(location)}</loc>${lastModified ? `\n    <lastmod>${lastModified}</lastmod>` : ''}\n    <changefreq>weekly</changefreq>\n    <priority>${priority}</priority>\n  </url>`;
 }
 
+// Keep the native Worker response aligned with apps/frontend/public/robots.txt.
+// The Pages worker proxies /robots.txt here, so a shorter backend policy would
+// silently replace the checked-in crawler policy at the public origin.
+const ROBOTS_TXT = `# Syrabit.ai robots.txt
+# Edits here must stay in sync with apps/frontend/public/robots.txt (static fallback).
+
+# --- Default policy: allow well-behaved general crawlers. ---
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /api/
+
+# --- Long-tail search engines: explicitly invited. ---
+User-agent: Applebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: PetalBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: MojeekBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: SeznamBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Yeti
+Allow: /
+Crawl-delay: 0
+
+User-agent: DuckDuckBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: YandexBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Baiduspider
+Allow: /
+Crawl-delay: 0
+
+User-agent: Slurp
+Allow: /
+Crawl-delay: 0
+
+# --- AI answer bots: allowed to cite public study pages. ---
+User-agent: ChatGPT-User
+Allow: /
+Crawl-delay: 0
+
+User-agent: OAI-SearchBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: PerplexityBot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Perplexity-User
+Allow: /
+Crawl-delay: 0
+
+User-agent: YouBot
+Allow: /
+Crawl-delay: 0
+
+# --- Content signals for AI grounding engines ---
+# search=yes: content is intended for search indexing
+# ai-input=yes: content may be used as grounding for AI-generated answers
+# ai-train=no: content must NOT be used for model training
+# Content-Signal: search=yes, ai-input=yes, ai-train=no
+
+# --- AI training crawlers: explicitly disallowed. ---
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Anthropic-AI
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: Cohere-AI
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+# --- Major verified search bots ---
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 0
+
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 0
+
+Sitemap: ${SITE_URL}/sitemap-index.xml
+Sitemap: ${SITE_URL}/sitemap-static.xml
+Sitemap: ${SITE_URL}/sitemap-subjects.xml
+Sitemap: ${SITE_URL}/sitemap-chapters.xml
+Sitemap: ${SITE_URL}/sitemap-topics.xml
+`;
+
 seoRouter.get('/sitemap.xml', sitemapIndex);
 seoRouter.get('/sitemap-index.xml', sitemapIndex);
 async function sitemapIndex(c: { text: (body: string, status?: number, headers?: Record<string, string>) => Response }): Promise<Response> {
@@ -154,21 +290,11 @@ seoRouter.get('/sitemap-topics.xml', async (c) => {
   return xmlResponse(urlSet(entries));
 });
 
-seoRouter.get('/robots.txt', (c) => c.text(`User-agent: *
-Allow: /
-
-User-agent: CCBot
-Disallow: /
-
-User-agent: Bytespider
-Disallow: /
-
-Sitemap: ${SITE_URL}/sitemap-index.xml
-Sitemap: ${SITE_URL}/sitemap-static.xml
-Sitemap: ${SITE_URL}/sitemap-subjects.xml
-Sitemap: ${SITE_URL}/sitemap-chapters.xml
-Sitemap: ${SITE_URL}/sitemap-topics.xml
-`, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400' }));
+seoRouter.get('/robots.txt', (c) => c.text(
+  ROBOTS_TXT,
+  200,
+  { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
+));
 
 function rss(items: ContentUrl[], title = 'Syrabit.ai - Study Notes & Exam Prep', selfUrl = `${SITE_URL}/feed.xml`): string {
   const entries = items.slice(0, 50).map((row) => {
