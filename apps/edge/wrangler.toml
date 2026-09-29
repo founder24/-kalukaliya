@@ -113,7 +113,7 @@ workers_dev = true
 
 [env.staging.vars]
 APP_ENV = "staging"
-ALLOWED_ORIGIN = "http://localhost:5001"
+ALLOWED_ORIGIN = "http://127.0.0.1:5001"
 RATE_LIMIT_CLEANUP_ALERT_THRESHOLD = "3"
 RATE_LIMIT_CLEANUP_ALERT_WINDOW_MINUTES = "60"
 

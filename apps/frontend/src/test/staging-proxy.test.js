@@ -4,7 +4,7 @@ import {
   validateStagingViteEnvironment,
 } from '../../vite-staging-proxy.js';
 
-const stagingHost = 'syrabitworker-staging.example-account.workers.dev';
+const stagingHost = 'syrabitworker-staging.axomxplain.workers.dev';
 const testToken = 'local-test-token-that-is-never-used-outside-unit-tests';
 
 describe('staging Vite proxy safeguards', () => {

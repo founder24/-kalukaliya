@@ -6,6 +6,7 @@ const systemChromium = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
 const stagingE2e = process.env.STAGING_E2E === '1';
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEB_SERVER === '1';
 const stagingWorkerUrl = process.env.STAGING_WORKER_URL || '';
+const stagingWorkerHostExpected = 'syrabitworker-staging.axomxplain.workers.dev';
 let stagingWorkerOrigin = '';
 let stagingWorkerHost = '';
 let baseURL = process.env.BASE_URL || 'http://localhost:5000';
@@ -20,7 +21,7 @@ if (stagingE2e) {
   }
   if (
     workerUrl.protocol !== 'https:'
-    || !/^syrabitworker-staging\.[a-z0-9-]+\.workers\.dev$/.test(workerUrl.hostname)
+    || workerUrl.hostname !== stagingWorkerHostExpected
     || workerUrl.username
     || workerUrl.password
     || workerUrl.port

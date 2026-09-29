@@ -1,4 +1,5 @@
 const STAGING_HEADER = 'X-Syrabit-Staging-Token';
+const STAGING_WORKER_HOST = 'syrabitworker-staging.axomxplain.workers.dev';
 
 function parseWorkerUrl(target) {
   try {
@@ -10,8 +11,8 @@ function parseWorkerUrl(target) {
 
 function isStagingWorkerUrl(url, expectedHost) {
   return url.protocol === 'https:'
+    && expectedHost === STAGING_WORKER_HOST
     && url.hostname === expectedHost
-    && /^syrabitworker-staging\.[a-z0-9-]+\.workers\.dev$/.test(url.hostname)
     && !url.username
     && !url.password
     && !url.port

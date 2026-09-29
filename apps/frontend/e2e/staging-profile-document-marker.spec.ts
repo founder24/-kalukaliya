@@ -12,7 +12,7 @@ test.describe('Isolated staging browser gates', () => {
   test('the public Worker gate blocks requests without its secret header', async ({ request }) => {
     const workerUrl = new URL(stagingWorkerUrl!);
     expect(workerUrl.protocol).toBe('https:');
-    expect(workerUrl.hostname).toMatch(/^syrabitworker-staging\.[a-z0-9-]+\.workers\.dev$/);
+    expect(workerUrl.hostname).toBe('syrabitworker-staging.axomxplain.workers.dev');
     expect(workerUrl.origin).toBe(stagingWorkerUrl);
 
     const response = await request.get(`${stagingWorkerUrl}/health`);
@@ -23,6 +23,7 @@ test.describe('Isolated staging browser gates', () => {
   });
 
   test('a staging student can save profile selectors; document markers render without chat generation', async ({ page }) => {
+    page.on('pageerror', (error) => console.log(`[staging-e2e] page error: ${error.message}`));
     const email = `staging-${randomUUID()}@example.invalid`;
     const password = `Stage-${randomBytes(24).toString('base64url')}!`;
     const anonymousId = `anon_${randomBytes(16).toString('hex')}`;
@@ -47,21 +48,48 @@ test.describe('Isolated staging browser gates', () => {
     await page.evaluate((token) => {
       sessionStorage.setItem('syrabit_token', token);
     }, signup.body.access_token);
+    await page.goto('/onboarding');
+    await expect(page.getByRole('heading', { name: 'Set Up Your Profile' })).toBeVisible();
+
+    await page.getByTestId('board-option-staging-en-board').click();
+    await page.getByTestId('onboarding-next-button').click();
+    await page.getByTestId('class-option-staging-en-class').click();
+    await page.getByTestId('onboarding-next-button').click();
+    await page.getByTestId('stream-option-staging-en-stream').click();
+    await page.getByTestId('onboarding-finish-button').click();
+    await expect(page).toHaveURL(/\/library$/);
+
+    const profileRequests = Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === 'GET' && url.pathname === '/api/v1/user/profile';
+      }),
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === 'GET' && url.pathname === '/api/v1/user/stats';
+      }),
+    ]);
     await page.goto('/profile');
+    const [profileResponse, statsResponse] = await profileRequests;
+    expect(profileResponse.status()).toBe(200);
+    expect(statsResponse.status()).toBe(200);
+    expect((await profileResponse.json()).name).toBe('Staging Gate Student');
+    await expect(page.getByTestId('profile-page')).toBeVisible();
     const nameField = page.getByTestId('edit-field-name');
     await expect(nameField).toContainText('Staging Gate Student');
 
-    await page.getByRole('button', { name: /^Board\b/ }).click();
-    await page.getByRole('button', { name: 'STAGING TEST BOARD', exact: true }).click();
-    await page.getByRole('button', { name: 'STAGING TEST CLASS', exact: true }).click();
-    await page.getByRole('button', { name: 'STAGING TEST STREAM', exact: true }).click();
+    await page.getByRole('button', { name: /^Subject\b/ }).click();
     await page.getByRole('button', { name: 'STAGING TEST SUBJECT', exact: true }).click();
 
     const saveProfileRequest = page.waitForRequest((request) =>
       request.method() === 'PATCH' && new URL(request.url()).pathname === '/api/v1/user/profile',
     );
+    const saveProfileResponse = page.waitForResponse((response) =>
+      response.request().method() === 'PATCH'
+      && new URL(response.url()).pathname === '/api/v1/user/profile',
+    );
     await page.getByRole('button', { name: 'Save Academic Details', exact: true }).click();
-    const profileRequest = await saveProfileRequest;
+    const [profileRequest, saveResponse] = await Promise.all([saveProfileRequest, saveProfileResponse]);
     expect(JSON.parse(profileRequest.postData() || '{}')).toMatchObject({
       board_id: 'staging-en-board',
       board_name: 'STAGING TEST BOARD',
@@ -71,6 +99,7 @@ test.describe('Isolated staging browser gates', () => {
       stream_name: 'STAGING TEST STREAM',
       selected_subjects: [{ id: 'staging-en-subject', name: 'STAGING TEST SUBJECT' }],
     });
+    expect(saveResponse.status()).toBe(200);
 
     await page.reload();
     await expect(page.getByRole('button', { name: /^Board\b/ })).toContainText('STAGING TEST BOARD');
@@ -87,8 +116,7 @@ test.describe('Isolated staging browser gates', () => {
     for (const marker of ['has_document=1', 'document_id=staging-document-fixture']) {
       await page.goto(`/chat?${marker}`);
       await expect(page.getByText(
-        'Document loaded as primary source. Ask any question.',
-        { exact: true },
+        /Document loaded as primary source|ডকুমেণ্ট প্ৰাথমিক উৎস হিচাপে লোড হৈছে/,
       )).toBeVisible();
     }
     expect(chatGenerationRequests).toBe(0);

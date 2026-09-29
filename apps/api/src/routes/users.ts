@@ -224,7 +224,18 @@ usersRouter.post('/onboarding', async (c) => {
   if (error) return error;
 
   const db = createDb(c.env.DB);
-  let body: { language?: string; grade?: string; board?: string; stream?: string };
+  let body: {
+    language?: string;
+    grade?: string;
+    board?: string;
+    stream?: string;
+    board_id?: string;
+    board_name?: string;
+    class_id?: string;
+    class_name?: string;
+    stream_id?: string | null;
+    stream_name?: string | null;
+  };
   try { body = await c.req.json() as typeof body; } catch { return c.json({ detail: 'Invalid JSON' }, 400); }
 
   const updates: Partial<typeof users.$inferInsert> = {
@@ -233,6 +244,12 @@ usersRouter.post('/onboarding', async (c) => {
   };
   if (body.language) updates.preferredLanguage = body.language;
   if (body.grade)    updates.grade = body.grade;
+  if (body.board_id != null) updates.boardId = body.board_id;
+  if (body.board_name != null) updates.boardName = body.board_name;
+  if (body.class_id != null) updates.classId = body.class_id;
+  if (body.class_name != null) updates.className = body.class_name;
+  if (body.stream_id !== undefined) updates.streamId = body.stream_id;
+  if (body.stream_name !== undefined) updates.streamName = body.stream_name;
 
   await db.update(users).set(updates).where(eq(users.id, id));
   return c.json({ status: 'success', message: 'Onboarding preferences saved' });
