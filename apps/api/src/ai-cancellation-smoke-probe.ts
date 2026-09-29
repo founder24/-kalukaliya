@@ -22,6 +22,7 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
+      'x-syrabit-ai-cancel-probe': 'staging',
     },
   });
 }
@@ -33,7 +34,7 @@ function constantTimeEqual(left: string, right: string): boolean {
 
   let difference = 0;
   for (let index = 0; index < leftBytes.length; index += 1) {
-    difference |= leftBytes[index] ^ rightBytes[index];
+    difference |= leftBytes[index]! ^ rightBytes[index]!;
   }
   return difference === 0;
 }
@@ -275,18 +276,37 @@ export default {
       return jsonResponse({ target: 'refused', status: 'not_staging' }, 503);
     }
     if (request.method !== 'POST') return new Response(null, { status: 405 });
+    if (!env.STAGING_ACCESS_TOKEN) {
+      return jsonResponse({ target: 'staging', status: 'probe_auth_not_configured' }, 503);
+    }
     if (request.headers.get('X-Syrabit-Staging-Token') === null
-      || !env.STAGING_ACCESS_TOKEN
       || !constantTimeEqual(
         request.headers.get('X-Syrabit-Staging-Token') ?? '',
         env.STAGING_ACCESS_TOKEN,
       )) {
-      return new Response(null, { status: 401 });
+      return jsonResponse({ target: 'staging', status: 'probe_auth_rejected' }, 401);
     }
 
     const path = new URL(request.url).pathname;
-    if (path === '/stream-stop') return runStreamingProbe(env);
+    if (path === '/ready') {
+      return jsonResponse({ target: 'staging', status: 'ready' });
+    }
+    if (path === '/stream-stop') {
+      try {
+        return await runStreamingProbe(env);
+      } catch (error) {
+        return jsonResponse({
+          target: 'staging',
+          status: 'probe_stream_failed',
+          errorName: errorName(error),
+        }, 500);
+      }
+    }
     if (path === '/buffered-timeout') return runBufferedTimeoutProbe(env);
-    return new Response(null, { status: 404 });
+    return jsonResponse({
+      target: 'staging',
+      status: 'probe_route_not_found',
+      requestedPath: path,
+    }, 404);
   },
 };
