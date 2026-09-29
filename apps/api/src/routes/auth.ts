@@ -19,6 +19,7 @@ import {
 } from '../middleware/auth';
 import { reconcileReferralAccount } from '../services/referral-attribution';
 import { enforceAuthRateLimit } from '../services/auth-rate-limit';
+import { isValidEmailSyntax } from '../utils/email-validation';
 import type { Env } from '../types';
 
 export const authRouter = new Hono<{ Bindings: Env }>();
@@ -44,10 +45,13 @@ authRouter.post('/signup', async (c) => {
     return c.json({ detail: 'Invalid JSON' }, 400);
   }
 
-  const email = body.email?.toLowerCase().trim();
+  const email = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
   const password = body.password;
   if (!email || !password) {
     return c.json({ detail: 'email and password are required' }, 422);
+  }
+  if (!isValidEmailSyntax(email)) {
+    return c.json({ detail: 'email must be a valid email address' }, 422);
   }
   if (password.length < 8) {
     return c.json({ detail: 'Password must be at least 8 characters' }, 422);

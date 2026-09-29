@@ -32,6 +32,14 @@ description: How this monorepo is configured to run in the Replit environment
 - Backend "degraded" health is normal in dev — Redis disabled, Vertex AI not configured
 - 401/403/404 console errors for auth-gated resources are expected for unauthenticated users
 
+## Focused API Vitest runs
+
+Use `pnpm --filter syrabit-api exec vitest run <test-path>` to run specific API test files. Passing a path after `--` to the package's `test` script was observed to run the full suite instead of filtering.
+
+**Why:** Concurrent full-suite runs can collide in timing-sensitive atomic quota tests, creating failures that pass when run alone.
+
+**How to apply:** Use direct Vitest filters for focused checks and avoid running duplicate full API suites concurrently.
+
 ## Production GCP resources
 - Cloud Run service: `syrabit-backend` (region `asia-south1`, project `blissful-acumen-495019-t6`)
 - URL: `https://syrabit-backend-851687450401.asia-south1.run.app`
