@@ -1,0 +1,14 @@
+name = "syrabit-ai-cancellation-smoke"
+main = "src/ai-cancellation-smoke-probe.ts"
+compatibility_date = "2024-11-01"
+workers_dev = false
+
+[env.staging]
+name = "syrabit-ai-cancel-probe-staging"
+workers_dev = true
+
+[env.staging.vars]
+APP_ENV = "staging"
+
+[env.staging.ai]
+binding = "AI"
