@@ -81,7 +81,7 @@ const DEFAULT_SEO_BACKEND = "https://syrabit-api-prod.axomxplain.workers.dev";
 // the matching backend route and force the correct Content-Type. Cached
 // at the edge for an hour (matches _headers s-maxage).
 const SEO_PASSTHROUGH_RE =
-  /^\/(sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
+  /^\/(?:sitemap-topics\.xml|sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
 // IndexNow keyfiles (32-hex .txt or *indexnow*.txt) are intentionally
 // excluded — they're shipped as static assets in dist/ so the Pages
 // ASSETS pipeline serves them directly. Routing them through the
@@ -476,7 +476,9 @@ export default {
         status: 301,
         headers: {
           "Location": "/library",
-          "Cache-Control": "public, max-age=3600",
+          "Cache-Control": "public, max-age=0, must-revalidate",
+          "X-Frame-Options": "DENY",
+          "X-Content-Type-Options": "nosniff",
         },
       });
     }
