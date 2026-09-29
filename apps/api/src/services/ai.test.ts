@@ -16,6 +16,8 @@ import { describe, it, expect } from 'vitest';
 import {
   parseSseLine,
   drainStream,
+  generate,
+  generateAssamese,
   streamGenerate,
   AI_MODEL_PRIMARY,
   AI_MODEL_FALLBACK,
@@ -290,6 +292,112 @@ describe('streamGenerate fallback behavior', () => {
       'Buffered but valid answer',
       `\x00model:${AI_MODEL_PRIMARY}`,
     ]);
+  });
+});
+
+describe('Workers AI cancellation', () => {
+  it('passes the caller signal to buffered inference and does not retry after abort', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    let bindingSignal: AbortSignal | undefined;
+    const ai = {
+      run: async (
+        model: string,
+        _input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => {
+        calls.push(model);
+        bindingSignal = options?.signal;
+        return new Promise<never>((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) {
+            reject(new Error('Workers AI signal was not forwarded'));
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    } as unknown as Ai;
+
+    const pending = generate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+      signal: controller.signal,
+    });
+    controller.abort(new Error('client disconnected'));
+
+    await expect(pending).rejects.toThrow('client disconnected');
+    expect(bindingSignal).toBe(controller.signal);
+    expect(calls).toEqual([AI_MODEL_PRIMARY]);
+  });
+
+  it('aborts a non-streaming binding call when its timeout expires', async () => {
+    const calls: string[] = [];
+    let bindingSignal: AbortSignal | undefined;
+    const ai = {
+      run: async (
+        model: string,
+        _input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => {
+        calls.push(model);
+        bindingSignal = options?.signal;
+        return new Promise<never>((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) {
+            reject(new Error('Workers AI signal was not forwarded'));
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      },
+    } as unknown as Ai;
+
+    await expect(generateAssamese(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+    }, 500)).rejects.toThrow('Assamese model quality repair timed out');
+
+    expect(calls).toEqual([AI_MODEL_ASSAMESE]);
+    expect(bindingSignal?.aborted).toBe(true);
+    expect((bindingSignal?.reason as Error).name).toBe('TimeoutError');
+  });
+
+  it('forwards cancellation to streaming inference and cancels its response reader', async () => {
+    const controller = new AbortController();
+    let bindingSignal: AbortSignal | undefined;
+    let streamCancelled = false;
+    const ai = {
+      run: async (
+        _model: string,
+        _input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => {
+        bindingSignal = options?.signal;
+        return new ReadableStream<Uint8Array>({
+          start(streamController) {
+            streamController.enqueue(encode('data: {"response":"Partial"}\n'));
+          },
+          cancel() {
+            streamCancelled = true;
+          },
+        });
+      },
+    } as unknown as Ai;
+
+    const generation = streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+      signal: controller.signal,
+    });
+    await expect(generation.next()).resolves.toEqual({ done: false, value: 'Partial' });
+
+    const pendingNext = generation.next();
+    controller.abort(new Error('client disconnected'));
+
+    await expect(pendingNext).rejects.toThrow('client disconnected');
+    expect(bindingSignal).toBe(controller.signal);
+    expect(streamCancelled).toBe(true);
   });
 });
 

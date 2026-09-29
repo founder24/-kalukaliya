@@ -2512,6 +2512,24 @@ chatRouter.post('/stream', async (c) => {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer  = writable.getWriter();
   const encoder = new TextEncoder();
+  const requestSignal = c.req.raw.signal;
+  const generationAbortController = new AbortController();
+  const abortGeneration = (reason?: unknown) => {
+    if (!generationAbortController.signal.aborted) {
+      generationAbortController.abort(
+        reason ?? new DOMException('Chat response was interrupted', 'AbortError'),
+      );
+    }
+  };
+  const abortOnRequest = () => abortGeneration(requestSignal.reason);
+  if (requestSignal.aborted) {
+    abortOnRequest();
+  } else {
+    requestSignal.addEventListener('abort', abortOnRequest, { once: true });
+  }
+  // A downstream reader cancel also rejects the TransformStream writer, even
+  // when the incoming request signal was not propagated by an intermediary.
+  void writer.closed.catch(abortGeneration);
 
   const write = (payload: unknown) =>
     writer.write(encoder.encode(sseEvent(payload)));
@@ -2575,6 +2593,7 @@ chatRouter.post('/stream', async (c) => {
             systemPrompt,
             userMessage: message,
             maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 384),
+            signal: generationAbortController.signal,
           }, 8_000);
           fullResponse = normalizeAssameseStreamChunk(generated.text);
           if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
@@ -2586,6 +2605,7 @@ chatRouter.post('/stream', async (c) => {
             systemPrompt,
             userMessage: message,
             maxTokens: CHAT_MAX_OUTPUT_TOKENS,
+            signal: generationAbortController.signal,
           })) {
             if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
             // Sentinel chunk carries the resolved model name — do not forward to client
@@ -2630,6 +2650,7 @@ chatRouter.post('/stream', async (c) => {
               systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
               userMessage: message,
               maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),
+              signal: generationAbortController.signal,
             }, 6_000);
             const repairedText = normalizeAssameseStreamChunk(repaired.text);
             if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
@@ -2639,6 +2660,7 @@ chatRouter.post('/stream', async (c) => {
               assameseProseLeakage = false;
             }
           } catch (repairError) {
+            if (generationAbortController.signal.aborted) throw repairError;
             console.warn('[chat] Assamese fallback-model repair failed:', repairError);
           }
           if (!isDeliverableAssameseAnswer(fullResponse)) {
@@ -2745,6 +2767,10 @@ chatRouter.post('/stream', async (c) => {
       }
 
     } catch (err) {
+      if (generationAbortController.signal.aborted) {
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+        return;
+      }
       console.error('[chat] Stream pipeline error:', err);
       try {
         await write(terminalChatErrorEvent(
@@ -2762,7 +2788,10 @@ chatRouter.post('/stream', async (c) => {
 
   // Register with Workers runtime so the isolate stays alive until streaming completes
   c.executionCtx.waitUntil(
-    streamTask.finally(() => writer.close().catch(() => {})),
+    streamTask.finally(() => {
+      requestSignal.removeEventListener('abort', abortOnRequest);
+      return writer.close().catch(() => {});
+    }),
   );
 
   return new Response(readable, {

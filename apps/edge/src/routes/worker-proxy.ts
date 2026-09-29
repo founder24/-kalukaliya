@@ -89,11 +89,15 @@ export async function proxyToApiWorker(
       : undefined;
 
   const serviceBindingAbort = new AbortController();
+  const serviceBindingSignal = AbortSignal.any([
+    request.signal,
+    serviceBindingAbort.signal,
+  ]);
   const outRequest = new Request(request.url, {
     method: request.method,
     headers,
     body: bodyBuffer,
-    signal: serviceBindingAbort.signal,
+    signal: serviceBindingSignal,
   });
 
   let timeoutId: ReturnType<typeof setTimeout> | undefined;

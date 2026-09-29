@@ -23,11 +23,69 @@ export interface GenerateOptions {
   systemPrompt: string;
   userMessage:  string;
   maxTokens?:   number;
+  signal?:      AbortSignal;
 }
 
 export interface GenerateResult {
   text:  string;
   model: string;
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+async function runWithTimeout<T>(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+  timeoutMessage: string,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let rejectAbort!: (reason: unknown) => void;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(abortReason(controller.signal));
+  controller.signal.addEventListener('abort', onAbort, { once: true });
+
+  const abortFromParent = () => {
+    controller.abort(
+      parentSignal?.reason ?? new DOMException('The operation was aborted', 'AbortError'),
+    );
+  };
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+  }
+
+  const timeoutError = new Error(timeoutMessage);
+  timeoutError.name = 'TimeoutError';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    if (!controller.signal.aborted) {
+      timer = setTimeout(
+        () => controller.abort(timeoutError),
+        Math.max(500, timeoutMs),
+      );
+    }
+    const operation = controller.signal.aborted
+      ? Promise.reject(abortReason(controller.signal))
+      : run(controller.signal);
+    const result = await Promise.race([operation, abortPromise]);
+    throwIfAborted(controller.signal);
+    return result;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    parentSignal?.removeEventListener('abort', abortFromParent);
+    controller.signal.removeEventListener('abort', onAbort);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,6 +97,7 @@ async function runModel(
   model:       string,
   opts:        GenerateOptions,
 ): Promise<string> {
+  throwIfAborted(opts.signal);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (ai as any).run(model, {
     messages: [
@@ -46,7 +105,7 @@ async function runModel(
       { role: 'user',   content: opts.userMessage  },
     ],
     ...(opts.maxTokens !== undefined && { max_tokens: opts.maxTokens }),
-  });
+  }, opts.signal ? { signal: opts.signal } : undefined);
 
   // Workers AI text-generation returns { response: string } or { result: { response: string } }
   // depending on the model family. Normalise both shapes.
@@ -65,6 +124,7 @@ async function runModelStream(
   model: string,
   opts:  GenerateOptions,
 ): Promise<ReadableStream<Uint8Array>> {
+  throwIfAborted(opts.signal);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await (ai as any).run(model, {
     messages: [
@@ -73,7 +133,7 @@ async function runModelStream(
     ],
     stream: true,
     ...(opts.maxTokens !== undefined && { max_tokens: opts.maxTokens }),
-  });
+  }, opts.signal ? { signal: opts.signal } : undefined);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = result as any;
@@ -130,14 +190,26 @@ export function parseSseLine(line: string): string | null {
  */
 export async function* drainStream(
   stream: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
 ): AsyncGenerator<string> {
   const reader  = stream.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  let cancelPromise: Promise<void> | undefined;
+  const cancelReader = (reason?: unknown): Promise<void> => {
+    cancelPromise ??= reader.cancel(reason).catch(() => {});
+    return cancelPromise;
+  };
+  const cancelOnAbort = () => {
+    if (signal) void cancelReader(abortReason(signal));
+  };
+  signal?.addEventListener('abort', cancelOnAbort, { once: true });
 
   try {
+    throwIfAborted(signal);
     while (true) {
       const { done, value } = await reader.read();
+      throwIfAborted(signal);
       if (done) break;
       buf += decoder.decode(value, { stream: true });
 
@@ -156,7 +228,8 @@ export async function* drainStream(
       if (delta !== null) yield delta;
     }
   } finally {
-    reader.cancel().catch(() => {});
+    signal?.removeEventListener('abort', cancelOnAbort);
+    void cancelReader(signal?.aborted ? abortReason(signal) : undefined);
   }
 }
 
@@ -179,9 +252,11 @@ export async function generate(
     if (text) return { text, model: AI_MODEL_PRIMARY };
     throw new Error('Primary model returned empty response');
   } catch (primaryErr) {
+    throwIfAborted(opts.signal);
     console.warn('[ai] Primary model failed, trying fallback:', primaryErr);
   }
 
+  throwIfAborted(opts.signal);
   const text = await runModel(ai, AI_MODEL_FALLBACK, opts);
   if (!text) throw new Error('[ai] Both primary and fallback models returned empty responses');
   return { text, model: AI_MODEL_FALLBACK };
@@ -193,22 +268,14 @@ export async function generateFallback(
   opts: GenerateOptions,
   timeoutMs = 6_000,
 ): Promise<GenerateResult> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const text = await Promise.race([
-      runModel(ai, AI_MODEL_FALLBACK, opts),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('[ai] Fallback model quality repair timed out')),
-          Math.max(500, timeoutMs),
-        );
-      }),
-    ]);
-    if (!text) throw new Error('[ai] Fallback model returned an empty response');
-    return { text, model: AI_MODEL_FALLBACK };
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  const text = await runWithTimeout(
+    opts.signal,
+    timeoutMs,
+    '[ai] Fallback model quality repair timed out',
+    (signal) => runModel(ai, AI_MODEL_FALLBACK, { ...opts, signal }),
+  );
+  if (!text) throw new Error('[ai] Fallback model returned an empty response');
+  return { text, model: AI_MODEL_FALLBACK };
 }
 
 /** Assamese-specialized quality repair using the strongest tested model. */
@@ -217,22 +284,14 @@ export async function generateAssamese(
   opts: GenerateOptions,
   timeoutMs = 6_000,
 ): Promise<GenerateResult> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const text = await Promise.race([
-      runModel(ai, AI_MODEL_ASSAMESE, opts),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('[ai] Assamese model quality repair timed out')),
-          Math.max(500, timeoutMs),
-        );
-      }),
-    ]);
-    if (!text) throw new Error('[ai] Assamese model returned an empty response');
-    return { text, model: AI_MODEL_ASSAMESE };
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  const text = await runWithTimeout(
+    opts.signal,
+    timeoutMs,
+    '[ai] Assamese model quality repair timed out',
+    (signal) => runModel(ai, AI_MODEL_ASSAMESE, { ...opts, signal }),
+  );
+  if (!text) throw new Error('[ai] Assamese model returned an empty response');
+  return { text, model: AI_MODEL_ASSAMESE };
 }
 
 /**
@@ -275,6 +334,7 @@ export async function* streamGenerate(
       yield chunk;
     }
   } catch (primaryErr) {
+    throwIfAborted(opts.signal);
     if (tokensEmitted > 0) throw primaryErr;
     console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
     usedModel = fallbackModel;
@@ -284,6 +344,7 @@ export async function* streamGenerate(
         yield chunk;
       }
     } catch (fallbackErr) {
+      throwIfAborted(opts.signal);
       if (tokensEmitted > 0) throw fallbackErr;
       console.warn('[ai] Both stream models failed, trying buffered generation:', fallbackErr);
       const buffered = await generate(ai, opts);
@@ -306,7 +367,7 @@ async function* streamModel(
 ): AsyncGenerator<string> {
   const stream = await runModelStream(ai, model, opts);
   let emitted = 0;
-  for await (const chunk of drainStream(stream)) {
+  for await (const chunk of drainStream(stream, opts.signal)) {
     emitted++;
     yield chunk;
   }

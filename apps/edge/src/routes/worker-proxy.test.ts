@@ -43,3 +43,36 @@ describe('API Worker trusted origin handoff', () => {
     ).toBe('edge-test-secret-at-least-32-characters');
   });
 });
+
+describe('API Worker request cancellation handoff', () => {
+  it('preserves the incoming abort signal for the full upstream response', async () => {
+    const controller = new AbortController();
+    let forwardedSignal: AbortSignal | undefined;
+    const env = {
+      API_WORKER: {
+        fetch: async (request: Request) => {
+          forwardedSignal = request.signal;
+          return new Response('{}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      },
+    } as unknown as Env;
+
+    const response = await proxyToApiWorker(new Request(
+      'https://www.syrabit.ai/api/v1/chat/stream',
+      {
+        method: 'POST',
+        body: '{}',
+        signal: controller.signal,
+      },
+    ), env);
+
+    expect(response.status).toBe(200);
+    expect(forwardedSignal?.aborted).toBe(false);
+    controller.abort(new Error('client disconnected'));
+    expect(forwardedSignal?.aborted).toBe(true);
+    await response.body?.cancel();
+  });
+});
