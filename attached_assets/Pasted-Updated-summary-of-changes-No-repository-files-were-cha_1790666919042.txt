@@ -1,0 +1,44 @@
+Updated summary of changes:
+- No repository files were changed in the current session.
+- The environment available here is effectively read-only metadata access; it does not provide a writable checkout or valid GitHub write access for this repo, so I did not apply or verify a patch in-place.
+
+What I did verify from the repo:
+- Signup path is at apps/api/src/routes/auth.ts; it currently accepts any non-empty email string and does not validate syntax before creating the user.
+- Prompt-boundary tests already exist at apps/api/src/routes/chat.prompt.test.ts and the code in apps/api/src/routes/chat.ts already includes language-specific “untrusted web context” instructions; the main requirement is to keep those boundaries intact while explicitly treating retrieved passages as untrusted data.
+- The AI service at apps/api/src/services/ai.ts uses Promise.race-based timeout wrappers, but Cloudflare Workers AI bindings do not provide reliable cancellation/AbortSignal semantics for streaming calls; the underlying operation can continue running even when the wrapper times out.
+- The deploy workflow at .github/workflows/deploy-cloudflare.yml does not show a job-level timeout on the migration job in the snippet I reviewed; if the actual migration job is unbounded, it should get a bounded timeout.
+- The staff contract in apps/api/src/routes/staff.ts and apps/frontend/src/utils/staffAccess.js appears intentional and capability-scoped; no permission change should be made unless a concrete route exceeds that contract.
+
+The concrete patch plan I would apply locally:
+1. Email validation
+- Add apps/api/src/lib/email-validation.ts with a syntax validator.
+- Import it in apps/api/src/routes/auth.ts signup route.
+- Reject malformed emails with 422 before duplicate-checking.
+- Add valid/invalid tests in apps/api/src/lib/email-validation.test.ts.
+- No domain allowlist added.
+
+2. RAG prompt boundaries
+- Keep existing provenance, publication, and subject-scope checks.
+- Ensure retrieved passages are clearly labeled as untrusted data.
+- Add explicit instructions that retrieved text cannot override system instructions.
+- Preserve original curriculum text (including Assamese and other educational language) without rewriting it.
+- Add adversarial tests using a retrieved passage that tells the model to ignore previous instructions; cover the retrieval paths used by chat.
+
+3. Workers AI deadlines
+- Implement bounded timeout strategy for primary/fallback/stream generation using real runtime-supported cancellation where available.
+- Do not rely on Promise.race alone and do not claim the underlying bound function was cancelled if it continues running.
+- Preserve the existing web-search and service-binding deadlines.
+- Add tests for stalled provider, fallback behavior, stream interruption, and quota/history cleanup without double generation.
+
+4. D1 migration job guard
+- Check the actual migration job in GitHub Actions.
+- If it lacks timeout-minutes, add a bounded job-level timeout.
+- Keep existing migration-state validation unchanged.
+- Do not add auto-retries or claim rollback is guaranteed.
+
+5. Staff permissions
+- Review staff/admin contract against apps/api/src/routes/staff.ts and apps/frontend/src/utils/staffAccess.js.
+- Change nothing unless a specific route clearly grants actions beyond that contract.
+- If a change is required, add focused tests.
+
+I did not implement or validate these in the repo because the writable checkout is not available here. If you provide a writable local path or repo clone, I can apply and verify the exact patch, run the focused tests, and report the final files changed and results.
