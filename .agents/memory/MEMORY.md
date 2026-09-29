@@ -85,7 +85,7 @@
 - [Workflow trigger contracts](workflow-trigger-contracts.md) — enforce GitHub Actions triggers from normalized YAML, not source-line regexes.
 - [Access bypass rehearsals](access-bypass-rehearsals.md) — TEST-NET proves policy cleanup only; warning activation requires a temporary real operator /32.
 - [Staff content editor contract](staff-content-contract.md) — shared CRUD uses direct staff routes; admin-only jobs remain under admin routes.
-- [GitHub audit access](github-audit-access.md) — public PR/check data is available, but security alerts and branch protection require a working authenticated token
+- [GitHub audit access](github-audit-access.md) — Security data needs auth; the connector may expose Actions metadata but block log archives.
 - [Playwright route fixture matching](playwright-route-fixtures.md) — collection and nested REST URLs need separate route globs in stateful browser fixtures.
 - [Playwright runtime preflight](playwright-runtime-preflight.md) — validate the separately downloaded headless shell directly; regular Chromium checks can miss loader failures.
 - [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — avoid the read-only Nix Python site; use user-scoped installs or isolated uv, with test tools kept out of runtime deps.

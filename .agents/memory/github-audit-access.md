@@ -1,10 +1,12 @@
 ---
 name: GitHub audit access
-description: Limits on auditing repository security and protection settings through the GitHub API
+description: Authentication limits for GitHub security, protection, and Actions log archives
 ---
 
 Public GitHub API data is sufficient for pull-request files, comments, reviews, and check-run conclusions. Dependabot alerts, code scanning, secret scanning, and branch-protection endpoints require a valid authenticated token; a failed token must not be treated as an empty result.
 
-**Why:** An unauthenticated request returns HTTP 401 for those endpoints, so reporting “no alerts” would be misleading.
+The connected GitHub integration may expose Actions run/job metadata but return 403 for log archives. An already-authorized GitHub secret can still retrieve an archive through GitHub's signed redirect; keep both the credential and redirect URL inside the request process, and never log or return them. A 404 means the archive is unavailable even if job metadata remains readable.
 
-**How to apply:** When the repository audit needs private security or repository-policy data, verify authentication first and report those areas as unavailable if the token is rejected. Do not retry by exposing or copying the token.
+**Why:** Unauthenticated requests return HTTP 401 for security endpoints, and the 2026-09-29 Syrabit audit confirmed that run/job metadata can be readable while the connector blocks archive downloads. Reporting these areas as empty or clean would be misleading.
+
+**How to apply:** For read-only GitHub audits, report run/job metadata coverage separately from raw log-archive coverage. Treat 403/404 archives as unavailable, not clean; use only an existing authorized secret and never expose its value or a signed redirect.
