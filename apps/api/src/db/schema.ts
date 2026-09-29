@@ -259,6 +259,17 @@ export const anonymousQuotaUsage = sqliteTable('anonymous_quota_usage', {
   uniqueIndex('anonymous_quota_period_idx').on(t.anonId, t.period),
 ]);
 
+// Completed authenticated free-tier turns are keyed to their admission month.
+// In-flight reservations remain in chat_request_claims until they settle.
+export const monthlyQuotaUsage = sqliteTable('monthly_quota_usage', {
+  userId: text('user_id').notNull().references(() => users.id),
+  period: text('period').notNull(),                                   // YYYY-MM
+  count: integer('count').notNull().default(0),
+  updatedAt: integer('updated_at').default(sql`(unixepoch())`),
+}, (t) => [
+  uniqueIndex('monthly_quota_user_period_idx').on(t.userId, t.period),
+]);
+
 // A stable browser request key makes a transport retry one logical turn
 // instead of charging a second quota slot.
 export const chatRequestClaims = sqliteTable('chat_request_claims', {
@@ -267,6 +278,8 @@ export const chatRequestClaims = sqliteTable('chat_request_claims', {
   period: text('period').notNull(),
   isAnon: integer('is_anon').notNull().default(1),
   quotaReserved: integer('quota_reserved').notNull().default(1),
+  monthlyQuotaReserved: integer('monthly_quota_reserved').notNull().default(0),
+  monthlyPeriod: text('monthly_period'),
   status: text('status').notNull().default('reserved'),
   sessionId: text('session_id'),
   responseContent: text('response_content'),
@@ -276,6 +289,13 @@ export const chatRequestClaims = sqliteTable('chat_request_claims', {
   expiresAt: integer('expires_at').notNull(),
 }, (t) => [
   index('chat_request_claims_expiry_idx').on(t.expiresAt),
+  index('chat_request_claims_monthly_idx').on(
+    t.userId,
+    t.monthlyPeriod,
+    t.monthlyQuotaReserved,
+    t.status,
+    t.expiresAt,
+  ),
 ]);
 
 // A successful insert is the atomic single-use claim for a refresh token.

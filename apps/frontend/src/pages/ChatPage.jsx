@@ -612,7 +612,7 @@ export default function ChatPage() {
         if (response.status === 429) {
           // Pull structured error from JSON body (may be {} if CF WAF returned HTML)
           const detail = String(errData.detail || '');
-          const capError = errData.error || '';
+          const capError = errData.error_code || errData.error || '';
           // Also check response headers — CF Worker sets X-Chat-Cap-Error and X-Cap
           const capHeader = response.headers?.get?.('X-Chat-Cap-Error') || response.headers?.get?.('X-Cap') || '';
 
@@ -621,6 +621,7 @@ export default function ChatPage() {
             capHeader === 'chat_daily_soft_cap' ||
             /daily.*(chat|free|quota).*allowance|daily.*limit.*reached|daily.*quota.*exhausted|free quota exhausted/i.test(detail);
           const isMonthlyCap =
+            capError === 'chat_monthly_limit' ||
             capError === 'chat_budget_exhausted' ||
             capHeader === 'chat_budget_exhausted' ||
             /monthly.*budget|monthly.*chat/i.test(detail);
@@ -642,7 +643,12 @@ export default function ChatPage() {
           } else if (isDailyCap && user) {
             toast.error('Daily chat allowance reached. Resets at midnight UTC.', { duration: 6000 });
           } else if (isMonthlyCap) {
-            toast.error('Monthly chat budget reached. Resets at the start of next month.', { duration: 8000 });
+            toast.error(
+              capError === 'chat_monthly_limit'
+                ? detail || 'You have used all 30 free chat requests for this month. Your allowance resets next month.'
+                : 'Monthly chat budget reached. Resets at the start of next month.',
+              { duration: 8000 },
+            );
           } else if (isAiRateLimit) {
             toast.error('Sending too fast — please wait a few seconds and try again.', { duration: 5000 });
           } else if (isNetworkBlock) {

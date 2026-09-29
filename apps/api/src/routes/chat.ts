@@ -41,7 +41,9 @@ import {
 } from '../services/web-search';
 import {
   CHAT_RPM_LIMIT,
+  FREE_MONTHLY_CHAT_LIMIT,
   anonUserId,
+  currentQuotaMonthPeriod,
   currentQuotaMinutePeriod,
   trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
@@ -576,6 +578,8 @@ interface ChatRequestClaim {
   period?: string;
   is_anon?: number;
   quota_reserved?: number;
+  monthly_quota_reserved?: number;
+  monthly_period?: string | null;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -586,7 +590,8 @@ async function getChatRequestClaim(
   requestId: string,
 ): Promise<ChatRequestClaim | null> {
   return d1.prepare(
-    `SELECT user_id, status, session_id, response_content, response_metadata
+    `SELECT user_id, status, session_id, response_content, response_metadata,
+            quota_reserved, monthly_quota_reserved, monthly_period
      FROM chat_request_claims
      WHERE request_id = ? AND expires_at > ?`,
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
@@ -605,29 +610,81 @@ async function isChatRequestCancelled(
   return Boolean(row);
 }
 
-async function insertChatRequestClaim(
+export async function insertChatRequestClaim(
   d1: D1Database,
   requestId: string,
   userId: string,
   isAnon: boolean,
   quotaReserved: boolean,
   period = currentQuotaMinutePeriod(),
+  monthlyQuota?: { period: string; limit: number },
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
-  const result = await d1.prepare(`
-    INSERT OR IGNORE INTO chat_request_claims
-      (request_id, user_id, period, is_anon, quota_reserved, status, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
-  `).bind(
-    requestId,
-    userId,
-    period,
-    isAnon ? 1 : 0,
-    quotaReserved ? 1 : 0,
-    now,
-    now + 24 * 3600,
-  ).run();
+  const result = monthlyQuota
+    ? await d1.prepare(`
+        INSERT OR IGNORE INTO chat_request_claims
+          (request_id, user_id, period, is_anon, quota_reserved,
+           monthly_quota_reserved, monthly_period, status, created_at, expires_at)
+        SELECT ?, ?, ?, ?, ?, 1, ?, 'reserved', ?, ?
+        WHERE COALESCE((
+          SELECT count FROM monthly_quota_usage
+          WHERE user_id = ? AND period = ?
+        ), 0) + (
+          SELECT COUNT(*) FROM chat_request_claims
+          WHERE user_id = ? AND monthly_period = ?
+            AND monthly_quota_reserved = 1 AND status = 'reserved'
+            AND expires_at > ?
+        ) < ?
+      `).bind(
+        requestId,
+        userId,
+        period,
+        isAnon ? 1 : 0,
+        quotaReserved ? 1 : 0,
+        monthlyQuota.period,
+        now,
+        now + 24 * 3600,
+        userId,
+        monthlyQuota.period,
+        userId,
+        monthlyQuota.period,
+        now,
+        monthlyQuota.limit,
+      ).run()
+    : await d1.prepare(`
+        INSERT OR IGNORE INTO chat_request_claims
+          (request_id, user_id, period, is_anon, quota_reserved, status, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
+      `).bind(
+        requestId,
+        userId,
+        period,
+        isAnon ? 1 : 0,
+        quotaReserved ? 1 : 0,
+        now,
+        now + 24 * 3600,
+      ).run();
   return (result.meta.changes ?? 0) > 0;
+}
+
+export async function getAuthMonthlyQuotaUsage(
+  d1: D1Database,
+  userId: string,
+  period = currentQuotaMonthPeriod(),
+): Promise<number> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await d1.prepare(`
+    SELECT COALESCE((
+      SELECT count FROM monthly_quota_usage
+      WHERE user_id = ? AND period = ?
+    ), 0) + (
+      SELECT COUNT(*) FROM chat_request_claims
+      WHERE user_id = ? AND monthly_period = ?
+        AND monthly_quota_reserved = 1 AND status = 'reserved'
+        AND expires_at > ?
+    ) AS count
+  `).bind(userId, period, userId, period, now).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 async function completeChatRequestClaim(
@@ -685,6 +742,7 @@ async function releaseClaimQuotaReservation(
           AND period = (
             SELECT period FROM chat_request_claims
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
           )
       `).bind(now, userId, requestId, userId)
     : d1.prepare(`
@@ -694,6 +752,7 @@ async function releaseClaimQuotaReservation(
           AND period = (
             SELECT period FROM chat_request_claims
             WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+              AND quota_reserved = 1
           )
       `).bind(now, userId, requestId, userId);
   await d1.batch([
@@ -1638,7 +1697,7 @@ export function buildSystemPrompt(opts: {
 // Chat persistence
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function persistCompletedChat(
+export async function persistCompletedChat(
   d1: D1Database,
   opts: {
     userId: string;
@@ -1690,6 +1749,18 @@ async function persistCompletedChat(
       )
     `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify({ model: opts.modelUsed }), expiresAt, now + 1, opts.requestId, opts.requestId, uid),
   ];
+  if (opts.requestId) {
+    statements.push(d1.prepare(`
+      INSERT INTO monthly_quota_usage (user_id, period, count, updated_at)
+      SELECT user_id, monthly_period, 1, ?
+      FROM chat_request_claims
+      WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+        AND monthly_quota_reserved = 1 AND monthly_period IS NOT NULL
+      ON CONFLICT (user_id, period) DO UPDATE
+        SET count = monthly_quota_usage.count + 1,
+            updated_at = excluded.updated_at
+    `).bind(now, opts.requestId, uid));
+  }
   if (!opts.isAnon) {
     statements.push(d1.prepare(`
       UPDATE users
@@ -1938,9 +2009,22 @@ chatRouter.post('/stream', async (c) => {
   let quotaLimit: number;
   let quotaAllowed: boolean;
   let ownsQuotaReservation = false;
+  let ownsMonthlyQuotaReservation = false;
+  let monthlyQuotaExhausted = false;
 
   const quotaStart = Date.now();
   const reservationPeriod = currentQuotaMinutePeriod();
+  const monthlyReservation = !isAnon
+    && userTier === 'free'
+    && userRole !== 'admin'
+    && userRole !== 'staff'
+    ? { period: currentQuotaMonthPeriod(), limit: FREE_MONTHLY_CHAT_LIMIT }
+    : undefined;
+  // Free authenticated requests need a claim even when older clients omit the
+  // stable request key. This gives cancellation and failure cleanup a period-
+  // bound reservation record without changing retry semantics for those clients.
+  const claimRequestId = clientRequestId
+    ?? (monthlyReservation ? `monthly-${crypto.randomUUID()}` : null);
   try {
     const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
       c.req.raw,
@@ -1993,49 +2077,82 @@ chatRouter.post('/stream', async (c) => {
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
     }
 
-    if (quotaAllowed && clientRequestId) {
+    if (quotaAllowed && claimRequestId) {
       const inserted = await insertChatRequestClaim(
         c.env.DB,
-        clientRequestId,
+        claimRequestId,
         userId,
         isAnon,
         ownsQuotaReservation,
         reservationPeriod,
+        monthlyReservation,
       );
       if (!inserted) {
         if (ownsQuotaReservation) {
           await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod);
           ownsQuotaReservation = false;
         }
-        const racedClaim = await getChatRequestClaim(c.env.DB, clientRequestId);
-        if (!racedClaim || racedClaim.user_id !== userId) {
-          throw new Error('Unable to establish chat request claim');
-        }
-        if (racedClaim.status === 'completed') {
-          return replayCompletedChatRequest(racedClaim, serverRequestId);
-        }
-        if (racedClaim.status === 'cancelled') {
+        const racedClaim = await getChatRequestClaim(c.env.DB, claimRequestId);
+        if (racedClaim && racedClaim.user_id !== userId) {
+          c.header('X-Failure-Stage', 'request_validation');
           return c.json({
-            detail: 'This chat request was cancelled.',
-            error_code: 'chat_request_cancelled',
+            detail: 'Chat request key is already in use.',
+            error_code: 'chat_request_conflict',
             request_id: serverRequestId,
-            failure_stage: 'cancelled',
+            failure_stage: 'request_validation',
           }, 409);
         }
-        return waitForInFlightChatRequest(
-          c.env.DB,
-          clientRequestId,
-          userId,
-          serverRequestId,
-        );
+        if (!racedClaim && monthlyReservation) {
+          const used = await getAuthMonthlyQuotaUsage(
+            c.env.DB,
+            userId,
+            monthlyReservation.period,
+          );
+          if (used >= monthlyReservation.limit) {
+            quotaAllowed = false;
+            monthlyQuotaExhausted = true;
+            quotaCount = used;
+            quotaLimit = monthlyReservation.limit;
+          } else {
+            throw new Error('Unable to establish chat request claim');
+          }
+        } else if (!racedClaim) {
+          throw new Error('Unable to establish chat request claim');
+        }
+        if (racedClaim) {
+          if (racedClaim.status === 'completed') {
+            return replayCompletedChatRequest(racedClaim, serverRequestId);
+          }
+          if (racedClaim.status === 'cancelled') {
+            return c.json({
+              detail: 'This chat request was cancelled.',
+              error_code: 'chat_request_cancelled',
+              request_id: serverRequestId,
+              failure_stage: 'cancelled',
+            }, 409);
+          }
+          return waitForInFlightChatRequest(
+            c.env.DB,
+            claimRequestId,
+            userId,
+            serverRequestId,
+          );
+        }
+      } else {
+        ownsMonthlyQuotaReservation = Boolean(monthlyReservation);
       }
     }
   } catch (err) {
     console.error('[chat] quota storage unavailable:', err);
-    if (ownsQuotaReservation) {
+    if (ownsMonthlyQuotaReservation && claimRequestId) {
+      await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon)
+        .catch(releaseErr => console.error('[chat] monthly quota compensation failed:', releaseErr));
+      ownsMonthlyQuotaReservation = false;
+      ownsQuotaReservation = false;
+    } else if (ownsQuotaReservation) {
       await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
         .catch(releaseErr => console.error('[chat] quota compensation failed:', releaseErr));
-      await deleteChatRequestClaim(c.env.DB, clientRequestId, userId)
+      await deleteChatRequestClaim(c.env.DB, claimRequestId, userId)
         .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
       ownsQuotaReservation = false;
     }
@@ -2052,9 +2169,17 @@ chatRouter.post('/stream', async (c) => {
     c.header('X-Failure-Stage', 'quota');
     return c.json(
       {
-        detail: 'Rate limit reached. Please wait a minute before sending another message.',
-        error_code: 'chat_rpm_limit',
-        quota: { used: quotaCount, limit: quotaLimit },
+        detail: monthlyQuotaExhausted
+          ? 'You have used all 30 free chat requests for this calendar month. Your allowance resets on the first day of next month.'
+          : 'Rate limit reached. Please wait a minute before sending another message.',
+        error_code: monthlyQuotaExhausted ? 'chat_monthly_limit' : 'chat_rpm_limit',
+        quota: {
+          used: quotaCount,
+          limit: quotaLimit,
+          ...(monthlyQuotaExhausted && monthlyReservation
+            ? { period: monthlyReservation.period }
+            : {}),
+        },
         request_id: serverRequestId,
         failure_stage: 'quota',
       },
@@ -2065,9 +2190,10 @@ chatRouter.post('/stream', async (c) => {
 
   // Helper to release a reserved quota slot on failure paths.
   const releaseQuota = async (): Promise<void> => {
-    if (ownsQuotaReservation) {
-      await releaseClaimQuotaReservation(c.env.DB, clientRequestId, userId, isAnon);
+    if (ownsQuotaReservation || ownsMonthlyQuotaReservation) {
+      await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon);
       ownsQuotaReservation = false;
+      ownsMonthlyQuotaReservation = false;
     }
   };
 
@@ -2733,7 +2859,7 @@ chatRouter.post('/stream', async (c) => {
           lang,
           modelUsed:   actualModel,
           isAnon,
-          requestId: clientRequestId,
+          requestId: claimRequestId,
           responseMetadata: { sourceCard, doneEvent },
           confidenceTier,
           subjectName: body.subject_name,

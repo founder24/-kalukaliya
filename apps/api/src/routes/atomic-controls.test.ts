@@ -7,11 +7,18 @@ import { getPlatformProxy } from 'wrangler';
 import { revokedRtKey, signAccessToken, signRefreshToken } from '../middleware/auth';
 import type { Env } from '../types';
 import { authRouter } from './auth';
-import { anonymousQuotaKey } from '../services/anonymous';
+import {
+  anonymousQuotaKey,
+  currentQuotaMonthPeriod,
+  currentQuotaMinutePeriod,
+} from '../services/anonymous';
 import { adminContentRouter } from './admin-content';
 import {
   chatRouter,
   fetchMatchedChunkContext,
+  getAuthMonthlyQuotaUsage,
+  insertChatRequestClaim,
+  persistCompletedChat,
   releaseQuotaReservation,
   reserveAnonQuota,
   reserveAuthQuota,
@@ -47,6 +54,24 @@ async function trustedAnonHeaders(anonId: string): Promise<Record<string, string
       .map(byte => byte.toString(16).padStart(2, '0'))
       .join(''),
   };
+}
+
+async function createFreeUser(): Promise<string> {
+  const userId = crypto.randomUUID();
+  await env.DB.prepare(
+    `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+     VALUES (?, ?, 'student', 'free', 0)`,
+  ).bind(userId, `${userId}@example.test`).run();
+  return userId;
+}
+
+function previousMonthPeriod(period: string): string {
+  const year = Number(period.slice(0, 4));
+  const month = Number(period.slice(5, 7));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error(`Invalid quota month: ${period}`);
+  }
+  return new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
 }
 
 function migrationStatements(): string[] {
@@ -88,6 +113,169 @@ afterAll(async () => {
 });
 
 describe('atomic quota controls', () => {
+  it('reserves exactly 30 authenticated free claims per UTC month under concurrency', async () => {
+    const userId = await createFreeUser();
+    const firstPeriod = '2026-09';
+    const nextPeriod = '2026-10';
+    const minutePeriod = '2026-09-29T12:00';
+
+    const firstMonth = await Promise.all(
+      Array.from({ length: 40 }, (_, index) => insertChatRequestClaim(
+        env.DB,
+        `month_sep_${index}_${crypto.randomUUID()}`,
+        userId,
+        false,
+        false,
+        minutePeriod,
+        { period: firstPeriod, limit: 30 },
+      )),
+    );
+    expect(firstMonth.filter(Boolean)).toHaveLength(30);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, firstPeriod)).toBe(30);
+
+    const nextMonth = await Promise.all(
+      Array.from({ length: 30 }, (_, index) => insertChatRequestClaim(
+        env.DB,
+        `month_oct_${index}_${crypto.randomUUID()}`,
+        userId,
+        false,
+        false,
+        minutePeriod,
+        { period: nextPeriod, limit: 30 },
+      )),
+    );
+    expect(nextMonth.filter(Boolean)).toHaveLength(30);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, nextPeriod)).toBe(30);
+  });
+
+  it('returns a distinct monthly-limit response and refunds the minute reservation', async () => {
+    const userId = await createFreeUser();
+    const period = currentQuotaMonthPeriod();
+    const minutePeriod = currentQuotaMinutePeriod();
+    const clientRequestId = `monthly_limit_${crypto.randomUUID().replace(/-/g, '')}`;
+    await env.DB.prepare(
+      'INSERT INTO monthly_quota_usage (user_id, period, count) VALUES (?, ?, 30)',
+    ).bind(userId, period).run();
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+
+    const response = await chatRouter.fetch(
+      new Request('https://api.example/stream', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: 'Explain kinetic energy',
+          lang: 'en',
+          client_request_id: clientRequestId,
+        }),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toMatchObject({
+      error_code: 'chat_monthly_limit',
+      quota: { used: 30, limit: 30, period },
+    });
+    const minuteRow = await env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, minutePeriod).first<{ count: number }>();
+    expect(minuteRow?.count ?? 0).toBe(0);
+    const claim = await env.DB.prepare(
+      'SELECT request_id FROM chat_request_claims WHERE request_id = ?',
+    ).bind(clientRequestId).first<{ request_id: string }>();
+    expect(claim).toBeNull();
+  });
+
+  it('frees an authenticated monthly reservation when its owner cancels', async () => {
+    const userId = await createFreeUser();
+    const requestId = `monthly_cancel_${crypto.randomUUID().replace(/-/g, '')}`;
+    const monthPeriod = currentQuotaMonthPeriod();
+    const minutePeriod = currentQuotaMinutePeriod();
+    await env.DB.prepare(
+      `INSERT INTO quota_usage (id, user_id, period, count)
+       VALUES (?, ?, ?, 1)`,
+    ).bind(`${userId}:${minutePeriod}`, userId, minutePeriod).run();
+    const inserted = await insertChatRequestClaim(
+      env.DB,
+      requestId,
+      userId,
+      false,
+      true,
+      minutePeriod,
+      { period: monthPeriod, limit: 30 },
+    );
+    expect(inserted).toBe(true);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, monthPeriod)).toBe(1);
+
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const response = await chatRouter.fetch(
+      new Request('https://api.example/cancel', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ client_request_id: requestId }),
+      }),
+      env,
+    );
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ cancelled: true });
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, monthPeriod)).toBe(0);
+
+    const minuteRow = await env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, minutePeriod).first<{ count: number }>();
+    expect(minuteRow?.count).toBe(0);
+  });
+
+  it('settles against the claim month after the calendar has rolled over', async () => {
+    const userId = await createFreeUser();
+    const currentPeriod = currentQuotaMonthPeriod();
+    const claimPeriod = previousMonthPeriod(currentPeriod);
+    const requestId = `monthly_settle_${crypto.randomUUID().replace(/-/g, '')}`;
+    await env.DB.prepare(
+      'INSERT INTO monthly_quota_usage (user_id, period, count) VALUES (?, ?, 29)',
+    ).bind(userId, claimPeriod).run();
+    const inserted = await insertChatRequestClaim(
+      env.DB,
+      requestId,
+      userId,
+      false,
+      false,
+      currentQuotaMinutePeriod(),
+      { period: claimPeriod, limit: 30 },
+    );
+    expect(inserted).toBe(true);
+
+    await persistCompletedChat(env.DB, {
+      userId,
+      sessionId: `session_${crypto.randomUUID()}`,
+      userMessage: 'Explain inertia',
+      assistantResponse: 'A short answer.',
+      lang: 'en',
+      modelUsed: 'test-model',
+      isAnon: false,
+      requestId,
+      responseMetadata: {},
+      confidenceTier: 'high',
+    });
+
+    const oldMonth = await env.DB.prepare(
+      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, claimPeriod).first<{ count: number }>();
+    expect(oldMonth?.count).toBe(30);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, claimPeriod)).toBe(30);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, currentPeriod)).toBe(0);
+    const claim = await env.DB.prepare(
+      'SELECT status, monthly_period FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string; monthly_period: string }>();
+    expect(claim).toEqual({ status: 'completed', monthly_period: claimPeriod });
+  });
+
   it('allows exactly the anonymous limit under parallel reservations', async () => {
     const anonId = 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const results = await Promise.all(
@@ -280,6 +468,7 @@ describe('atomic quota controls', () => {
 
   it('keeps authenticated chat identity and releases its quota on provider failure', async () => {
     const userId = crypto.randomUUID();
+    const clientRequestId = `failed_auth_${crypto.randomUUID().replace(/-/g, '')}`;
     await env.DB.prepare(
       `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
        VALUES (?, ?, 'student', 'free', 0)`,
@@ -314,7 +503,11 @@ describe('atomic quota controls', () => {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: 'hello', lang: 'en' }),
+        body: JSON.stringify({
+          message: 'hello',
+          lang: 'en',
+          client_request_id: clientRequestId,
+        }),
       }),
       failingEnv,
       context,
@@ -327,6 +520,14 @@ describe('atomic quota controls', () => {
       'SELECT count FROM quota_usage WHERE user_id = ?',
     ).bind(userId).first<{ count: number }>();
     expect(authRow?.count).toBe(0);
+    const monthlyRow = await env.DB.prepare(
+      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, currentQuotaMonthPeriod()).first<{ count: number }>();
+    expect(monthlyRow).toBeNull();
+    const claim = await env.DB.prepare(
+      'SELECT request_id FROM chat_request_claims WHERE request_id = ?',
+    ).bind(clientRequestId).first<{ request_id: string }>();
+    expect(claim).toBeNull();
   });
 
   it('uses the exact metadata passage when a legacy vector has no D1 chunk mirror', async () => {

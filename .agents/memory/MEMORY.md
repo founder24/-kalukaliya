@@ -99,3 +99,4 @@
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
 - [GitHub Actions runner context in job env](github-actions-runner-context-job-env.md) — job-level env can't use `runner` context; causes whole workflow to fail to start (0 jobs), not just a lint warning
 - [Dependabot stale manifest alerts](dependabot-stale-manifest-alerts.md) — alerts don't auto-close when their manifest file is deleted; dismiss via API with reason "inaccurate"; alerts endpoint needs Link-header pagination, not ?page=
+- [Drizzle migration history](drizzle-migration-history.md) — the hand-maintained D1 migration history has no snapshots; generation may emit a full-schema `0000` migration and rewrite the journal.

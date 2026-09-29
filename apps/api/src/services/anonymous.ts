@@ -9,6 +9,7 @@
 export const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 export const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
 export const CHAT_RPM_LIMIT = 6;
+export const FREE_MONTHLY_CHAT_LIMIT = 30;
 export const ANONYMOUS_DAILY_LIMIT = CHAT_RPM_LIMIT;
 export const ANONYMOUS_MONTHLY_LIMIT = CHAT_RPM_LIMIT;
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
@@ -25,6 +26,11 @@ export function currentQuotaPeriod(): string {
 /** Canonical period for the atomic chat allowance (one UTC minute bucket). */
 export function currentQuotaMinutePeriod(): string {
   return new Date().toISOString().slice(0, 16);
+}
+
+/** Calendar-month key for the authenticated free chat allowance, in UTC. */
+export function currentQuotaMonthPeriod(): string {
+  return new Date().toISOString().slice(0, 7);
 }
 
 function cookieValue(cookieHeader: string, name: string): string | null {
