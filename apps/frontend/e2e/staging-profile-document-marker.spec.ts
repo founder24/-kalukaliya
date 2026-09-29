@@ -12,7 +12,8 @@ test.describe('Isolated staging browser gates', () => {
   test('the public Worker gate blocks requests without its secret header', async ({ request }) => {
     const workerUrl = new URL(stagingWorkerUrl!);
     expect(workerUrl.protocol).toBe('https:');
-    expect(workerUrl.hostname).toMatch(/\.workers\.dev$/);
+    expect(workerUrl.hostname).toMatch(/^syrabitworker-staging\.[a-z0-9-]+\.workers\.dev$/);
+    expect(workerUrl.origin).toBe(stagingWorkerUrl);
 
     const response = await request.get(`${stagingWorkerUrl}/health`);
     expect(response.status()).toBe(401);

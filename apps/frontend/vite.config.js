@@ -7,29 +7,21 @@ import codemirrorStubPlugin from './vite-plugins/codemirror-stub.js';
 import sentryReplayStubPlugin from './vite-plugins/sentry-replay-stub.js';
 import modulepreloadInjectPlugin from './vite-plugins/modulepreload-inject.js';
 import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js';
+import {
+  stagingProxyHeaders as buildStagingProxyHeaders,
+  validateStagingViteEnvironment,
+} from './vite-staging-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
+const isStagingE2E = process.env.STAGING_E2E === '1';
+validateStagingViteEnvironment(process.env);
 const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY_URL || 'https://api.syrabit.ai';
-// Local previews use the production-native API Worker by default. Set
-// VITE_BACKEND_URL, BACKEND_PROXY_URL, or VITE_CHAT_API_ORIGIN only when
-// deliberately targeting an isolated staging Worker.
+// Local previews use the production-native API Worker by default. Staging
+// E2E overrides only the server-side proxy target; browser requests stay
+// same-origin so the staging gate token is never bundled or sent by the client.
 const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || BACKEND_TARGET;
-const STAGING_ACCESS_HOST = (process.env.STAGING_ACCESS_HOST || '').toLowerCase();
-
-// The staging gate token is server-only. Require an explicit exact workers.dev
-// host match so it cannot be forwarded to production or another proxy target.
-function stagingProxyHeaders(target) {
-  const token = process.env.STAGING_ACCESS_TOKEN;
-  if (!token || !STAGING_ACCESS_HOST) return {};
-  try {
-    const hostname = new URL(target).hostname.toLowerCase();
-    if (hostname !== STAGING_ACCESS_HOST || !hostname.endsWith('.workers.dev')) return {};
-  } catch {
-    return {};
-  }
-  return { 'X-Syrabit-Staging-Token': token };
-}
+const stagingProxyHeaders = (target) => buildStagingProxyHeaders(target, process.env);
 
 function workerProxyOptions(target) {
   return {
@@ -664,7 +656,9 @@ export default defineConfig(({ mode }) => ({
   },
 
   server: {
-    port: Number.isFinite(parseInt(process.env.PORT, 10)) ? parseInt(process.env.PORT, 10) : 5000,
+    port: isStagingE2E
+      ? 5001
+      : Number.isFinite(parseInt(process.env.PORT, 10)) ? parseInt(process.env.PORT, 10) : 5000,
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {

@@ -98,7 +98,7 @@ name = "syrabit-api-staging"
 workers_dev = false
 
 [env.staging.vars]
-ALLOWED_ORIGINS = "http://localhost:5000"
+ALLOWED_ORIGINS = "http://localhost:5001"
 APP_ENV = "staging"
 WEB_SEARCH_ENABLED = "false"
 REFERRAL_PROGRAM_RUNTIME_ENABLED = "false"
