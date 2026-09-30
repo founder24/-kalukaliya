@@ -632,7 +632,8 @@ if should_run "edge"; then
             -H "User-Agent: Mozilla/5.0 SyrabitTest/1.0"
 
         if [[ "$HTTP_CODE" == "200" ]]; then
-            if echo "$RESPONSE_BODY" | grep -qi '<meta\|<!DOCTYPE\|<html'; then
+            ROOT_BODY_LOWER="${RESPONSE_BODY,,}"
+            if [[ "$ROOT_BODY_LOWER" == *'<meta'* || "$ROOT_BODY_LOWER" == *'<!doctype html'* || "$ROOT_BODY_LOWER" == *'<html'* ]]; then
                 pass_test "frontend / reaches HTTP 200 after ${ROOT_REDIRECTS} same-origin redirect(s) ($ROOT_CURRENT_URL)"
             else
                 fail_test "frontend / destination returned 200 without HTML content" "yes"
