@@ -48,7 +48,7 @@
 - [CF_ACCOUNT_ID alias in embedder](cf-account-id-alias.md) — embedder must use CF_ACCOUNT_ID or CLOUDFLARE_ACCOUNT_ID; using only CF_ACCOUNT_ID caused silent 0-chunk indexing in dev
 - [D1 migration outcome](syrabit-d1-migration.md) — DB UUID, schema FK notes, row counts, performance lessons, cutover gate (API_WORKER_LIVE flag)
 - [Workers AI generation boundary](workers-ai-generation-boundary.md) — Cloud Run generation crosses the authenticated API Worker; keep secret and token limits aligned.
-- [Workers AI abort semantics](workers-ai-abort-semantics.md) — Binding-call rejection and stream-reader cancellation show local cancellation settlement, not provider compute termination.
+- [Workers AI stream lifecycle](workers-ai-abort-semantics.md) — Stop at the terminal SSE marker; reader cancellation still does not prove provider compute termination.
 - [Pages navigation and stylesheet caching](pages-navigation-stylesheet-caching.md) — Keep navigation HTML fresh and the main stylesheet active; stale documents and deferred CSS can break responsive layouts.
 - [Wrangler local integration tests](wrangler-local-integration-tests.md) — getPlatformProxy remote bindings default on; tests must opt out to remain credential-free.
 - [API Worker production deployment](api-worker-production-deployment.md) — Workers AI smoke tests use the workers.dev account slug, and direct Wrangler deploys require Node 22.
@@ -78,7 +78,7 @@
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
 - [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
-- [Chat cancellation state](chat-cancellation-state.md) — quota, cancellation, and persistence must compete through one conditional D1 claim state.
+- [Chat cancellation state](chat-cancellation-state.md) — use immediate stream abort plus bounded D1 tombstone polling, not per-token database reads.
 - [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
 - [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
 - [Production browser verification traps](production-browser-verification.md) — Preserve Vite preload rejections; seed auth fixtures once so logout checks remain valid.
@@ -101,3 +101,4 @@
 - [Dependabot stale manifest alerts](dependabot-stale-manifest-alerts.md) — alerts don't auto-close when their manifest file is deleted; dismiss via API with reason "inaccurate"; alerts endpoint needs Link-header pagination, not ?page=
 - [Drizzle migration history](drizzle-migration-history.md) — preserve applied names; verify parallel histories and clean-database replay before restoring or renumbering SQL.
 - [Backend test isolation](backend-test-isolation.md) — Keep endpoint lifespan mocks and canonical script module identity scoped; avoid replacing `sys.modules` in importer tests.
+- [Live test request fidelity](live-test-request-fidelity.md) — Preserve raw traversal paths and validate every redirect hop before following it.

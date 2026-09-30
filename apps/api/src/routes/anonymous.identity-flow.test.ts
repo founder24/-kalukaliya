@@ -283,6 +283,55 @@ describe('anonymous identity flow', () => {
     }
   });
 
+  it.each([
+    {
+      lang: 'en',
+      message: 'Show me the syllabus',
+      detail: "No published syllabus entries were found for this request, so I can't verify a list. Please share the relevant syllabus text.",
+    },
+    {
+      lang: 'as',
+      message: 'পাঠ্যক্ৰমৰ তালিকা দেখুৱাওক',
+      detail: 'এই অনুৰোধৰ বাবে প্ৰকাশিত পাঠ্যক্ৰমৰ তালিকা পোৱা নগ’ল; সেয়ে সত্যাপিত তালিকা দিব নোৱাৰোঁ। অনুগ্ৰহ কৰি প্ৰাসংগিক পাঠ্যাংশ পঠিয়াওক।',
+    },
+    {
+      lang: 'en',
+      message: 'Show previous year question papers',
+      detail: "No published previous-year question text was found for this request, so I can't verify the paper or its answers. Please share the paper text or exact question.",
+    },
+    {
+      lang: 'as',
+      message: 'পূৰ্বৰ বছৰৰ প্ৰশ্ন কাকত দেখুৱাওক',
+      detail: 'এই অনুৰোধৰ বাবে প্ৰকাশিত পূৰ্বৰ বছৰৰ প্ৰশ্নৰ পাঠ্য পোৱা নগ’ল; সেয়ে প্ৰশ্নকাকত বা উত্তৰ সত্যাপন কৰিব নোৱাৰোঁ। অনুগ্ৰহ কৰি কাকতৰ পাঠ্য বা নিৰ্দিষ্ট প্ৰশ্নটো পঠিয়াওক।',
+    },
+  ])('fails closed for empty authoritative evidence in $lang', async ({ lang, message, detail }) => {
+    const anonId = `anon_${crypto.randomUUID().replace(/-/g, '')}`;
+    const generationCallsBefore = generationCalls;
+    const response = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-anon-id': anonId,
+      },
+      body: JSON.stringify({ message, lang }),
+    }));
+    await Promise.all(background);
+
+    expect(response.status).toBe(422);
+    expect(response.headers.get('X-Failure-Stage')).toBe('authoritative_retrieval');
+    await expect(response.json()).resolves.toMatchObject({
+      detail,
+      error_code: 'authoritative_context_empty',
+      failure_stage: 'authoritative_retrieval',
+    });
+    expect(generationCalls).toBe(generationCallsBefore);
+
+    const quota = await env.DB.prepare(
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
+    ).bind(anonId).first<{ count: number }>();
+    expect(quota?.count ?? 0).toBe(0);
+  });
+
   it('does not generate a current board answer when verified web retrieval is disabled', async () => {
     const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
     env.WEB_SEARCH_ENABLED = 'false';

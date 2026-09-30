@@ -528,15 +528,24 @@ export default function ChatPage() {
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
           return;
         }
-        if (response.status === 422 && errData.error_code === 'curriculum_scope_ambiguous') {
+        const isCurriculumScopeAmbiguous = errData.error_code === 'curriculum_scope_ambiguous';
+        const isAuthoritativeEvidenceMissing = errData.error_code === 'authoritative_context_empty';
+        if (
+          response.status === 422
+          && (isCurriculumScopeAmbiguous || isAuthoritativeEvidenceMissing)
+        ) {
           setMessages((prev) => prev.map((m) =>
             m.id === aiMsgId
               ? {
                   ...m,
-                  content: String(errData.detail || 'Please include both your class and subject.'),
+                  content: String(errData.detail || (
+                    isCurriculumScopeAmbiguous
+                      ? 'Please include both your class and subject.'
+                      : 'I could not verify this request from published curriculum records. Please share the relevant source text.'
+                  )),
                   streaming: false,
                   isAiUnavailable: false,
-                  isCurriculumClarification: true,
+                  isCurriculumClarification: isCurriculumScopeAmbiguous,
                 }
               : m
           ));

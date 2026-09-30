@@ -2,6 +2,17 @@ export const PASS_RULE =
   'A strict majority of samples for each route must meet the target, and the median must be at or below the target.';
 
 export function validateProbeEvents(name, events) {
+  const terminalError = events.find(event => event.event === 'chat_error');
+  if (terminalError) {
+    const details = [
+      typeof terminalError.error_code === 'string' && `code=${terminalError.error_code}`,
+      typeof terminalError.failure_stage === 'string' && `stage=${terminalError.failure_stage}`,
+    ].filter(Boolean);
+    throw new Error(
+      `${name} emitted terminal chat_error${details.length ? ` (${details.join(', ')})` : ''}`,
+    );
+  }
+
   const sourceIndex = events.findIndex(event => event.event === 'source_card');
   const tokenIndex = events.findIndex(event =>
     typeof event.content === 'string' && event.content.length > 0 && !event.done);
@@ -25,6 +36,45 @@ export function validateRouteResult(route, result) {
   if (route === 'web' && (result.web_used !== true || result.web_status !== 'ok')) {
     throw new Error(`Web probe did not return attributed web context: ${JSON.stringify(result)}`);
   }
+}
+
+const FAILED_PROBE_OBSERVATIONS = [
+  'elapsed_ms',
+  'failure_stage',
+  'error_class',
+  'error_code',
+  'tokens_emitted',
+  'terminal_sse_marker_observed',
+  'headers_ms',
+  'source_card_ms',
+  'observed_first_token_ms',
+  'terminal_event_ms',
+  'event_count',
+  'token_events',
+  'output_chars',
+  'terminal_event',
+  'source_type',
+  'rag_path',
+  'web_used',
+  'web_status',
+  'worker_timings_ms',
+];
+
+export function invalidProbeSample(name, targetMs, error, observations = {}) {
+  const preserved = Object.fromEntries(
+    FAILED_PROBE_OBSERVATIONS
+      .filter(key => observations[key] !== undefined)
+      .map(key => [key, observations[key]]),
+  );
+  return {
+    name,
+    // Incomplete or invalid streams remain failed regardless of the observed
+    // first-token time. Keep the measured value separately for diagnosis.
+    first_token_ms: targetMs + 1,
+    target_met: false,
+    probe_error: error,
+    ...preserved,
+  };
 }
 
 export function summarizeRoute(results, targetMs) {

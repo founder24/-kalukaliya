@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   buildReport,
   failedRouteMessages,
+  invalidProbeSample,
   recurringOutlierWarnings,
   summarizeRoute,
   validateProbeEvents,
@@ -81,6 +82,67 @@ test('one invalid stream is a failed sample without aborting the majority rule',
   assert.equal(summary.passed, true);
 });
 
+test('invalid streams preserve observed timing but cannot become passing samples', () => {
+  const failed = invalidProbeSample(
+    'direct_chapter_rag_1',
+    targetMs,
+    'direct emitted terminal chat_error',
+    {
+      elapsed_ms: 5_100,
+      failure_stage: 'provider_stream',
+      error_class: 'TimeoutError',
+      error_code: 'timeout',
+      tokens_emitted: true,
+      terminal_sse_marker_observed: true,
+      headers_ms: 1800,
+      source_card_ms: 2100,
+      observed_first_token_ms: 2800,
+      terminal_event_ms: 5100,
+      event_count: 31,
+      token_events: 28,
+      output_chars: 162,
+      terminal_event: 'chat_error:provider_stream_failed:provider_stream',
+      worker_timings_ms: { quota_ms: 300, retrieval_ms: 900, generation_ms: 3000 },
+      rag_path: 'chapter_direct',
+      student_prompt: 'private prompt',
+      generated_completion: 'private completion',
+      credential: 'private credential',
+      token_content: 'private token',
+      first_token_ms: 100,
+      target_met: true,
+    },
+  );
+
+  assert.equal(failed.first_token_ms, targetMs + 1);
+  assert.equal(failed.target_met, false);
+  assert.equal(failed.observed_first_token_ms, 2800);
+  assert.equal(failed.elapsed_ms, 5_100);
+  assert.equal(failed.failure_stage, 'provider_stream');
+  assert.equal(failed.error_class, 'TimeoutError');
+  assert.equal(failed.error_code, 'timeout');
+  assert.equal(failed.tokens_emitted, true);
+  assert.equal(failed.terminal_sse_marker_observed, true);
+  assert.equal(failed.student_prompt, undefined);
+  assert.equal(failed.generated_completion, undefined);
+  assert.equal(failed.credential, undefined);
+  assert.equal(failed.token_content, undefined);
+  assert.equal(failed.event_count, 31);
+  assert.equal(failed.output_chars, 162);
+  assert.deepEqual(failed.worker_timings_ms, {
+    quota_ms: 300,
+    retrieval_ms: 900,
+    generation_ms: 3000,
+  });
+
+  const summary = summarizeRoute([
+    failed,
+    sample('direct_chapter_rag_2', 1800),
+    sample('direct_chapter_rag_3', 1900),
+  ], targetMs);
+  assert.equal(summary.passing_samples, 2);
+  assert.equal(summary.passed, true);
+});
+
 test('an incomplete sentinel sample does not create a recurring measured-latency warning', () => {
   const current = reportFor([1500, 1700, 2100], [targetMs + 1, 1700, 1900]);
   const previous = reportFor([1500, 1600, 2200], [targetMs + 1, 1700, 1900]);
@@ -137,6 +199,22 @@ test('SSE order and native Workers AI model remain required', () => {
       { ...validEvents[2], model: 'gemini-2.5-flash' },
     ]),
     /native Workers AI model/,
+  );
+});
+
+test('terminal chat errors report their code and failure stage', () => {
+  assert.throws(
+    () => validateProbeEvents('direct', [
+      { event: 'source_card' },
+      { content: 'Partial answer', done: false },
+      {
+        event: 'chat_error',
+        done: true,
+        error_code: 'provider_stream_failed',
+        failure_stage: 'provider_stream',
+      },
+    ]),
+    /direct emitted terminal chat_error \(code=provider_stream_failed, stage=provider_stream\)/,
   );
 });
 

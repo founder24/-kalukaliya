@@ -88,6 +88,33 @@ describe('student chat curriculum scope', () => {
     expect(buildEmbeddingQuery('এইটো কেনেকৈ বুজিম', 'as')).toBe('এইটো কেনেকৈ বুজিম');
   });
 
+  it('sets evidence, relevance, completeness, and clarity rules in both response languages', () => {
+    const english = buildSystemPrompt({
+      lang: 'en',
+      contextText: '',
+      history: '',
+      question: 'List the syllabus and its exam dates.',
+    });
+    const assamese = buildSystemPrompt({
+      lang: 'as',
+      contextText: '',
+      history: '',
+      question: 'পাঠ্যক্ৰম আৰু পৰীক্ষাৰ তাৰিখৰ তালিকা দিয়া।',
+    });
+
+    expect(english).toContain('For textbook- or syllabus-specific claims, use relevant Curriculum Context');
+    expect(english).toContain('do not invent board-specific facts, chapter lists, dates, or PYQ text');
+    expect(english).toContain('Answer every explicit part and stated constraint');
+    expect(english).toContain('Keep every sentence relevant');
+    expect(english).toContain('Use plain English and briefly explain necessary technical terms');
+
+    expect(assamese).toContain('পাঠ্যক্ৰম-নিৰ্দিষ্ট দাবীৰ বাবে প্ৰাসংগিক পাঠ্যক্ৰমৰ প্ৰসংগ ব্যৱহাৰ কৰা');
+    expect(assamese).toContain('অধ্যায়ৰ তালিকা, তাৰিখ বা PYQ-ৰ পাঠ্য উদ্ভাৱন নকৰিবা');
+    expect(assamese).toContain('প্ৰশ্নৰ প্ৰতিটো স্পষ্ট অংশ আৰু উল্লেখ কৰা চৰ্তৰ উত্তৰ দিয়া');
+    expect(assamese).toContain('উত্তৰ প্ৰাসংগিক ৰাখিবা');
+    expect(assamese).toContain('সহজ, স্পষ্ট অসমীয়া ব্যৱহাৰ কৰা');
+  });
+
   it('separates authoritative curriculum evidence from supplementary web sources', () => {
     const prompt = buildSystemPrompt({
       lang: 'en',

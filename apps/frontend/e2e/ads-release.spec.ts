@@ -239,6 +239,57 @@ function attachProductionDiagnostics(page: Page) {
   return { pageErrors, requestFailures, staleAssets, consoleErrors, requestHosts };
 }
 
+function extractHashedAssetReferences(html: string, documentUrl: string): string[] {
+  const assets = new Set<string>();
+  for (const match of html.matchAll(/\s(?:src|href)=["'](\/assets\/[^"'?#]+)(?:\?[^"']*)?["']/gi)) {
+    assets.add(new URL(match[1], documentUrl).toString());
+  }
+  return [...assets];
+}
+
+async function checkHashedAssetReferences(
+  assetUrls: string[],
+  fetchStatus: (assetUrl: string) => Promise<number>,
+) {
+  return Promise.all(assetUrls.map(async (assetUrl) => {
+    try {
+      return { assetUrl, status: await fetchStatus(assetUrl) };
+    } catch (error) {
+      return {
+        assetUrl,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+}
+
+test('finds and checks every distinct root-relative hashed asset in the document', async () => {
+  const documentUrl = 'https://syrabit.ai/ahsec/physics/laws-of-motion';
+  const html = [
+    '<script type="module" src="/assets/index-a1b2c3d4.js"></script>',
+    '<link rel="modulepreload" href="/assets/vendor-e5f6g7h8.js">',
+    '<link rel="stylesheet" href="/assets/index-i9j0k1l2.css?build=1">',
+    '<script src="/assets/index-a1b2c3d4.js"></script>',
+    '<script src="https://pagead2.googlesyndication.com/ads.js"></script>',
+  ].join('');
+  const assetUrls = extractHashedAssetReferences(html, documentUrl);
+  const requested: string[] = [];
+  const checks = await checkHashedAssetReferences(assetUrls, async (assetUrl) => {
+    requested.push(assetUrl);
+    return assetUrl.endsWith('/assets/vendor-e5f6g7h8.js') ? 404 : 200;
+  });
+
+  expect(assetUrls).toEqual([
+    'https://syrabit.ai/assets/index-a1b2c3d4.js',
+    'https://syrabit.ai/assets/vendor-e5f6g7h8.js',
+    'https://syrabit.ai/assets/index-i9j0k1l2.css',
+  ]);
+  expect(requested).toEqual(assetUrls);
+  expect(checks.filter(({ status, error }) => error || (status ?? 0) >= 400)).toEqual([
+    { assetUrl: 'https://syrabit.ai/assets/vendor-e5f6g7h8.js', status: 404 },
+  ]);
+});
+
 test.describe('live production AdSense smoke', () => {
   test.use({ serviceWorkers: 'block' });
 
@@ -248,14 +299,46 @@ test.describe('live production AdSense smoke', () => {
   );
 
   test('reports the exact route, request hosts, slot metadata, and stale assets', async ({ page }) => {
+    const attempt = Number(process.env.E2E_ADS_ASSET_SMOKE_ATTEMPT || '1');
+    if (!Number.isSafeInteger(attempt) || attempt < 1) {
+      throw new Error('E2E_ADS_ASSET_SMOKE_ATTEMPT must be a positive integer');
+    }
+    const routeUrl = new URL(PRODUCTION_ROUTE, process.env.BASE_URL || 'https://syrabit.ai');
+    routeUrl.searchParams.set('__pages_asset_smoke', `${attempt}-${Date.now()}`);
     const diagnostics = attachProductionDiagnostics(page);
-    const response = await page.goto(PRODUCTION_ROUTE, { waitUntil: 'domcontentloaded' });
+    const response = await page.goto(routeUrl.toString(), { waitUntil: 'domcontentloaded' });
+    const html = response ? await response.text() : '';
+    const hashedAssetUrls = extractHashedAssetReferences(html, response?.url() || routeUrl.toString());
+    const hashedAssetChecks = await checkHashedAssetReferences(
+      hashedAssetUrls,
+      async (assetUrl) => {
+        const cacheBustedAssetUrl = new URL(assetUrl);
+        cacheBustedAssetUrl.searchParams.set('__pages_asset_smoke', `${attempt}-${Date.now()}`);
+        const assetResponse = await page.context().request.get(cacheBustedAssetUrl.toString(), {
+          timeout: 20_000,
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        });
+        return assetResponse.status();
+      },
+    );
+    const missingHashedAssets = hashedAssetChecks.filter(
+      ({ status, error }) => Boolean(error) || (status ?? 0) >= 400,
+    );
     await page.waitForTimeout(3500);
 
     const slots = await readSlots(page);
     const report = JSON.stringify({
-      route: page.url(),
+      attempt,
+      route: routeUrl.toString(),
+      finalRoute: page.url(),
+      routeStatus: response?.status() ?? null,
       requestHosts: [...diagnostics.requestHosts],
+      hashedAssetUrls,
+      hashedAssetChecks,
+      missingHashedAssets,
       slots,
       pageErrors: diagnostics.pageErrors,
       requestFailures: diagnostics.requestFailures,
@@ -264,6 +347,8 @@ test.describe('live production AdSense smoke', () => {
     }, null, 2);
 
     expect(response?.status(), report).toBeLessThan(400);
+    expect(hashedAssetUrls.length, report).toBeGreaterThan(0);
+    expect(missingHashedAssets, report).toEqual([]);
     expect(diagnostics.staleAssets, report).toEqual([]);
     expect(diagnostics.pageErrors, report).toEqual([]);
     expect(slots.length, report).toBeGreaterThan(0);

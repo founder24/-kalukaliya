@@ -9,6 +9,8 @@
     "deploy:staging": "wrangler deploy --env staging",
     "type-check": "tsc --noEmit",
     "smoke:ai-cancellation": "node scripts/ai-cancellation-smoke.mjs",
+    "eval:chat-rag": "node scripts/chat-rag-benchmark.mjs",
+    "test:chat-rag-eval": "vitest run scripts/chat-rag-benchmark.test.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply syrabit-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply syrabit-db --remote",

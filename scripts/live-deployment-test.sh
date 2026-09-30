@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# SYRABIT COMPREHENSIVE LIVE DEPLOYMENT TEST
+# SYRABIT LIVE DEPLOYMENT TEST
 # ===========================================================================
 #
-# Tests all layers of the live production deployment:
+# Tests selected layers of the live production deployment:
 #   - API Worker (Cloudflare Workers + D1)
 #   - Frontend/Edge (Cloudflare Workers + Pages)
+# The default categories are read-only and exclude auth, chat, payments, admin,
+# and webhook probes. Select those categories explicitly when appropriate.
 #
 # Usage:
 #   ./scripts/live-deployment-test.sh
@@ -23,7 +25,10 @@ BACKEND_URL="https://api.syrabit.ai"
 FRONTEND_URL="https://syrabit.ai"
 VERBOSE=0
 CATEGORIES=""
-ALL_CATEGORIES="health,auth,content,chat,seo,payments,admin,edge,security,performance,webhook"
+AVAILABLE_CATEGORIES="health,auth,content,chat,seo,payments,admin,edge,security,performance,webhook"
+# Safe default: read-only checks only. Auth, chat, payment, admin, and webhook
+# probes require explicit category selection.
+DEFAULT_CATEGORIES="health,content,seo,edge,security,performance"
 
 # --- Counters ---
 TOTAL=0
@@ -56,7 +61,9 @@ show_help() {
     echo "  --verbose           Show detailed curl output"
     echo "  --category LIST / --categories LIST"
     echo "                      Comma-separated categories to run"
-    echo "                      Available: $ALL_CATEGORIES"
+    echo "                      Available: $AVAILABLE_CATEGORIES"
+    echo "                      Safe default: $DEFAULT_CATEGORIES"
+    echo "                      Auth/chat/payment/admin/webhook probes are opt-in."
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
@@ -78,7 +85,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$CATEGORIES" ]]; then
-    CATEGORIES="$ALL_CATEGORIES"
+    CATEGORIES="$DEFAULT_CATEGORIES"
 fi
 
 # --- Utility Functions ---
@@ -180,18 +187,35 @@ if should_run "health"; then
         fail_test "/health returned HTTP $HTTP_CODE (expected 200)" "yes"
     fi
 
-    # GET /health/deep - expect 200 or 503
-    do_request GET "$BACKEND_URL/health/deep"
-    verbose "Status: $HTTP_CODE, Body: ${RESPONSE_BODY:0:200}"
-    if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "503" ]]; then
-        # Verify JSON response
-        if echo "$RESPONSE_BODY" | python3 -m json.tool >/dev/null 2>&1 || echo "$RESPONSE_BODY" | grep -q '{'; then
-            pass_test "/health/deep returns $HTTP_CODE with JSON response"
+    # The public edge aggregator performs the deep probe with its service secret.
+    do_request GET "$BACKEND_URL/health/full"
+    if [[ "$HTTP_CODE" == "200" ]]; then
+        FULL_HEALTH_STATUS=$(echo "$RESPONSE_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status", ""))' 2>/dev/null || true)
+        if [[ "$FULL_HEALTH_STATUS" == "healthy" ]]; then
+            pass_test "/health/full reports healthy"
         else
-            warn_test "/health/deep returns $HTTP_CODE but response is not JSON"
+            fail_test "/health/full returned 200 with unexpected status '${FULL_HEALTH_STATUS:-missing}'" "yes"
         fi
+    elif [[ "$HTTP_CODE" == "503" ]]; then
+        fail_test "/health/full reports degraded service" "yes"
+    elif [[ "$HTTP_CODE" == "404" ]]; then
+        warn_test "/health/full is not exposed by this backend (optional)"
     else
-        fail_test "/health/deep returned HTTP $HTTP_CODE (expected 200 or 503)"
+        fail_test "/health/full returned HTTP $HTTP_CODE (expected 200)"
+    fi
+
+    # /health/deep is protected by EDGE_SHARED_SECRET. An external 401 is
+    # expected; do not accept public health data as a substitute.
+    do_request GET "$BACKEND_URL/health/deep"
+    verbose "Status: $HTTP_CODE"
+    if [[ "$HTTP_CODE" == "401" ]]; then
+        pass_test "/health/deep requires authorization (401)"
+    elif [[ "$HTTP_CODE" == "404" ]]; then
+        warn_test "/health/deep is not exposed by this backend (service-boundary check unavailable)"
+    elif [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "503" ]]; then
+        fail_test "/health/deep exposed protected health data without authorization" "yes"
+    else
+        fail_test "/health/deep returned HTTP $HTTP_CODE (expected protected 401)"
     fi
 
     # GET /health/circuit-breakers - expect 200
@@ -204,7 +228,7 @@ if should_run "health"; then
             warn_test "/health/circuit-breakers returns 200 but not JSON"
         fi
     elif [[ "$HTTP_CODE" == "404" ]]; then
-        warn_test "/health/circuit-breakers not found (may not be deployed)"
+        warn_test "/health/circuit-breakers is optional and absent (404; informational)"
     else
         fail_test "/health/circuit-breakers returned HTTP $HTTP_CODE (expected 200)"
     fi
@@ -339,7 +363,7 @@ if should_run "content"; then
     # Cache-hit verification: second identical request should be faster or show cache indicator.
     # Check for X-Cache, CF-Cache-Status, or Age headers that confirm caching is active.
     do_request GET "$BACKEND_URL/api/v1/content/library-bundle"
-    local cache_indicator=""
+    cache_indicator=""
     cache_indicator=$(echo "$RESPONSE_HEADERS" | grep -iE "^(x-cache|cf-cache-status|age|x-cache-status):" | head -1 || true)
     if [[ -n "$cache_indicator" ]]; then
         pass_test "Cache indicator header present on library-bundle: $(echo "$cache_indicator" | tr -d '\r')"
@@ -349,7 +373,7 @@ if should_run "content"; then
 
     # Second request to verify cache works end-to-end (Age should increment or HIT)
     do_request GET "$BACKEND_URL/api/v1/content/library-bundle"
-    local cf_cache_status=""
+    cf_cache_status=""
     cf_cache_status=$(echo "$RESPONSE_HEADERS" | grep -i "^cf-cache-status:" | tr -d '\r' | awk '{print $2}' || true)
     if [[ "$cf_cache_status" == "HIT" ]]; then
         pass_test "CF-Cache-Status: HIT on second library-bundle request (cache warm)"
@@ -366,9 +390,9 @@ if should_run "content"; then
     #  2. Verify the response body is valid (not empty/stale placeholder)
     #  3. Second identical busted URL → should be MISS again (unique param, no KV warmth)
     #     This proves CF is not incorrectly caching query-param variants.
-    local CACHE_BUST="cache_bust_$(date +%s)_${RANDOM}"
+    CACHE_BUST="cache_bust_$(date +%s)_${RANDOM}"
     do_request GET "$BACKEND_URL/api/v1/content/library-bundle?${CACHE_BUST}=1"
-    local bust_status=""
+    bust_status=""
     bust_status=$(echo "$RESPONSE_HEADERS" | grep -i "^cf-cache-status:" | tr -d '\r' | awk '{print $2}' || true)
 
     if [[ "$bust_status" == "HIT" ]]; then
@@ -377,17 +401,17 @@ if should_run "content"; then
         pass_test "Cache invalidation: busted URL returned ${bust_status} (not HIT) — fresh content served"
     elif [[ -z "$bust_status" ]]; then
         # No CF header — backend direct or cache headers stripped; validate body freshness instead
-        if [[ "$RESPONSE_CODE" == "200" ]] && echo "$RESPONSE_BODY" | grep -q '"boards"'; then
+        if [[ "$HTTP_CODE" == "200" ]] && echo "$RESPONSE_BODY" | grep -q '"boards"'; then
             pass_test "Cache invalidation: busted URL returned fresh content (200, boards present)"
         else
-            warn_test "Cache invalidation: no CF-Cache-Status header and body check inconclusive (HTTP ${RESPONSE_CODE})"
+            warn_test "Cache invalidation: no CF-Cache-Status header and body check inconclusive (HTTP ${HTTP_CODE})"
         fi
     else
         warn_test "Cache invalidation: unexpected CF-Cache-Status '${bust_status}' on busted URL"
     fi
 
     # Deploy-after-invalidation simulation: purge via Cache-Control: no-cache and re-fetch
-    local purge_code=""
+    purge_code=""
     purge_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
         -H "Cache-Control: no-cache" \
         -H "Pragma: no-cache" \
@@ -600,17 +624,70 @@ if should_run "edge"; then
     echo -e "${BOLD}--- [edge] Edge Worker / Frontend ---${NC}"
     echo ""
 
-    # GET / - expect 200 with HTML
-    do_request GET "$FRONTEND_URL/" \
-        -H "User-Agent: Mozilla/5.0 SyrabitTest/1.0"
-    if [[ "$HTTP_CODE" == "200" ]]; then
-        if echo "$RESPONSE_BODY" | grep -qi '<meta\|<!DOCTYPE\|<html'; then
-            pass_test "frontend / returns 200 with HTML content"
-        else
-            warn_test "frontend / returns 200 but may not contain expected HTML"
+    ROOT_CURRENT_URL="${FRONTEND_URL%/}/"
+    ROOT_REDIRECTS=0
+    ROOT_RESULT="pending"
+    while [[ "$ROOT_REDIRECTS" -le 5 ]]; do
+        do_request GET "$ROOT_CURRENT_URL" \
+            -H "User-Agent: Mozilla/5.0 SyrabitTest/1.0"
+
+        if [[ "$HTTP_CODE" == "200" ]]; then
+            ROOT_BODY_LOWER="${RESPONSE_BODY,,}"
+            if [[ "$ROOT_BODY_LOWER" == *'<meta'* || "$ROOT_BODY_LOWER" == *'<!doctype html'* || "$ROOT_BODY_LOWER" == *'<html'* ]]; then
+                pass_test "frontend / reaches HTTP 200 after ${ROOT_REDIRECTS} same-origin redirect(s) ($ROOT_CURRENT_URL)"
+            else
+                fail_test "frontend / destination returned 200 without HTML content" "yes"
+            fi
+            ROOT_RESULT="done"
+            break
         fi
-    else
-        fail_test "frontend / returned $HTTP_CODE (expected 200)"
+
+        if [[ "$HTTP_CODE" != "301" && "$HTTP_CODE" != "302" && "$HTTP_CODE" != "303" && "$HTTP_CODE" != "307" && "$HTTP_CODE" != "308" ]]; then
+            fail_test "frontend / final response returned $HTTP_CODE (expected 200 after redirects)" "yes"
+            ROOT_RESULT="done"
+            break
+        fi
+
+        ROOT_LOCATION=$(printf '%s\n' "$RESPONSE_HEADERS" | grep -i '^location:' | tail -1 | cut -d: -f2- | tr -d '\r' | sed 's/^[[:space:]]*//')
+        if [[ -z "$ROOT_LOCATION" ]]; then
+            fail_test "frontend / returned HTTP $HTTP_CODE without a Location header" "yes"
+            ROOT_RESULT="done"
+            break
+        fi
+
+        if ! ROOT_NEXT_URL=$(python3 - "$FRONTEND_URL" "$ROOT_CURRENT_URL" "$ROOT_LOCATION" <<'PY'
+import sys
+from urllib.parse import urljoin, urlsplit
+
+def origin(value):
+    parsed = urlsplit(value)
+    scheme = parsed.scheme.lower()
+    if scheme not in ('http', 'https') or not parsed.hostname:
+        return None
+    port = parsed.port or (443 if scheme == 'https' else 80)
+    return (scheme, parsed.hostname.lower(), port)
+
+try:
+    base, current, location = sys.argv[1:]
+    target = urljoin(current, location)
+    if origin(base) is not None and origin(base) == origin(target):
+        print(target)
+    else:
+        sys.exit(1)
+except ValueError:
+    sys.exit(1)
+PY
+); then
+            fail_test "frontend / redirect points outside the configured origin" "yes"
+            ROOT_RESULT="done"
+            break
+        fi
+
+        ROOT_CURRENT_URL="$ROOT_NEXT_URL"
+        ROOT_REDIRECTS=$((ROOT_REDIRECTS + 1))
+    done
+    if [[ "$ROOT_RESULT" == "pending" ]]; then
+        fail_test "frontend / exceeded the 5-redirect limit" "yes"
     fi
 
     # GET /chat - SPA routing (may redirect to /chat/ with trailing slash)
@@ -721,21 +798,11 @@ if should_run "security"; then
     fi
 
     # Path traversal test
-    do_request GET "$BACKEND_URL/api/v1/content/render/../../../etc/passwd"
+    do_request GET "$BACKEND_URL/api/v1/content/render/../../../etc/passwd" --path-as-is
     if [[ "$HTTP_CODE" == "400" || "$HTTP_CODE" == "404" || "$HTTP_CODE" == "422" ]]; then
         pass_test "path traversal blocked (returned $HTTP_CODE)"
     else
         fail_test "path traversal NOT blocked (returned $HTTP_CODE, expected 400)" "yes"
-    fi
-
-    # Retired webhook endpoint cannot accept any provider callback.
-    do_request POST "$BACKEND_URL/api/webhooks/razorpay" \
-        -H "Content-Type: application/json" \
-        -d '{"event":"payment.captured","payload":{}}'
-    if [[ "$HTTP_CODE" == "410" || "$HTTP_CODE" == "404" ]]; then
-        pass_test "webhook is retired (returned $HTTP_CODE)"
-    else
-        fail_test "webhook returned $HTTP_CODE (expected 404 or 410)" "yes"
     fi
 
     # Check error responses don't leak stack traces
