@@ -13,6 +13,7 @@ import {
   currentQuotaMinutePeriod,
 } from '../services/anonymous';
 import { adminContentRouter } from './admin-content';
+import { assertD1MigrationLedgerMatchesFiles } from '../db/migration-ledger-contract.mjs';
 import {
   chatRouter,
   fetchMatchedChunkContext,
@@ -119,6 +120,31 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await disposeProxy?.();
+});
+
+describe('production D1 migration ledger guard', () => {
+  it('accepts applied names that exist and leaves new tracked migrations pending', () => {
+    const result = assertD1MigrationLedgerMatchesFiles(
+      ['0036_monthly_chat_claim_fields.sql'],
+      [
+        '0036_monthly_chat_claim_fields.sql',
+        '0037_monthly_free_chat_quota.sql',
+      ],
+    );
+
+    expect(result).toEqual({ appliedMigrationCount: 1 });
+  });
+
+  it('fails when an applied migration identity is missing after a rename or removal', () => {
+    expect(() => assertD1MigrationLedgerMatchesFiles(
+      ['0036_monthly_chat_claim_fields.sql'],
+      ['0036_replaced_with_a_different_identity.sql'],
+    )).toThrow(
+      'Production D1 has applied migration identities with no matching tracked SQL files: '
+      + '0036_monthly_chat_claim_fields.sql. Restore the exact filenames or reconcile the production ledger '
+      + 'before release; refusing to apply pending migrations.',
+    );
+  });
 });
 
 describe('atomic quota controls', () => {
