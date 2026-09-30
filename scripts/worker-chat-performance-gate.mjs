@@ -38,6 +38,39 @@ export function validateRouteResult(route, result) {
   }
 }
 
+const FAILED_PROBE_OBSERVATIONS = [
+  'headers_ms',
+  'source_card_ms',
+  'observed_first_token_ms',
+  'terminal_event_ms',
+  'event_count',
+  'token_events',
+  'output_chars',
+  'terminal_event',
+  'source_type',
+  'rag_path',
+  'web_used',
+  'web_status',
+  'worker_timings_ms',
+];
+
+export function invalidProbeSample(name, targetMs, error, observations = {}) {
+  const preserved = Object.fromEntries(
+    FAILED_PROBE_OBSERVATIONS
+      .filter(key => observations[key] !== undefined)
+      .map(key => [key, observations[key]]),
+  );
+  return {
+    name,
+    // Incomplete or invalid streams remain failed regardless of the observed
+    // first-token time. Keep the measured value separately for diagnosis.
+    first_token_ms: targetMs + 1,
+    target_met: false,
+    probe_error: error,
+    ...preserved,
+  };
+}
+
 export function summarizeRoute(results, targetMs) {
   const values = results.map(result => result.first_token_ms).sort((a, b) => a - b);
   const passingSamples = values.filter(value => value <= targetMs).length;

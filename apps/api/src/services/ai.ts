@@ -192,7 +192,8 @@ export function parseSseLine(line: string): string | null {
 
 function isSseDoneLine(line: string): boolean {
   const trimmed = line.trim();
-  return trimmed.startsWith('data:') && trimmed.slice(5).trim() === '[DONE]';
+  return trimmed === '[DONE]'
+    || (trimmed.startsWith('data:') && trimmed.slice(5).trim() === '[DONE]');
 }
 
 /**

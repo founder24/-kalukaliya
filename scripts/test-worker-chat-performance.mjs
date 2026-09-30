@@ -17,6 +17,7 @@ import { writeFile } from 'node:fs/promises';
 import {
   buildReport,
   failedRouteMessages,
+  invalidProbeSample,
   validateProbeEvents,
   validateRouteResult,
 } from './worker-chat-performance-gate.mjs';
@@ -88,6 +89,33 @@ async function probe(name, body) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   const started = performance.now();
+  const events = [];
+  let headersMs = null;
+  let firstSourceCardMs = null;
+  let firstTokenMs = null;
+  let tokenEvents = 0;
+  let outputChars = 0;
+  let terminalEvent = null;
+  let terminalEventMs = null;
+  let observedSourceCard = null;
+  let workerTimingsMs = null;
+  const observations = () => ({
+    ...(headersMs !== null && { headers_ms: Math.round(headersMs) }),
+    ...(firstSourceCardMs !== null && { source_card_ms: Math.round(firstSourceCardMs) }),
+    ...(firstTokenMs !== null && { observed_first_token_ms: Math.round(firstTokenMs) }),
+    ...(terminalEventMs !== null && { terminal_event_ms: Math.round(terminalEventMs) }),
+    event_count: events.length,
+    token_events: tokenEvents,
+    output_chars: outputChars,
+    ...(terminalEvent !== null && { terminal_event: terminalEvent }),
+    ...(observedSourceCard && {
+      source_type: observedSourceCard.source_type,
+      rag_path: observedSourceCard.rag_path,
+      web_used: observedSourceCard.web_used,
+      web_status: observedSourceCard.web_status,
+    }),
+    ...(workerTimingsMs && { worker_timings_ms: workerTimingsMs }),
+  });
   try {
     const response = await fetch(`${origin}/api/v1/chat/stream`, {
       method: 'POST',
@@ -98,14 +126,11 @@ async function probe(name, body) {
       }),
       signal: controller.signal,
     });
-    const headersMs = performance.now() - started;
+    headersMs = performance.now() - started;
     if (!response.ok || !response.body) {
       throw new Error(`${name} returned HTTP ${response.status}: ${await response.text()}`);
     }
 
-    const events = [];
-    let firstSourceCardMs = null;
-    let firstTokenMs = null;
     let buffer = '';
     const decoder = new TextDecoder();
     for await (const chunk of response.body) {
@@ -118,9 +143,21 @@ async function probe(name, body) {
         events.push(event);
         if (event.event === 'source_card' && firstSourceCardMs === null) {
           firstSourceCardMs = performance.now() - started;
+          observedSourceCard = event;
         }
         if (typeof event.content === 'string' && event.content.length > 0 && !event.done && firstTokenMs === null) {
           firstTokenMs = performance.now() - started;
+        }
+        if (typeof event.content === 'string' && event.content.length > 0 && !event.done) {
+          tokenEvents += 1;
+          outputChars += event.content.length;
+        }
+        if (event.event === 'chat_error' || event.event === 'syrabit_done') {
+          terminalEvent = event.event === 'chat_error'
+            ? `${event.event}:${event.error_code ?? 'unknown'}:${event.failure_stage ?? 'unknown'}`
+            : event.event;
+          terminalEventMs = performance.now() - started;
+          workerTimingsMs = event.timings_ms ?? event.route_trace?.timings_ms ?? workerTimingsMs;
         }
       }
     }
@@ -132,6 +169,9 @@ async function probe(name, body) {
       headers_ms: Math.round(headersMs),
       source_card_ms: Math.round(firstSourceCardMs ?? 0),
       first_token_ms: Math.round(firstTokenMs),
+      token_events: tokenEvents,
+      output_chars: outputChars,
+      event_count: events.length,
       target_met: firstTokenMs <= targetMs,
       total_ms: done?.latency_ms,
       source_type: sourceCard?.source_type,
@@ -145,31 +185,47 @@ async function probe(name, body) {
       model: done?.model,
     };
     return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const enriched = new Error(message);
+    enriched.cause = error;
+    enriched.probeDiagnostics = observations();
+    throw enriched;
   } finally {
     clearTimeout(timer);
   }
 }
 
 async function collectProbeSample(route, name, body) {
+  let result;
   try {
-    const result = await probe(name, body);
+    result = await probe(name, body);
     validateRouteResult(route, result);
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const observations = error && typeof error === 'object' && error.probeDiagnostics
+      ? error.probeDiagnostics
+      : result
+        ? {
+            headers_ms: result.headers_ms,
+            source_card_ms: result.source_card_ms,
+            observed_first_token_ms: result.first_token_ms,
+            token_events: result.token_events,
+            output_chars: result.output_chars,
+            event_count: result.event_count,
+            source_type: result.source_type,
+            rag_path: result.rag_path,
+            web_used: result.web_used,
+            web_status: result.web_status,
+            worker_timings_ms: result.worker_timings_ms,
+          }
+        : {};
+    const failed = invalidProbeSample(name, targetMs, message, observations);
     console.error(
-      `::warning title=Chat probe sample failed::${name}: ${message}`,
+      `::warning title=Chat probe sample failed::${name}: ${message}; observed=${JSON.stringify(observations)}`,
     );
-    return {
-      name,
-      // Count an invalid or incomplete stream as a failed sample while still
-      // collecting the remaining samples needed by the strict-majority rule.
-      first_token_ms: targetMs + 1,
-      target_met: false,
-      probe_error: message,
-      web_used: false,
-      web_status: 'error',
-    };
+    return failed;
   }
 }
 
