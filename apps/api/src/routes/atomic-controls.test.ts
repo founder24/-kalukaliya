@@ -103,6 +103,15 @@ beforeAll(async () => {
     APP_ENV: 'test',
   };
 
+  const migrationDirectory = path.join(API_ROOT, 'drizzle/migrations');
+  const migrationFiles = fs.readdirSync(migrationDirectory)
+    .filter(file => file.endsWith('.sql'))
+    .sort();
+  expect(migrationFiles).toEqual(expect.arrayContaining([
+    '0036_monthly_chat_claim_fields.sql',
+    '0037_monthly_free_chat_quota.sql',
+  ]));
+
   for (const statement of migrationStatements()) {
     await env.DB.prepare(statement).run();
   }
