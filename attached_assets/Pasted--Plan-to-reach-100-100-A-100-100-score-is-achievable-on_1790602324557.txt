@@ -1,0 +1,66 @@
+## Plan to reach 100/100
+
+A 100/100 score is achievable only when **every required check passes on the same release candidate**, with no skipped or blocked flows. Chat accuracy also needs an approved answer set; it can’t be proved from code review or a green workflow alone. I’ll target all production changes through staging first—no production D1, RAG, Vectorize, profile, chat, or staff writes.
+
+### 1. Establish a clean, testable baseline
+- Reconcile deployed `main` (`9287139a`), remote PR head (`d3d89484`), and workspace `HEAD` (`d1146ede`).
+- Remove generated Wrangler artifacts from the change set and ensure the exact candidate commit gets its own build and test results.
+- Create or confirm isolated staging resources and fixtures for D1, KV, Vectorize, staff roles, profile users, and chat evaluations.
+- Establish an approved Degree syllabus inventory and factual-answer gold set. Do not invent missing curriculum content or translate Assamese.
+
+**Gate:** Every test has a safe target, expected result, and evidence method. Production-mutating checks remain excluded.
+
+### 2. Fix authorization and publication controls
+- Enforce staff capabilities in the Worker, not only in the frontend. Test staff with limited capability arrays against edit, publish, delete, analytics, history, and reindex APIs.
+- Apply published-chapter and published-subject checks consistently to public topics, Q&A/PYQ, images, FAQ, and related-topic routes.
+- Verify Cloudflare Access and API authentication in staging without bypassing either.
+
+**Gate:** Limited roles receive 403 for disallowed actions; draft or archived chapter IDs return 404 from every public content subresource.
+
+### 3. Repair library and content delivery
+- Fix slim-bundle chapter counts and add parity tests against boot/full bundle counts.
+- Fix the AHSEC/Degree `subjects?board_id=` 500 response.
+- Implement the course-type endpoint or update the profile selector to use a supported API; add error and empty states.
+- Use the `has_assamese` API flag in the deployed ChapterPage UI, then test existing Assamese notes without translating or changing them.
+- Align related-topic and FAQ response shapes between the Worker and ChapterPage.
+- Compare AHSEC and Degree inventory against the approved curriculum checklist. Fill only verified gaps from approved source material.
+
+**Gate:** API and UI counts agree; all required semester/subject/chapter entries are present; every published chapter and language state renders as expected.
+
+### 4. Complete profile and staff-panel flows in staging
+- Test profile loading, academic cascade, course-type selection, validation, and save behavior with disposable staging accounts.
+- Test each supported staff section and confirm unsupported sections are clearly unavailable, not presented as working.
+- Include role-based UI checks and direct API authorization checks; do not use production accounts for writes.
+
+**Gate:** Every supported flow passes from page entry through completion, and unauthorized operations are rejected server-side.
+
+### 5. Validate chat behavior and accuracy
+- Reconcile frontend and Worker request fields, especially `card_context` and `document_id`; either consume them correctly or stop sending them.
+- Test streaming, source cards, curriculum scoping, retries, cancellation, quota handling, persistence, and error states in staging.
+- Run the gold set against authoritative answer material. Record correctness, grounding, citation support, refusal behavior, language handling, and hallucinations.
+- Keep Assamese evaluation limited to approved existing content and expert-provided test cases; do not generate translations.
+
+**Gate:** Every required test case passes, each grounded answer cites the correct source, and the evaluation report actually runs. A skipped report is a failed gate.
+
+### 6. Close deployment, UX, and workflow gaps
+- Repair the Cloudflare Analytics workflow and verify the required permission using the workflow’s expected token setup, without exposing credentials.
+- Make CI fail if accuracy, security, build, or test steps are skipped when required.
+- Run browser tests for desktop/mobile, keyboard access, accessibility, errors, navigation, and key flows in staging.
+- Add a build-SHA signal so the deployed Pages and Worker can be matched to the tested commit.
+- Run the full release suite on the exact candidate SHA, then repeat safe post-deployment health checks.
+
+**Gate:** No unexplained workflow failures, no required skipped checks, no generated build artifacts in the release diff, and the serving SHA matches the tested SHA.
+
+### Score gates
+
+| Category | Weight | Work needed for full credit |
+|---|---:|---|
+| Deployment provenance and health | 15 | Exact build identity, healthy services, passing analytics and uptime checks |
+| Security, auth, and staff authorization | 15 | Server-side least privilege and publication gates, verified with role tests |
+| Library and AHSEC/Degree coverage | 20 | Correct APIs and counts, approved curriculum coverage, working language and chapter flows |
+| Chat behavior and accuracy | 20 | Request-contract tests, full staging E2E, passing gold-set evaluation |
+| Profile flow | 10 | Staging read, selector, validation, and save all pass |
+| UX, accessibility, and performance | 10 | Browser, responsive, accessibility, and performance checks pass |
+| CI, observability, caching, and reliability | 10 | Required workflows run and pass; no misleading green skips |
+
+The current audit score stays at **33/100** until these gates are actually tested. The score should not be raised for code changes alone, and any blocked or skipped required test keeps the final result below 100.

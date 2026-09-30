@@ -1,5 +1,5 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
-- [Syrabit content architecture](syrabit-content-arch.md) — Chapter model, 3-section model (Notes/Q&A/Question Paper), content_type field, translation pipeline
+- [Syrabit content architecture](syrabit-content-arch.md) — Chapter sections, degree course types stored as stream slugs, and bilingual content flow
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
@@ -22,7 +22,7 @@
 - [JWT RS256→HS256 migration fallback](jwt-migration-fallback.md) — During RS256→HS256 migration, logout decode must try HS256 then fall back to RS256 for live tokens; use _decode_token_with_fallback()
 - [CF_WORKER_AI_TOKEN vs CF_API_TOKEN](cf-worker-ai-token.md) — Cloud Run env var is CF_WORKER_AI_TOKEN; cloudflare_client.api_token must resolve CF_WORKER_AI_TOKEN ?? CF_API_TOKEN; both fields needed in config.py
 - [Redis disabled health check](redis-disabled-health.md) — When Upstash creds absent, health check returns "disabled" not "unhealthy"; smoke test must accept "disabled" as pass
-- [Auth rate limit MongoDB migration](auth-rate-limit-mongo.md) — _check_rate_limit was Redis-only; migrated to MongoDB auth_rate_limit collection with 90s TTL + TTL index on expires_at; eliminates RuntimeError on every prod login/signup
+- [Auth rate-limit MongoDB failure policy](auth-rate-limit-mongo.md) — MongoDB remains the atomic limiter; fail closed with 503 outside development.
 - [Upstash must stay optional in cloudbuild.yaml](upstash-optional-secret.md) — Upstash secrets don't exist in SM; putting them in mandatory --update-secrets causes SecretsAccessCheckFailed; always keep in Step 5 optional probe + add to --remove-secrets to clean stale refs
 - [React lazy SSR with renderToString](react-lazy-ssr.md) — React.lazy() _status is -1 until first render; pre-importing modules does NOT help renderToString; only fix is static imports OR renderToPipeableStream
 - [Gunicorn SIGABRT on Cloud Run](gunicorn-sigabrt.md) — Gunicorn timeout=30s caused SIGABRT on long AI requests; set timeout=120 for async AI workloads; graceful_timeout can stay at 30
@@ -48,6 +48,7 @@
 - [CF_ACCOUNT_ID alias in embedder](cf-account-id-alias.md) — embedder must use CF_ACCOUNT_ID or CLOUDFLARE_ACCOUNT_ID; using only CF_ACCOUNT_ID caused silent 0-chunk indexing in dev
 - [D1 migration outcome](syrabit-d1-migration.md) — DB UUID, schema FK notes, row counts, performance lessons, cutover gate (API_WORKER_LIVE flag)
 - [Workers AI generation boundary](workers-ai-generation-boundary.md) — Cloud Run generation crosses the authenticated API Worker; keep secret and token limits aligned.
+- [Workers AI abort semantics](workers-ai-abort-semantics.md) — Binding-call rejection and stream-reader cancellation show local cancellation settlement, not provider compute termination.
 - [Pages navigation and stylesheet caching](pages-navigation-stylesheet-caching.md) — Keep navigation HTML fresh and the main stylesheet active; stale documents and deferred CSS can break responsive layouts.
 - [Wrangler local integration tests](wrangler-local-integration-tests.md) — getPlatformProxy remote bindings default on; tests must opt out to remain credential-free.
 - [API Worker production deployment](api-worker-production-deployment.md) — Workers AI smoke tests use the workers.dev account slug, and direct Wrangler deploys require Node 22.
@@ -72,7 +73,7 @@
 - [External library crawl boundaries](external-library-crawl-boundaries.md) — dedupe archive graphs before processing and defer bulk scan OCR so large refreshes remain bounded.
 - [Syllabus PDF alignment](syllabus-pdf-alignment.md) — catalog PDFs lack subject links; align by official structure and reject body-keyword guesses.
 - [IndexNow endpoint fallback](indexnow-endpoint-fallback.md) — Cloudflare egress can be rate-limited per provider; use bounded participant fallback.
-- [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names through bindings metadata when immediate Wrangler CI listing is inconsistent.
+- [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names only; generate shared values once and provision every target together.
 - [Cloudflare analytics workflow permissions](cloudflare-analytics-workflow-permissions.md) — analytics GraphQL schema is valid, but the deployment token needs zone analytics read permission.
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
 - [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
@@ -85,10 +86,10 @@
 - [Workflow trigger contracts](workflow-trigger-contracts.md) — enforce GitHub Actions triggers from normalized YAML, not source-line regexes.
 - [Access bypass rehearsals](access-bypass-rehearsals.md) — TEST-NET proves policy cleanup only; warning activation requires a temporary real operator /32.
 - [Staff content editor contract](staff-content-contract.md) — shared CRUD uses direct staff routes; admin-only jobs remain under admin routes.
-- [GitHub audit access](github-audit-access.md) — public PR/check data is available, but security alerts and branch protection require a working authenticated token
+- [GitHub audit access](github-audit-access.md) — Security data needs auth; the connector may expose Actions metadata but block log archives.
 - [Playwright route fixture matching](playwright-route-fixtures.md) — collection and nested REST URLs need separate route globs in stateful browser fixtures.
 - [Playwright runtime preflight](playwright-runtime-preflight.md) — validate the separately downloaded headless shell directly; regular Chromium checks can miss loader failures.
-- [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — local dry-runs need the PEP 668 install flag and the locked PyMuPDF dependency.
+- [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — avoid the read-only Nix Python site; use user-scoped installs or isolated uv, with test tools kept out of runtime deps.
 - [Referral settlement controls](referral-settlement-controls.md) — fund and settle only frozen mature-claim statements with private payout evidence and immutable pause cutoffs
 - [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes
 - [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials
@@ -98,3 +99,4 @@
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
 - [GitHub Actions runner context in job env](github-actions-runner-context-job-env.md) — job-level env can't use `runner` context; causes whole workflow to fail to start (0 jobs), not just a lint warning
 - [Dependabot stale manifest alerts](dependabot-stale-manifest-alerts.md) — alerts don't auto-close when their manifest file is deleted; dismiss via API with reason "inaccurate"; alerts endpoint needs Link-header pagination, not ?page=
+- [Drizzle migration history](drizzle-migration-history.md) — the hand-maintained D1 migration history has no snapshots; generation may emit a full-schema `0000` migration and rewrite the journal.

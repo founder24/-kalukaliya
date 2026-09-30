@@ -1,6 +1,7 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 
 
@@ -54,10 +55,19 @@ async def test_protected_endpoint_without_token(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_protected_subscription_without_token(client: AsyncClient):
-    """Test subscription endpoint requires auth"""
-    response = await client.get("/api/v1/subscription/status")
-    assert response.status_code in [401, 403]
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/v1/subscription/status"),
+        ("POST", "/api/v1/subscription/create-order"),
+    ],
+)
+async def test_retired_subscription_routes_remain_unmounted(
+    client: AsyncClient, method: str, path: str
+):
+    """Legacy Python payment routes stay outside the Cloudflare-native API."""
+    response = await client.request(method, path)
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
@@ -78,16 +88,6 @@ async def test_refresh_with_malformed_token(client: AsyncClient):
     response = await client.post(
         "/api/v1/auth/refresh",
         json={"refresh_token": "completely.invalid.token"},
-    )
-    assert response.status_code == 401
-
-
-@pytest.mark.anyio
-async def test_subscription_create_order_with_invalid_token(client: AsyncClient):
-    """Test that subscription create-order with invalid token returns 401"""
-    response = await client.post(
-        "/api/v1/subscription/create-order",
-        headers={"Authorization": "Bearer bad.token.here"},
     )
     assert response.status_code == 401
 
@@ -120,3 +120,49 @@ async def test_refresh_returns_503_on_key_misconfiguration(client: AsyncClient):
         )
     assert response.status_code == 503
     assert "misconfigured" in response.json()["detail"].lower()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/api/v1/auth/signup",
+            {
+                "email": "rate-limit@example.com",
+                "password": "Valid-Password-123!",
+                "name": "Test Student",
+            },
+        ),
+        (
+            "/api/v1/auth/login",
+            {"email": "rate-limit@example.com", "password": "Valid-Password-123!"},
+        ),
+        (
+            "/api/v1/auth/forgot-password",
+            {"email": "rate-limit@example.com"},
+        ),
+        (
+            "/api/v1/auth/refresh",
+            {"refresh_token": "opaque-refresh-token"},
+        ),
+    ],
+)
+async def test_auth_routes_stop_when_rate_limiter_is_unavailable(
+    client: AsyncClient, path: str, payload: dict
+):
+    limiter_error = HTTPException(
+        status_code=503,
+        detail="Authentication temporarily unavailable. Please try again shortly.",
+    )
+    rate_limiter = AsyncMock(side_effect=limiter_error)
+
+    with (
+        patch("app.api.v1.auth._check_rate_limit", rate_limiter),
+        patch("app.models.user.User.find_one", new_callable=AsyncMock) as user_lookup,
+    ):
+        response = await client.post(path, json=payload)
+
+    assert response.status_code == 503
+    rate_limiter.assert_awaited_once()
+    user_lookup.assert_not_awaited()

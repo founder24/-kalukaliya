@@ -46,6 +46,18 @@ function chatRequest(
   });
 }
 
+function authRequest(path: string, ip: string): Request {
+  return new Request(`https://syrabit.ai${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'workers-runtime-auth-limit-test',
+      'CF-Connecting-IP': ip,
+    },
+    body: JSON.stringify({ email: 'student@example.test', password: 'incorrect' }),
+  });
+}
+
 async function authenticatedToken(userId: string): Promise<string> {
   const encode = (value: object) => btoa(JSON.stringify(value))
     .replace(/\+/g, '-')
@@ -757,5 +769,53 @@ describe('authenticated per-language limits in the Workers runtime', () => {
     expect(forwardedLanguages.filter(lang => lang === 'as')).toHaveLength(6);
     expect(forwardedLanguages.filter(lang => lang === 'en')).toHaveLength(6);
     expect(apiFetch).toHaveBeenCalledTimes(12);
+  });
+});
+
+describe('authentication burst protection in the Workers runtime', () => {
+  it('admits ten concurrent login attempts from one trusted IP, then rejects the rest', async () => {
+    const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(windowStart);
+      const apiFetch = vi.fn(async () => Response.json({ ok: true }));
+      const environment = runtimeEnv(apiFetch);
+      const responses = await Promise.all(
+        Array.from({ length: 12 }, () => worker.fetch(
+          authRequest('/api/v1/auth/login', '198.51.100.73'),
+          environment,
+          context(),
+        )),
+      );
+
+      expect(responses.filter(response => response.status === 200)).toHaveLength(10);
+      expect(responses.filter(response => response.status === 429)).toHaveLength(2);
+      expect(apiFetch).toHaveBeenCalledTimes(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses the stricter independent admin-login bucket', async () => {
+    const windowStart = (Math.floor(Date.now() / 60_000) + 2) * 60_000;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(windowStart);
+      const apiFetch = vi.fn(async () => Response.json({ ok: true }));
+      const environment = runtimeEnv(apiFetch);
+      const responses = await Promise.all(
+        Array.from({ length: 6 }, () => worker.fetch(
+          authRequest('/api/v1/admin/login', '198.51.100.74'),
+          environment,
+          context(),
+        )),
+      );
+
+      expect(responses.filter(response => response.status === 200)).toHaveLength(5);
+      expect(responses.filter(response => response.status === 429)).toHaveLength(1);
+      expect(apiFetch).toHaveBeenCalledTimes(5);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

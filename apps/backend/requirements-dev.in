@@ -1,6 +1,8 @@
 # Development/test dependencies for the backend.
 # These are NOT needed in production and should not be in the Docker image.
-# Run: pip-compile --generate-hashes --output-file=requirements-dev.txt requirements-dev.in
+# Lock: pip-compile --generate-hashes --strip-extras --output-file=requirements-dev.txt requirements-dev.in
+# Install from apps/backend: python3 -m pip install --user --break-system-packages --requirement requirements-dev.txt
+# Run auth regressions: python3 -m pytest tests/test_rate_limiter.py tests/test_auth.py tests/test_admin_endpoints.py
 
 pytest
 pytest-asyncio

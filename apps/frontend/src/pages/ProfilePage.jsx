@@ -20,6 +20,8 @@ import ReferralProfileCard from './profile/ReferralProfileCard';
 export default function ProfilePage() {
   const { user, updateUser } = useAuth();
   const navigate = useNavigate();
+  const hasUser = Boolean(user);
+  const userKey = user?.id ?? user?.email ?? null;
 
   const [profile, setProfile]               = useState(null);
   const [profileError, setProfileError]     = useState(false);
@@ -38,7 +40,7 @@ export default function ProfilePage() {
   const editInputRef = useRef(null);
 
   const loadProfile = useCallback(async () => {
-    if (!user) {
+    if (!hasUser) {
       setLoading(false);
       return;
     }
@@ -74,7 +76,10 @@ export default function ProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, [user, updateUser]);
+  // Updating the profile also synchronizes AuthContext. Depend on stable
+  // identity rather than the whole user object, or each sync triggers another
+  // profile fetch indefinitely.
+  }, [hasUser, userKey, updateUser]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
 

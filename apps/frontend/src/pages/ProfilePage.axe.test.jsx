@@ -13,13 +13,14 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe, toHaveNoViolations } from 'jest-axe';
-import { render, act } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import React from 'react';
 
 expect.extend(toHaveNoViolations);
 
 const mockNavigate = vi.fn();
 const mockSetSearchParams = vi.fn();
+const mockApiGet = vi.fn();
 
 vi.mock('react-router-dom', () => ({
   useNavigate:      () => mockNavigate,
@@ -39,7 +40,7 @@ vi.mock('@/utils/analytics', () => ({
 }));
 
 vi.mock('@/utils/api', () => ({
-  apiClient:           () => ({ get: vi.fn().mockReturnValue(new Promise(() => {})) }),
+  apiClient:           () => ({ get: mockApiGet }),
   createPaymentOrder:  vi.fn(),
   verifyPayment:       vi.fn(),
   createCreditTopUp:   vi.fn(),
@@ -77,6 +78,7 @@ vi.mock('./profile/DangerZone',           () => ({
   DeletionBanner: () => <div data-testid="deletion-banner" />,
 }));
 vi.mock('./profile/PrivacyControls',      () => ({ default: () => <div data-testid="privacy-controls" /> }));
+vi.mock('./profile/ReferralProfileCard',   () => ({ default: () => <div data-testid="referral-profile-card" /> }));
 vi.mock('./profile/EditFieldDialog',      () => ({ default: () => null }));
 vi.mock('./profile/DeleteConfirmDialog',  () => ({ default: () => null }));
 vi.mock('./profile/PaymentModal',         () => ({ default: () => null }));
@@ -86,7 +88,13 @@ vi.mock('./profile/PaymentHistory',       () => ({ default: () => <div data-test
 let mockUser = null;
 
 vi.mock('@/context/AuthContext', () => ({
-  useAuth: () => ({ user: mockUser, refreshUser: vi.fn() }),
+  useAuth: () => {
+    const [user, setUser] = React.useState(mockUser);
+    const updateUser = React.useCallback((updates) => {
+      setUser((previous) => (previous ? { ...previous, ...updates } : previous));
+    }, []);
+    return { user, updateUser, refreshUser: vi.fn() };
+  },
 }));
 
 import ProfilePage from './ProfilePage';
@@ -94,6 +102,8 @@ import ProfilePage from './ProfilePage';
 beforeEach(() => {
   mockUser = null;
   mockNavigate.mockClear();
+  mockApiGet.mockReset();
+  mockApiGet.mockImplementation(() => new Promise(() => {}));
 });
 
 afterEach(() => {
@@ -119,5 +129,21 @@ describe('ProfilePage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('does not refetch forever when synchronizing the loaded profile to auth state', async () => {
+    mockUser = { id: 'staging-user', email: 'student@example.invalid', role: 'user' };
+    mockApiGet.mockImplementation((path) => Promise.resolve({
+      data: path === '/user/profile'
+        ? { id: 'staging-user', name: 'Staging Gate Student', plan: 'free' }
+        : { conversations: 0, saved_subjects: 0, total_tokens: 0, credits_used: 0 },
+    }));
+
+    await act(async () => {
+      render(<ProfilePage />);
+    });
+
+    expect(await screen.findByTestId('profile-page')).toBeInTheDocument();
+    expect(mockApiGet).toHaveBeenCalledTimes(2);
   });
 });

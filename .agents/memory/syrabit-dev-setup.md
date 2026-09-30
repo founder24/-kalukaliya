@@ -17,7 +17,6 @@ description: How this monorepo is configured to run in the Replit environment
 ## Key config
 - `apps/backend/.env` sets `APP_ENV=development` and `TRUST_EDGE_AUTH=False` — required for dev startup without errors
 - Vite config already has `host: '0.0.0.0'`, `allowedHosts: true`, port 5000 — no changes needed
-- Vite proxies `/api/*` to `localhost:8000` (BACKEND_TARGET default)
 - Backend health returns "degraded" in dev (Redis + Vertex AI not configured) — this is expected and non-fatal
 
 ## Dependencies
@@ -32,6 +31,14 @@ description: How this monorepo is configured to run in the Replit environment
 - App loads and chapter pages render correctly with MongoDB connected
 - Backend "degraded" health is normal in dev — Redis disabled, Vertex AI not configured
 - 401/403/404 console errors for auth-gated resources are expected for unauthenticated users
+
+## Focused API Vitest runs
+
+Use `pnpm --filter syrabit-api exec vitest run <test-path>` to run specific API test files. Passing a path after `--` to the package's `test` script was observed to run the full suite instead of filtering.
+
+**Why:** Concurrent full-suite runs can collide in timing-sensitive atomic quota tests, creating failures that pass when run alone.
+
+**How to apply:** Use direct Vitest filters for focused checks and avoid running duplicate full API suites concurrently.
 
 ## Production GCP resources
 - Cloud Run service: `syrabit-backend` (region `asia-south1`, project `blissful-acumen-495019-t6`)

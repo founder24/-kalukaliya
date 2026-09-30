@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "wrangler dev --env development",
     "deploy": "wrangler deploy --env production",
+    "deploy:staging": "wrangler deploy --env staging",
     "type-check": "tsc --noEmit",
+    "smoke:ai-cancellation": "node scripts/ai-cancellation-smoke.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply syrabit-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply syrabit-db --remote",
+    "db:migrate:staging": "wrangler d1 migrations apply syrabit-db-staging --remote --env staging",
     "db:studio": "drizzle-kit studio",
     "test": "vitest run"
   },

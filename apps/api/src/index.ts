@@ -121,6 +121,7 @@ export async function handleScheduled(controller: ScheduledController, env: Env)
       'referral_claim_events',
       'referral_weekly_claims',
       'referral_visit_rate_limits',
+      'auth_rate_limits',
     ];
 
     for (const table of tables) {

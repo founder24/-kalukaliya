@@ -7,14 +7,29 @@ import codemirrorStubPlugin from './vite-plugins/codemirror-stub.js';
 import sentryReplayStubPlugin from './vite-plugins/sentry-replay-stub.js';
 import modulepreloadInjectPlugin from './vite-plugins/modulepreload-inject.js';
 import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js';
+import {
+  stagingProxyHeaders as buildStagingProxyHeaders,
+  validateStagingViteEnvironment,
+} from './vite-staging-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
+const isStagingE2E = process.env.STAGING_E2E === '1';
+validateStagingViteEnvironment(process.env);
 const BACKEND_TARGET = process.env.VITE_BACKEND_URL || process.env.BACKEND_PROXY_URL || 'https://api.syrabit.ai';
-// Local previews use the production-native API Worker by default. Set
-// VITE_BACKEND_URL, BACKEND_PROXY_URL, or VITE_CHAT_API_ORIGIN only when
-// deliberately targeting an isolated staging Worker.
-const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || 'https://api.syrabit.ai';
+// Local previews use the production-native API Worker by default. Staging
+// E2E overrides only the server-side proxy target; browser requests stay
+// same-origin so the staging gate token is never bundled or sent by the client.
+const CHAT_WORKER_TARGET = process.env.VITE_CHAT_API_ORIGIN || BACKEND_TARGET;
+const stagingProxyHeaders = (target) => buildStagingProxyHeaders(target, process.env);
+
+function workerProxyOptions(target) {
+  return {
+    target,
+    changeOrigin: true,
+    headers: stagingProxyHeaders(target),
+  };
+}
 
 // ─── CANONICAL BOT REGEX — DO NOT DRIFT ─────────────────────────────────────
 // This regex MUST stay aligned with three other locations:
@@ -641,19 +656,25 @@ export default defineConfig(({ mode }) => ({
   },
 
   server: {
-    port: Number.isFinite(parseInt(process.env.PORT, 10)) ? parseInt(process.env.PORT, 10) : 5000,
+    port: isStagingE2E
+      ? 5001
+      : Number.isFinite(parseInt(process.env.PORT, 10)) ? parseInt(process.env.PORT, 10) : 5000,
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api/v1/chat/stream': { target: CHAT_WORKER_TARGET, changeOrigin: true },
-      '/api': { target: BACKEND_TARGET, changeOrigin: true },
-      '/health': { target: BACKEND_TARGET, changeOrigin: true },
-      '/docs': { target: BACKEND_TARGET, changeOrigin: true },
-      '/openapi.json': { target: BACKEND_TARGET, changeOrigin: true },
+      '/api/v1/chat/stream': workerProxyOptions(CHAT_WORKER_TARGET),
+      '/api': workerProxyOptions(BACKEND_TARGET),
+      '/health': workerProxyOptions(BACKEND_TARGET),
+      '/docs': workerProxyOptions(BACKEND_TARGET),
+      '/openapi.json': workerProxyOptions(BACKEND_TARGET),
       '/assets': {
-        target: 'https://api.syrabit.ai',
+        target: BACKEND_TARGET,
         changeOrigin: true,
-        headers: { origin: 'https://syrabit.ai', referer: 'https://syrabit.ai/' },
+        headers: {
+          origin: 'https://syrabit.ai',
+          referer: 'https://syrabit.ai/',
+          ...stagingProxyHeaders(BACKEND_TARGET),
+        },
       },
     },
   },
@@ -664,11 +685,11 @@ export default defineConfig(({ mode }) => ({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api/v1/chat/stream': { target: CHAT_WORKER_TARGET, changeOrigin: true },
-      '/api': { target: BACKEND_TARGET, changeOrigin: true },
-      '/health': { target: BACKEND_TARGET, changeOrigin: true },
-      '/docs': { target: BACKEND_TARGET, changeOrigin: true },
-      '/openapi.json': { target: BACKEND_TARGET, changeOrigin: true },
+      '/api/v1/chat/stream': workerProxyOptions(CHAT_WORKER_TARGET),
+      '/api': workerProxyOptions(BACKEND_TARGET),
+      '/health': workerProxyOptions(BACKEND_TARGET),
+      '/docs': workerProxyOptions(BACKEND_TARGET),
+      '/openapi.json': workerProxyOptions(BACKEND_TARGET),
     },
   },
 

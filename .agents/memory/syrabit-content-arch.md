@@ -28,3 +28,10 @@ description: How content is stored/served, translation model, and bilingual disp
 - Admin UI: Content Hub → "Assamese" tab → AssameseBackfillPanel
 
 **Why:** Content was migrated to Chapter model but KnowledgeObject was never populated until June 2026 migration. Render endpoint reads KO, not Chapter — so any new chapter content needs to be written to BOTH Chapter.content_en and a new KnowledgeObject. The migration script at `infra/scripts/migrate_chapters_to_ko.py` is the reference for how to do this.
+
+## Degree profile course selections
+Degree course types are represented by `streams.slug` values (`major`, `minor`, `sec`, `vac`, `mdc`, `aec`), not a separate course-type table. The public profile selector groups subjects through `streams → classes → board_id` and includes only published subjects.
+
+**Why:** The D1 schema stores the degree taxonomy in the same hierarchy as school streams; grouping by subject names or omitting the board join can mix catalogues.
+
+**How to apply:** Treat the six slugs as the supported taxonomy, scope every lookup to the requested board, and preserve `{ slug, name, description, icon, subject_count, subjects: [{ id, name }] }` for the profile selector.

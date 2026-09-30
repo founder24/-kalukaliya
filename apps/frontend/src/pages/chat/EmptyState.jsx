@@ -24,18 +24,17 @@ const EMPTY_STATE_T = {
   },
 };
 
-export function EmptyState({ subject, documentId, defaultPrompts, setInput, textareaRef }) {
+export function EmptyState({ subject, hasDocument, defaultPrompts, setInput, textareaRef }) {
   const navigate = useNavigate();
   const { contentLang } = useContentLang();
   const t = EMPTY_STATE_T[contentLang] || EMPTY_STATE_T.en;
   // Defer URL-search-param-dependent text until after hydration. The SSR
   // snapshot is rendered for /chat with no query string, so reading
-  // `documentId` here on the first client render would drift if the user
-  // landed on /chat?document_id=… and break hydration. (Task #387 —
-  // architect review.)
+  // `hasDocument` here on the first client render could drift if the user
+  // landed on a document-backed chat link and break hydration.
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  const showDocumentText = mounted && documentId;
+  const showDocumentText = mounted && hasDocument;
 
   return (
     <div className="flex flex-col items-center justify-center text-center space-y-3 sm:space-y-4 py-4 sm:py-6 px-3 sm:px-4">

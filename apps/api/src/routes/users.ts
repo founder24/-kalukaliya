@@ -45,6 +45,12 @@ export const usersRouter = new Hono<{ Bindings: Env }>();
 // value — they previously used 72 hours and 14 days respectively, so a
 // reloaded profile page showed a hard-delete date three times too soon.
 const ACCOUNT_DELETION_GRACE_DAYS = 14;
+const STAGING_E2E_ACCOUNT_EMAIL_PATTERN =
+  /^staging-e2e-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@example\.invalid$/i;
+
+export function isStagingE2eAccountEmail(email: string | null | undefined): boolean {
+  return typeof email === 'string' && STAGING_E2E_ACCOUNT_EMAIL_PATTERN.test(email);
+}
 
 // Credit limits — authoritative, must match billing pipeline
 const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
@@ -224,7 +230,18 @@ usersRouter.post('/onboarding', async (c) => {
   if (error) return error;
 
   const db = createDb(c.env.DB);
-  let body: { language?: string; grade?: string; board?: string; stream?: string };
+  let body: {
+    language?: string;
+    grade?: string;
+    board?: string;
+    stream?: string;
+    board_id?: string;
+    board_name?: string;
+    class_id?: string;
+    class_name?: string;
+    stream_id?: string | null;
+    stream_name?: string | null;
+  };
   try { body = await c.req.json() as typeof body; } catch { return c.json({ detail: 'Invalid JSON' }, 400); }
 
   const updates: Partial<typeof users.$inferInsert> = {
@@ -233,6 +250,12 @@ usersRouter.post('/onboarding', async (c) => {
   };
   if (body.language) updates.preferredLanguage = body.language;
   if (body.grade)    updates.grade = body.grade;
+  if (body.board_id != null) updates.boardId = body.board_id;
+  if (body.board_name != null) updates.boardName = body.board_name;
+  if (body.class_id != null) updates.classId = body.class_id;
+  if (body.class_name != null) updates.className = body.class_name;
+  if (body.stream_id !== undefined) updates.streamId = body.stream_id;
+  if (body.stream_name !== undefined) updates.streamName = body.stream_name;
 
   await db.update(users).set(updates).where(eq(users.id, id));
   return c.json({ status: 'success', message: 'Onboarding preferences saved' });
@@ -478,6 +501,33 @@ usersRouter.post('/saved-subjects/:subjectId', async (c) => {
   }).where(eq(users.id, id));
 
   return c.json({ status: 'success', action, saved_subjects: saved });
+});
+
+// ── DELETE /staging-e2e-account ────────────────────────────────────────────────
+// Hard-delete only the authenticated test account created by the staging E2E
+// flow. This endpoint is deliberately unavailable in every other environment.
+
+usersRouter.delete('/staging-e2e-account', async (c) => {
+  if (c.env.APP_ENV !== 'staging') return c.json({ detail: 'Not found' }, 404);
+
+  const { id, error } = await requireUser(c);
+  if (error) return error;
+
+  const user = await c.env.DB.prepare(
+    'SELECT email FROM users WHERE id = ? LIMIT 1',
+  ).bind(id).first<{ email: string | null }>();
+  if (!user || !isStagingE2eAccountEmail(user.email)) {
+    return c.json({ detail: 'Not found' }, 404);
+  }
+
+  const result = await c.env.DB.prepare(
+    'DELETE FROM users WHERE id = ? AND email = ?',
+  ).bind(id, user.email).run();
+  if (Number(result.meta?.changes ?? 0) !== 1) {
+    return c.json({ detail: 'Test account not found' }, 404);
+  }
+
+  return c.json({ status: 'deleted' });
 });
 
 // ── DELETE /account ────────────────────────────────────────────────────────────

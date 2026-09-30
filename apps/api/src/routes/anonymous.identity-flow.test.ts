@@ -1366,6 +1366,11 @@ describe('anonymous identity flow', () => {
       monthly_message_count: 1,
       total_lifetime_messages: 1,
     });
+    const monthlyUsage = await env.DB.prepare(
+      `SELECT count FROM monthly_quota_usage
+       WHERE user_id = ? AND period = strftime('%Y-%m', 'now')`,
+    ).bind(userId).first<{ count: number }>();
+    expect(monthlyUsage?.count).toBe(1);
     const chats = await env.DB.prepare(
       'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
     ).bind(userId).first<{ count: number }>();

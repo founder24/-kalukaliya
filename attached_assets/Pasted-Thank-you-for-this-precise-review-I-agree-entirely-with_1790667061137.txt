@@ -1,0 +1,104 @@
+Thank you for this precise review. I agree entirely with your verdict. Here's the refined implementation plan:
+
+## Confirmed Narrow Improvements
+
+### 1. D1 Migration Job Timeout (Verified, Ready to Implement)
+**File:** `.github/workflows/deploy-cloudflare.yml`
+**Change:** Add `timeout-minutes` to the `deploy-api` job.
+**Scope:** Bounds the GitHub Actions job execution; does not guarantee remote migration rollback.
+**Evidence:** Job currently has no timeout; a stuck migration can hold the release indefinitely.
+
+```yaml
+deploy-api:
+  name: Deploy API Worker + D1
+  runs-on: ubuntu-latest
+  needs: verify
+  timeout-minutes: 30  # ← Add this
+  env:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+    ...
+```
+
+---
+
+### 2. Email Syntax Validation (Reasonable Candidate)
+**Action:** Check if an existing validator is already imported/used in the codebase before creating a new one.
+**File:** `apps/api/src/routes/auth.ts`
+**Change:** Add email syntax check in signup before duplicate-check.
+**No domain allowlist.** Only reject syntactically invalid addresses.
+**Add tests** for valid and malformed cases.
+
+**Search first:**
+```bash
+grep -r "isValid.*[Ee]mail\|validateEmail\|emailRegex" apps/api/src/
+```
+
+If found, reuse. If not, create `apps/api/src/lib/email-validation.ts` (as outlined above).
+
+---
+
+### 3. Curriculum-Specific RAG Coverage (Reasonable Candidate)
+**Action:** Review the actual retrieval path used by chat to fetch curriculum passages.
+**File:** `apps/api/src/routes/chat.ts`
+**Current state:** Web-context boundaries already exist in `buildSystemPrompt`.
+**Needed:** Verify that retrieved curriculum passages are also treated as untrusted data with explicit "do not override" instructions.
+**Test:** Add adversarial case where a retrieved curriculum passage tells the model to ignore prior instructions.
+**Preserve:** Original curriculum text (including Assamese and technical terminology) unmodified.
+
+**Search first:**
+```bash
+grep -n "verifiedChapter\|retrieveChapter\|semanticRetrieval" apps/api/src/routes/chat.ts
+```
+
+Inspect the retrieval logic to confirm the boundary coverage.
+
+---
+
+### 4. Workers AI Cancellation (Defer)
+**Verdict:** Confirmed limitation. The Cloudflare Workers AI binding does not honor AbortSignal for streaming operations (GitHub: cloudflare/ai#640).
+**Action:** Document the limitation; do not add a second `Promise.race` layer or claim cancellation is effective.
+**If needed later:** Wait for official Cloudflare support or implement a custom wrapper that respects the runtime constraint.
+
+---
+
+### 5. Staff Permissions (Review-Only, No Change Without Evidence)
+**Action:** No changes unless a specific route is shown to grant actions beyond the existing `capabilityDenied` contract in `apps/api/src/routes/staff.ts`.
+**Current contract:** Staff/admin roles share full control-center access; limited staff accounts are scoped by capabilities array.
+**Condition for change:** A concrete route that bypasses `capabilityDenied` checks or the capability model.
+
+---
+
+## Implementation Order
+1. **D1 timeout** (apply immediately; no code path risk).
+2. **Email validator** (search for existing; create only if absent; add tests).
+3. **RAG boundary** (inspect retrieval path; add adversarial test; preserve source text).
+4. **Workers AI, Staff permissions** (document current state; no change without further evidence).
+
+---
+
+## Files to Change (If All Applied)
+- `.github/workflows/deploy-cloudflare.yml` (D1 timeout)
+- `apps/api/src/lib/email-validation.ts` (new, if no existing validator)
+- `apps/api/src/lib/email-validation.test.ts` (new, if creating validator)
+- `apps/api/src/routes/auth.ts` (import validator; call in signup)
+- `apps/api/src/routes/chat.ts` (curriculum-specific boundary + test)
+- `apps/api/src/routes/chat.prompt.test.ts` (add adversarial test)
+
+---
+
+## Test Commands (Local)
+```bash
+# Email validation
+pnpm --filter syrabit-api test -- email-validation.test.ts
+
+# RAG boundaries
+pnpm --filter syrabit-api test -- chat.prompt.test.ts
+
+# Deployment workflow validation
+node scripts/validate-cloudflare-release-config.py
+bash scripts/test-validate-cloudflare-api-cutover.sh
+```
+
+---
+
+This is still a proposal pending your approval to proceed with implementation in the actual repo.

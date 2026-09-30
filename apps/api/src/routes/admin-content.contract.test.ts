@@ -191,7 +191,10 @@ describe('Worker-native admin publishing and seed dispatch', () => {
   it('supports the existing admin login, verify, and logout cookie lifecycle', async () => {
     const login = await workerFetch(new Request('http://worker/api/v1/admin/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '198.51.100.198',
+      },
       body: JSON.stringify({ email: 'admin-lifecycle@example.test', password: 'correct-password' }),
     }));
     expect(login.status).toBe(200);

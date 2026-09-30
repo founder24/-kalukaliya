@@ -5,6 +5,7 @@ Validates auth guards (401 without cookie) and response shapes.
 
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import jwt
 from datetime import datetime, timezone, timedelta
@@ -189,3 +190,117 @@ class TestResponseShapes:
         assert response.status_code == 200
         data = response.json()
         assert "count" in data
+
+
+def test_admin_login_stops_when_limiter_is_unavailable(client):
+    limiter_error = HTTPException(
+        status_code=503,
+        detail="Authentication temporarily unavailable. Please try again shortly.",
+    )
+    with (
+        patch(
+            "app.api.v1.admin._check_rate_limit",
+            new_callable=AsyncMock,
+            side_effect=limiter_error,
+        ) as rate_limiter,
+        patch(
+            "app.api.v1.admin.User.find_one", new_callable=AsyncMock
+        ) as user_lookup,
+    ):
+        response = client.post(
+            "/api/v1/admin/login",
+            json={"email": "admin@example.com", "password": "StrongPassword123!"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == limiter_error.detail
+    rate_limiter.assert_awaited_once()
+    user_lookup.assert_not_awaited()
+    assert "set-cookie" not in response.headers
+
+
+def test_admin_login_preserves_rate_limit_429(client):
+    limiter_error = HTTPException(status_code=429, detail="Too many attempts")
+    with (
+        patch(
+            "app.api.v1.admin._check_rate_limit",
+            new_callable=AsyncMock,
+            side_effect=limiter_error,
+        ) as rate_limiter,
+        patch(
+            "app.api.v1.admin.User.find_one", new_callable=AsyncMock
+        ) as user_lookup,
+    ):
+        response = client.post(
+            "/api/v1/admin/login",
+            json={"email": "admin@example.com", "password": "StrongPassword123!"},
+        )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "Too many attempts"
+    rate_limiter.assert_awaited_once()
+    user_lookup.assert_not_awaited()
+
+
+def test_admin_login_maps_unexpected_limiter_error_to_generic_503(client):
+    with (
+        patch(
+            "app.api.v1.admin._check_rate_limit",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("private storage detail"),
+        ) as rate_limiter,
+        patch(
+            "app.api.v1.admin.User.find_one", new_callable=AsyncMock
+        ) as user_lookup,
+    ):
+        response = client.post(
+            "/api/v1/admin/login",
+            json={"email": "admin@example.com", "password": "StrongPassword123!"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Authentication temporarily unavailable. Please try again shortly."
+    )
+    assert "private storage detail" not in response.text
+    rate_limiter.assert_awaited_once()
+    user_lookup.assert_not_awaited()
+
+
+def test_admin_login_sets_session_cookie_after_limiter_allows(client):
+    admin = MagicMock()
+    admin.hashed_password = "hashed"
+    admin.verify_password.return_value = True
+    admin.role = "admin"
+    admin.name = "Test Admin"
+    admin.id = "test-admin-id"
+
+    with (
+        patch(
+            "app.api.v1.admin._check_rate_limit",
+            new_callable=AsyncMock,
+        ) as rate_limiter,
+        patch(
+            "app.api.v1.admin.User.find_one",
+            new_callable=AsyncMock,
+            return_value=admin,
+        ) as user_lookup,
+        patch(
+            "app.api.v1.admin._get_admin_signing_key",
+            return_value=("test-signing-key", "HS256"),
+        ),
+    ):
+        response = client.post(
+            "/api/v1/admin/login",
+            json={"email": "admin@example.com", "password": "StrongPassword123!"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "syrabit_admin_session=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    rate_limiter.assert_awaited_once()
+    user_lookup.assert_awaited_once_with({"email": "admin@example.com"})
+    admin.verify_password.assert_called_once_with("StrongPassword123!")

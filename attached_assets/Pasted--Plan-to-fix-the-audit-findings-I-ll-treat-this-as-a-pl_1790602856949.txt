@@ -1,0 +1,42 @@
+## Plan to fix the audit findings
+
+I’ll treat this as a plan only; no files or environments have been changed.
+
+1. **Protect the active Worker login routes**
+   - First check whether Cloudflare has an external rate-limit rule for these routes; the repo alone doesn’t show one.
+   - Add or reuse a Worker-side limiter for user login, signup, password reset, and admin login. Trust only the client IP supplied by the trusted edge.
+   - Fail closed with a generic 503 if the limiter is unavailable; return 429 when a limit is exceeded.
+   - Add Worker tests for allowed requests, limit exhaustion, concurrent requests, and limiter-store failure.
+
+   **Done when:** the active Worker routes—not just the retired Python backend—have tested rate protection.
+
+2. **Resolve the chat `document_id` contract**
+   - Confirm whether it represents a separate document or simply duplicates the subject ID.
+   - If redundant, stop adding it to the URL and request. If meaningful, validate it against published content and use it to establish the correct chat scope.
+   - Add a frontend/Worker contract test. Update the frontend comments so `card_context` is clearly described as untrusted supplemental context.
+
+   **Done when:** no request field is silently ignored, and document-scoped chat has a test proving the expected scope.
+
+3. **Finish the course-type selector states**
+   - Add visible API error and empty-result messages, plus a retry action.
+   - Refresh course types when the selected board changes.
+   - Test loading, failure, empty results, selection, validation, and saving with a disposable local or staging profile.
+
+   **Done when:** users aren’t left with a blank selector when the request fails or returns no options.
+
+4. **Make test results reliable**
+   - Update the retired-backend diagnostic workflow to fail when pytest exits unsuccessfully, rather than checking only coverage.
+   - Ensure the Worker CI suite includes the new login-limit and chat-contract tests and continues to fail on test errors.
+   - Keep staging gold-set and browser checks as required release gates rather than treating a green unit-test workflow as equivalent evidence.
+
+   **Done when:** required test failures and skipped checks cannot produce a misleading green result.
+
+5. **Run the remaining gates on one staging candidate**
+   - Reconcile the current workspace, remote PR, and deployed-main identities using read-only checks; the attachment’s SHA snapshot is stale relative to the current workspace.
+   - Use isolated staging D1/KV/Vectorize fixtures and disposable staff/profile accounts. Verify publication restrictions, staff capabilities, profile flows, Cloudflare Access, and browser behavior.
+   - Run chat accuracy against an approved answer set. Assamese evaluation must use only approved existing material and expert-provided cases; do not generate or translate content.
+   - Verify Analytics permissions, health checks, and that the Pages and Worker serving SHA matches the tested candidate.
+
+   **Done when:** every required gate passes on the same SHA, with no production writes and no required checks skipped.
+
+Per the attached rubric, the score should remain **33/100** until those gates have evidence.

@@ -10,6 +10,7 @@
  *   GET /classes?board_id=
  *   GET /streams?class_id=
  *   GET /subjects?stream_id=&board_id=
+ *   GET /subjects-by-course-type?board_id=
  *   GET /subjects/:id
  *   GET /chapters/:subjectId        ← Cloud Run lists chapters by SUBJECT id
  *   GET /chapter-by-slug/:board/:classSlug/:subjectSlug/:chapterSlug
@@ -22,7 +23,7 @@
  */
 
 import { Hono, type Context } from 'hono';
-import { eq, and, ne, inArray, asc } from 'drizzle-orm';
+import { eq, and, ne, inArray, asc, count } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
@@ -31,6 +32,17 @@ import type { Env } from '../types';
 export const contentRouter = new Hono<{ Bindings: Env }>();
 
 const MAX_SEARCH_QUERY_LENGTH = 200;
+const COURSE_TYPE_SLUGS = ['major', 'minor', 'sec', 'vac', 'mdc', 'aec'] as const;
+type CourseTypeSlug = typeof COURSE_TYPE_SLUGS[number];
+
+const COURSE_TYPE_ICONS: Record<CourseTypeSlug, string> = {
+  major: 'target',
+  minor: 'book',
+  sec: 'zap',
+  vac: 'sparkles',
+  mdc: 'globe',
+  aec: 'brain',
+};
 
 // Every public content response, including a not-found response, should have
 // an explicit cache policy. Successful handlers set their tighter route-
@@ -183,6 +195,71 @@ contentRouter.get('/subjects', async (c) => {
     thumbnail_url: r.imageUrl ?? null,
     tags: [],
   })));
+});
+
+// ── Degree course types ────────────────────────────────────────────────────────
+// GET /api/v1/content/subjects-by-course-type?board_id=
+// → [{ slug, name, description, icon, subject_count, subjects: [{ id, name }] }]
+
+contentRouter.get('/subjects-by-course-type', async (c) => {
+  const boardId = c.req.query('board_id');
+  if (!boardId) {
+    return c.json({ detail: 'board_id is required' }, 400);
+  }
+
+  const rows = await createDb(c.env.DB).select({
+    courseTypeSlug: streams.slug,
+    courseTypeName: streams.name,
+    subjectId: subjects.id,
+    subjectName: subjects.name,
+  }).from(streams)
+    .innerJoin(classes, eq(streams.classId, classes.id))
+    .leftJoin(
+      subjects,
+      and(eq(subjects.streamId, streams.id), eq(subjects.isPublished, 1)),
+    )
+    .where(and(
+      eq(classes.boardId, boardId),
+      inArray(streams.slug, [...COURSE_TYPE_SLUGS]),
+    ))
+    .orderBy(asc(streams.slug), asc(subjects.name));
+
+  type CourseTypeGroup = {
+    slug: CourseTypeSlug;
+    name: string;
+    description: null;
+    icon: string;
+    subject_count: number;
+    subjects: Array<{ id: string; name: string }>;
+  };
+  const groups = new Map<CourseTypeSlug, CourseTypeGroup>();
+
+  for (const row of rows) {
+    const slug = row.courseTypeSlug as CourseTypeSlug;
+    let group = groups.get(slug);
+    if (!group) {
+      group = {
+        slug,
+        name: row.courseTypeName,
+        description: null,
+        icon: COURSE_TYPE_ICONS[slug],
+        subject_count: 0,
+        subjects: [],
+      };
+      groups.set(slug, group);
+    }
+
+    if (row.subjectId !== null && row.subjectName !== null) {
+      group.subjects.push({ id: row.subjectId, name: row.subjectName });
+      group.subject_count += 1;
+    }
+  }
+
+  c.header('Cache-Control', 'public, max-age=300, s-maxage=600');
+  return c.json(COURSE_TYPE_SLUGS.flatMap(slug => {
+    const group = groups.get(slug);
+    return group ? [group] : [];
+  }));
 });
 
 // ── Subject detail ─────────────────────────────────────────────────────────────
@@ -644,6 +721,20 @@ contentRouter.get('/library-bundle', async (c) => {
     }).from(chapters).where(inArray(chapters.status, ['published', 'active']));
   }
 
+  // Slim mode omits chapter rows, but subject cards still need chapter counts.
+  const chapterCountBySubject = new Map<string, number>();
+  if (slim) {
+    const chapterCounts = await db.select({
+      subjectId: chapters.subjectId,
+      chapterCount: count(),
+    }).from(chapters)
+      .where(inArray(chapters.status, ['published', 'active']))
+      .groupBy(chapters.subjectId);
+    for (const row of chapterCounts) {
+      chapterCountBySubject.set(row.subjectId, row.chapterCount);
+    }
+  }
+
   // Build chapter maps: subjectId → chapter list
   const chaptersBySubject = new Map<string, unknown[]>();
   const allPublishedSubjectIds = new Set(allSubjects.map(s => s.id));
@@ -689,7 +780,7 @@ contentRouter.get('/library-bundle', async (c) => {
       gradient: null,
       thumbnail_url: sub.imageUrl ?? null,
       tags: [],
-      chapter_count: chaps.length,
+      chapter_count: slim ? (chapterCountBySubject.get(sub.id) ?? 0) : chaps.length,
       pyq_papers: safeParse(sub.pyqPapers) ?? [],
       ...(includeChapters ? { chapters: chaps } : {}),
     };

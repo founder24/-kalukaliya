@@ -30,6 +30,8 @@ const COURSE_TYPE_COLORS = {
 function CourseTypeSelector({ profile, onUpdate }) {
   const [courseTypes, setCourseTypes] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [expanded, setExpanded] = useState(null);
   const [selectedCT, setSelectedCT] = useState(profile?.course_type || null);
   const [selectedSubjects, setSelectedSubjects] = useState(profile?.selected_subjects || []);
@@ -37,13 +39,52 @@ function CourseTypeSelector({ profile, onUpdate }) {
   const [showSelector, setShowSelector] = useState(false);
 
   useEffect(() => {
-    if (showSelector && profile?.board_id && courseTypes.length === 0) {
-      setLoading(true);
-      getSubjectsByCourseType(profile.board_id)
-        .then((res) => setCourseTypes(res.data))
-        .finally(() => setLoading(false));
+    setSelectedCT(profile?.course_type || null);
+    setSelectedSubjects(Array.isArray(profile?.selected_subjects) ? profile.selected_subjects : []);
+  }, [profile?.course_type, profile?.selected_subjects]);
+
+  useEffect(() => {
+    if (!showSelector) return undefined;
+
+    let cancelled = false;
+    setCourseTypes([]);
+    setLoadError('');
+    setExpanded(null);
+
+    if (!profile?.board_id) {
+      setLoading(false);
+      setLoadError('Select a board before choosing course types.');
+      return () => { cancelled = true; };
     }
-  }, [showSelector, profile?.board_id]);
+
+    setLoading(true);
+    getSubjectsByCourseType(profile.board_id)
+      .then((res) => {
+        if (cancelled) return;
+        if (!Array.isArray(res?.data)) throw new Error('Invalid course-type response');
+        setCourseTypes(res.data);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCourseTypes([]);
+        setLoadError('Could not load course types. Please try again.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [showSelector, profile?.board_id, loadAttempt]);
+
+  useEffect(() => {
+    const activeCourseType = courseTypes.find((courseType) => courseType.slug === selectedCT);
+    if (!activeCourseType) return;
+    const allowedSubjectIds = new Set((activeCourseType.subjects || []).map((subject) => subject.id));
+    setSelectedSubjects((previous) => {
+      const valid = previous.filter((subject) => allowedSubjectIds.has(subject.id));
+      return valid.length === previous.length ? previous : valid;
+    });
+  }, [courseTypes, selectedCT]);
 
   const toggleSubject = (subj) => {
     setSelectedSubjects((prev) => {
@@ -54,14 +95,22 @@ function CourseTypeSelector({ profile, onUpdate }) {
   };
 
   const handleSave = async () => {
+    const activeCourseType = courseTypes.find((courseType) => courseType.slug === selectedCT);
+    if (!activeCourseType) {
+      toast.error('Choose an available course type before saving');
+      return;
+    }
+    const allowedSubjectIds = new Set((activeCourseType.subjects || []).map((subject) => subject.id));
+    const validSelectedSubjects = selectedSubjects.filter((subject) => allowedSubjectIds.has(subject.id));
+
     setSaving(true);
     try {
       await apiClient().patch('/user/profile', {
         course_type: selectedCT,
         stream_name: selectedCT ? selectedCT.charAt(0).toUpperCase() + selectedCT.slice(1) : undefined,
-        selected_subjects: selectedSubjects,
+        selected_subjects: validSelectedSubjects,
       });
-      if (onUpdate) onUpdate({ course_type: selectedCT, selected_subjects: selectedSubjects });
+      if (onUpdate) onUpdate({ course_type: selectedCT, selected_subjects: validSelectedSubjects });
       toast.success('Course preferences saved');
       setShowSelector(false);
     } catch {
@@ -96,7 +145,26 @@ function CourseTypeSelector({ profile, onUpdate }) {
       {showSelector && (
         <div className="px-4 pb-4">
           {loading ? (
-            <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-violet-600" /></div>
+            <div className="flex justify-center py-6" role="status" aria-label="Loading course types">
+              <Loader2 size={20} className="animate-spin text-violet-600" />
+            </div>
+          ) : loadError ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-foreground" role="alert">
+              <p>{loadError}</p>
+              {profile?.board_id && (
+                <button
+                  type="button"
+                  onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+                  className="mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold text-primary hover:bg-accent"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          ) : courseTypes.length === 0 ? (
+            <p className="rounded-xl border border-border/50 bg-accent/10 px-3 py-4 text-center text-sm text-muted-foreground" role="status">
+              No course types are available for this board yet.
+            </p>
           ) : (
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
               {courseTypes.map((ct) => {
@@ -110,8 +178,13 @@ function CourseTypeSelector({ profile, onUpdate }) {
                 return (
                   <div key={ct.slug}>
                     <button
+                      type="button"
+                      aria-expanded={isExpanded}
+                      aria-pressed={isSelected}
+                      data-testid={`course-type-${ct.slug}`}
                       onClick={() => {
                         setSelectedCT(ct.slug);
+                        setSelectedSubjects((previous) => previous.filter((subject) => ctSubjectIds.has(subject.id)));
                         setExpanded(isExpanded ? null : ct.slug);
                       }}
                       className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all ${
@@ -152,7 +225,10 @@ function CourseTypeSelector({ profile, onUpdate }) {
                             const isSubjSelected = selectedSubjects.some((s) => s.id === subj.id);
                             return (
                               <button
+                                type="button"
                                 key={subj.id}
+                                data-testid={`course-subject-${subj.id}`}
+                                aria-pressed={isSubjSelected}
                                 onClick={() => toggleSubject(subj)}
                                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all text-left ${
                                   isSubjSelected
@@ -179,17 +255,18 @@ function CourseTypeSelector({ profile, onUpdate }) {
                   </div>
                 );
               })}
-
-              <button
-                onClick={handleSave}
-                disabled={saving || !selectedCT}
-                className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-40 transition-colors flex items-center justify-center gap-2"
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                {saving ? 'Saving...' : 'Save Course Preferences'}
-              </button>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || loading || !!loadError || !courseTypes.some((ct) => ct.slug === selectedCT)}
+            className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-40 transition-colors flex items-center justify-center gap-2"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {saving ? 'Saving...' : 'Save Course Preferences'}
+          </button>
         </div>
       )}
     </div>

@@ -1468,7 +1468,10 @@ describe('Staff password change session protection', () => {
 
     const freshLogin = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '198.51.100.199',
+      },
       body: JSON.stringify({ email: 'staff@example.test', password: 'updated-password' }),
     }));
     expect(freshLogin.status).toBe(200);
@@ -1496,14 +1499,20 @@ describe('Staff password change session protection', () => {
 
     const reset = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '198.51.100.199',
+      },
       body: JSON.stringify({ token: resetToken, password: 'reset-password-final' }),
     }));
     expect(reset.status).toBe(200);
 
     const replayedReset = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '198.51.100.199',
+      },
       body: JSON.stringify({ token: resetToken, password: 'reset-password-replay' }),
     }));
     expect(replayedReset.status).toBe(400);
@@ -1531,7 +1540,10 @@ describe('Staff password change session protection', () => {
 
     const postResetLogin = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '198.51.100.199',
+      },
       body: JSON.stringify({ email: 'staff@example.test', password: 'reset-password-final' }),
     }));
     expect(postResetLogin.status).toBe(200);
@@ -1554,7 +1566,10 @@ describe('Staff password change session protection', () => {
       const nonce = 'cutover_nonce_0123456789abcdef';
       const response = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/request', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': '198.51.100.199',
+        },
         body: JSON.stringify({ email: 'staff@example.test', cutover_nonce: nonce }),
       }));
 
@@ -1573,7 +1588,10 @@ describe('Staff password change session protection', () => {
 
       const mismatchedConfirmation = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': '198.51.100.199',
+        },
         body: JSON.stringify({
           token,
           password: 'nonce-bound-password',
@@ -1587,7 +1605,10 @@ describe('Staff password change session protection', () => {
 
       const matchingConfirmation = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': '198.51.100.199',
+        },
         body: JSON.stringify({
           token,
           password: 'nonce-bound-password',
@@ -1606,7 +1627,10 @@ describe('Staff password change session protection', () => {
       ).run();
       const editedLegacyLink = await sharedWorkerFetch(new Request('http://worker/api/v1/auth/reset-password/confirm', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': '198.51.100.199',
+        },
         body: JSON.stringify({
           token: legacyToken,
           password: 'edited-link-password',
