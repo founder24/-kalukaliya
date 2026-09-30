@@ -140,6 +140,22 @@ test('SSE order and native Workers AI model remain required', () => {
   );
 });
 
+test('terminal chat errors report their code and failure stage', () => {
+  assert.throws(
+    () => validateProbeEvents('direct', [
+      { event: 'source_card' },
+      { content: 'Partial answer', done: false },
+      {
+        event: 'chat_error',
+        done: true,
+        error_code: 'provider_stream_failed',
+        failure_stage: 'provider_stream',
+      },
+    ]),
+    /direct emitted terminal chat_error \(code=provider_stream_failed, stage=provider_stream\)/,
+  );
+});
+
 test('web route still requires successful attributed web status', () => {
   assert.doesNotThrow(() => validateRouteResult('web', {
     web_used: true,

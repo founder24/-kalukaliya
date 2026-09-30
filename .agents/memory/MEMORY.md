@@ -48,7 +48,7 @@
 - [CF_ACCOUNT_ID alias in embedder](cf-account-id-alias.md) — embedder must use CF_ACCOUNT_ID or CLOUDFLARE_ACCOUNT_ID; using only CF_ACCOUNT_ID caused silent 0-chunk indexing in dev
 - [D1 migration outcome](syrabit-d1-migration.md) — DB UUID, schema FK notes, row counts, performance lessons, cutover gate (API_WORKER_LIVE flag)
 - [Workers AI generation boundary](workers-ai-generation-boundary.md) — Cloud Run generation crosses the authenticated API Worker; keep secret and token limits aligned.
-- [Workers AI abort semantics](workers-ai-abort-semantics.md) — Binding-call rejection and stream-reader cancellation show local cancellation settlement, not provider compute termination.
+- [Workers AI stream lifecycle](workers-ai-abort-semantics.md) — Stop at the terminal SSE marker; reader cancellation still does not prove provider compute termination.
 - [Pages navigation and stylesheet caching](pages-navigation-stylesheet-caching.md) — Keep navigation HTML fresh and the main stylesheet active; stale documents and deferred CSS can break responsive layouts.
 - [Wrangler local integration tests](wrangler-local-integration-tests.md) — getPlatformProxy remote bindings default on; tests must opt out to remain credential-free.
 - [API Worker production deployment](api-worker-production-deployment.md) — Workers AI smoke tests use the workers.dev account slug, and direct Wrangler deploys require Node 22.
