@@ -517,6 +517,85 @@ export function shouldPollChatCancellation(now: number, lastCheckedAt: number): 
   return now - lastCheckedAt >= CHAT_CANCEL_TOMBSTONE_POLL_MS;
 }
 
+export type ChatStreamFailureStage =
+  | 'source_card'
+  | 'provider_stream'
+  | 'stream_write'
+  | 'language_validation'
+  | 'terminal_sse'
+  | 'persistence'
+  | 'unknown';
+
+export type ChatStreamAbortSource =
+  | 'request_signal'
+  | 'response_stream'
+  | 'cancellation_tombstone';
+
+export interface ChatStreamFailureDiagnostic {
+  error_class: string;
+  error_code: string;
+  failure_stage: ChatStreamFailureStage;
+  elapsed_ms: number;
+  tokens_emitted: boolean;
+  terminal_sse_marker_written: boolean;
+  abort_source?: ChatStreamAbortSource;
+}
+
+const SAFE_CHAT_ERROR_CLASSES = new Set([
+  'AbortError',
+  'Error',
+  'NetworkError',
+  'ProviderError',
+  'RangeError',
+  'TimeoutError',
+  'TypeError',
+]);
+
+function sanitizedChatErrorClass(error: unknown): string {
+  if (!error || typeof error !== 'object') return 'UnknownError';
+  const name = (error as { name?: unknown }).name;
+  return typeof name === 'string' && SAFE_CHAT_ERROR_CLASSES.has(name)
+    ? name
+    : 'ProviderError';
+}
+
+export function buildChatStreamFailureDiagnostic(
+  error: unknown,
+  input: {
+    failureStage: ChatStreamFailureStage;
+    elapsedMs: number;
+    tokensEmitted: boolean;
+    terminalSseMarkerWritten: boolean;
+    abortSource?: ChatStreamAbortSource;
+  },
+): ChatStreamFailureDiagnostic {
+  const errorClass = sanitizedChatErrorClass(error);
+  const errorCode = input.abortSource === 'request_signal'
+    || input.abortSource === 'cancellation_tombstone'
+    ? 'client_cancelled'
+    : input.abortSource === 'response_stream'
+      ? 'downstream_cancelled'
+      : errorClass === 'TimeoutError'
+        ? 'timeout'
+        : errorClass === 'AbortError'
+          ? 'aborted'
+          : input.failureStage === 'provider_stream'
+            ? 'provider_exception'
+            : 'stream_failure';
+
+  return {
+    error_class: errorClass,
+    error_code: errorCode,
+    failure_stage: input.failureStage,
+    elapsed_ms: Number.isFinite(input.elapsedMs)
+      ? Math.max(0, Math.round(input.elapsedMs))
+      : 0,
+    tokens_emitted: input.tokensEmitted,
+    terminal_sse_marker_written: input.terminalSseMarkerWritten,
+    ...(input.abortSource && { abort_source: input.abortSource }),
+  };
+}
+
 type ChatContentSourceType = 'notes' | 'qa' | 'pyq';
 
 export function normalizeChatSourceType(value: string | undefined): ChatContentSourceType | null {
@@ -881,8 +960,7 @@ function waitForInFlightChatRequest(
         controller.close();
       } catch (error) {
         console.error('[chat] in-flight replay failed', {
-          requestId: serverRequestId,
-          error: error instanceof Error ? error.message : String(error),
+          error_class: sanitizedChatErrorClass(error),
         });
         controller.error(error);
       }
@@ -1980,7 +2058,9 @@ chatRouter.post('/stream', async (c) => {
         sessionValid = Boolean(row)
           && await isSessionValid(c.env.DB, payload.sub, payload.iat);
       } catch (err) {
-        console.error('[chat] authentication storage unavailable:', err);
+        console.error('[chat] authentication storage unavailable', {
+          error_class: sanitizedChatErrorClass(err),
+        });
         c.header('X-Failure-Stage', 'authentication');
         return c.json({
           detail: 'Chat authentication service is temporarily unavailable. Please try again.',
@@ -2152,17 +2232,25 @@ chatRouter.post('/stream', async (c) => {
       }
     }
   } catch (err) {
-    console.error('[chat] quota storage unavailable:', err);
+    console.error('[chat] quota storage unavailable', {
+      error_class: sanitizedChatErrorClass(err),
+    });
     if (ownsMonthlyQuotaReservation && claimRequestId) {
       await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon)
-        .catch(releaseErr => console.error('[chat] monthly quota compensation failed:', releaseErr));
+        .catch(releaseErr => console.error('[chat] monthly quota compensation failed', {
+          error_class: sanitizedChatErrorClass(releaseErr),
+        }));
       ownsMonthlyQuotaReservation = false;
       ownsQuotaReservation = false;
     } else if (ownsQuotaReservation) {
       await releaseQuotaReservation(c.env.DB, userId, isAnon, reservationPeriod)
-        .catch(releaseErr => console.error('[chat] quota compensation failed:', releaseErr));
+        .catch(releaseErr => console.error('[chat] quota compensation failed', {
+          error_class: sanitizedChatErrorClass(releaseErr),
+        }));
       await deleteChatRequestClaim(c.env.DB, claimRequestId, userId)
-        .catch(deleteErr => console.error('[chat] claim compensation failed:', deleteErr));
+        .catch(deleteErr => console.error('[chat] claim compensation failed', {
+          error_class: sanitizedChatErrorClass(deleteErr),
+        }));
       ownsQuotaReservation = false;
     }
     c.header('X-Failure-Stage', 'quota');
@@ -2262,7 +2350,9 @@ chatRouter.post('/stream', async (c) => {
     try {
       curriculumScope = await resolveCurriculumScope(c.env.DB, message, body.subject_id);
     } catch (error) {
-      console.warn('[chat] Curriculum scope resolution failed:', error);
+      console.warn('[chat] Curriculum scope resolution failed', {
+        error_class: sanitizedChatErrorClass(error),
+      });
       curriculumScope = {
         ...(body.subject_id && { subjectId: body.subject_id }),
         explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
@@ -2481,17 +2571,23 @@ chatRouter.post('/stream', async (c) => {
         }
       }
     } catch (err) {
-      console.error('[chat] RAG retrieval error:', err);
+      console.error('[chat] RAG retrieval error', {
+        error_class: sanitizedChatErrorClass(err),
+      });
       // Non-fatal: continue without context
     }
   } else if (embedResult.status === 'rejected') {
-    console.warn('[chat] Embedding failed:', embedResult.reason);
+    console.warn('[chat] Embedding failed', {
+      error_class: sanitizedChatErrorClass(embedResult.reason),
+    });
   }
   }
 
   if (!memories) {
     memories = await memoryPromise.catch((error) => {
-      console.warn('[chat] memory load failed:', error);
+      console.warn('[chat] memory load failed', {
+        error_class: sanitizedChatErrorClass(error),
+      });
       return '';
     });
   }
@@ -2530,7 +2626,9 @@ chatRouter.post('/stream', async (c) => {
         topScore       = 0.5;
       }
     } catch (err) {
-      console.warn('[chat] Card-context fallback error:', err);
+      console.warn('[chat] Card-context fallback error', {
+        error_class: sanitizedChatErrorClass(err),
+      });
     }
   }
 
@@ -2651,14 +2749,49 @@ chatRouter.post('/stream', async (c) => {
   const encoder = new TextEncoder();
   const requestSignal = c.req.raw.signal;
   const generationAbortController = new AbortController();
-  const abortGeneration = (reason?: unknown) => {
+  let tokensEmitted = false;
+  let terminalSseMarkerWritten = false;
+  let streamFailureStage: ChatStreamFailureStage = 'source_card';
+  let streamAbortSource: ChatStreamAbortSource | undefined;
+  const reportStreamFailure = (
+    error: unknown,
+    failureStage: ChatStreamFailureStage = streamFailureStage,
+    abortSource: ChatStreamAbortSource | null | undefined = streamAbortSource,
+  ) => {
+    const diagnostic = buildChatStreamFailureDiagnostic(error, {
+      failureStage,
+      elapsedMs: Date.now() - startTime,
+      tokensEmitted,
+      terminalSseMarkerWritten,
+      ...(abortSource && { abortSource }),
+    });
+    if (diagnostic.error_code === 'client_cancelled'
+      || diagnostic.error_code === 'downstream_cancelled') {
+      console.warn('[chat] stream failure diagnostic', diagnostic);
+    } else {
+      console.error('[chat] stream failure diagnostic', diagnostic);
+    }
+  };
+  const reportTombstoneCancellation = (failureStage: ChatStreamFailureStage) => {
+    streamAbortSource = 'cancellation_tombstone';
+    reportStreamFailure(
+      new DOMException('Chat request cancelled', 'AbortError'),
+      failureStage,
+      'cancellation_tombstone',
+    );
+  };
+  const abortGeneration = (
+    reason?: unknown,
+    source: ChatStreamAbortSource = 'response_stream',
+  ) => {
     if (!generationAbortController.signal.aborted) {
+      streamAbortSource = source;
       generationAbortController.abort(
         reason ?? new DOMException('Chat response was interrupted', 'AbortError'),
       );
     }
   };
-  const abortOnRequest = () => abortGeneration(requestSignal.reason);
+  const abortOnRequest = () => abortGeneration(requestSignal.reason, 'request_signal');
   if (requestSignal.aborted) {
     abortOnRequest();
   } else {
@@ -2666,10 +2799,22 @@ chatRouter.post('/stream', async (c) => {
   }
   // A downstream reader cancel also rejects the TransformStream writer, even
   // when the incoming request signal was not propagated by an intermediary.
-  void writer.closed.catch(abortGeneration);
+  void writer.closed.catch((reason) => abortGeneration(reason, 'response_stream'));
 
-  const write = (payload: unknown) =>
-    writer.write(encoder.encode(sseEvent(payload)));
+  const write = async (payload: unknown) => {
+    try {
+      await writer.write(encoder.encode(sseEvent(payload)));
+    } catch (error) {
+      abortGeneration(error, 'response_stream');
+      throw error;
+    }
+    if (payload && typeof payload === 'object') {
+      const event = (payload as { event?: unknown }).event;
+      if (event === 'chat_error' || event === 'syrabit_done') {
+        terminalSseMarkerWritten = true;
+      }
+    }
+  };
 
   const streamTask = (async () => {
     let fullResponse = '';
@@ -2696,17 +2841,24 @@ chatRouter.post('/stream', async (c) => {
         latency_ms: Date.now() - startTime,
         latency_semantics: lang === 'as' ? 'buffered_completion' : 'first_token_streaming',
         failure_stage: failureStage,
-      }).catch((error) => console.warn('[chat] operational analytics write failed:', error));
+      }).catch((error) => console.warn('[chat] operational analytics write failed', {
+        error_class: sanitizedChatErrorClass(error),
+      }));
     };
 
     try {
-      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+        reportTombstoneCancellation('source_card');
+        return;
+      }
       lastStreamCancellationCheckAt = Date.now();
       // Always emit source_card first — client uses this to learn the conversation_id
+      streamFailureStage = 'source_card';
       await write(sourceCard);
       timings.source_card_ms = Date.now() - startTime;
       if (verifiedWebEvidenceUnavailable) {
         timings.total_ms = Date.now() - startTime;
+        streamFailureStage = 'terminal_sse';
         await write({
           ...terminalChatErrorEvent(
             lang === 'as'
@@ -2720,7 +2872,9 @@ chatRouter.post('/stream', async (c) => {
           error_kind: 'web_evidence_unavailable',
         });
         await recordAnalytics('chat_failure', 'web_evidence');
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          error_class: sanitizedChatErrorClass(e),
+        }));
         return;
       }
 
@@ -2731,6 +2885,7 @@ chatRouter.post('/stream', async (c) => {
       let generationStartedAt: number | undefined;
 
       try {
+        streamFailureStage = 'provider_stream';
         generationStartedAt = Date.now();
         if (lang === 'as') {
           const generated = await generateAssamese(c.env.AI, {
@@ -2740,7 +2895,10 @@ chatRouter.post('/stream', async (c) => {
             signal: generationAbortController.signal,
           }, 8_000);
           fullResponse = normalizeAssameseStreamChunk(generated.text);
-          if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+          if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+            reportTombstoneCancellation('provider_stream');
+            return;
+          }
           actualModel = generated.model;
           timings.first_token_ms = Date.now() - startTime;
           firstTokenRecorded = true;
@@ -2754,7 +2912,10 @@ chatRouter.post('/stream', async (c) => {
             const now = Date.now();
             if (shouldPollChatCancellation(now, lastStreamCancellationCheckAt)) {
               lastStreamCancellationCheckAt = now;
-              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+                reportTombstoneCancellation('provider_stream');
+                return;
+              }
             }
             // Sentinel chunk carries the resolved model name — do not forward to client
             if (chunk.startsWith('\x00model:')) {
@@ -2766,7 +2927,10 @@ chatRouter.post('/stream', async (c) => {
               firstTokenRecorded = true;
             }
             fullResponse += chunk;
+            streamFailureStage = 'stream_write';
             await write({ content: chunk, done: false });
+            if (chunk.length > 0) tokensEmitted = true;
+            streamFailureStage = 'provider_stream';
           }
         }
         timings.generation_ms = Date.now() - generationStartedAt;
@@ -2775,13 +2939,13 @@ chatRouter.post('/stream', async (c) => {
         if (generationStartedAt !== undefined) {
           timings.generation_ms = Date.now() - generationStartedAt;
         }
-        console.warn('[chat] streamGenerate failed:', streamErr);
         throw streamErr;
       }
 
       if (!streamDone || !fullResponse) {
         // Provider returned an empty response — release the reserved slot
         timings.total_ms = Date.now() - startTime;
+        streamFailureStage = 'terminal_sse';
         await write(terminalChatErrorEvent(
           'Empty response from AI. Please try again.',
           'provider_empty_response',
@@ -2790,16 +2954,22 @@ chatRouter.post('/stream', async (c) => {
           timings,
         ));
         await recordAnalytics('chat_failure', 'provider_stream');
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          error_class: sanitizedChatErrorClass(e),
+        }));
         return;
       }
 
+      streamFailureStage = 'language_validation';
       if (lang === 'as') {
         fullResponse = normalizeAssameseStreamChunk(fullResponse);
         assameseProseLeakage = !isReliableAssameseAnswer(fullResponse);
         if (assameseProseLeakage) {
           try {
-            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+              reportTombstoneCancellation('language_validation');
+              return;
+            }
             const repaired = await generateAssamese(c.env.AI, {
               systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nআগৰ খচৰা ব্যৱহাৰ নকৰিবা। কেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ সম্পূৰ্ণ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
               userMessage: message,
@@ -2807,7 +2977,10 @@ chatRouter.post('/stream', async (c) => {
               signal: generationAbortController.signal,
             }, 6_000);
             const repairedText = normalizeAssameseStreamChunk(repaired.text);
-            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+              reportTombstoneCancellation('language_validation');
+              return;
+            }
             if (isReliableAssameseAnswer(repairedText)) {
               fullResponse = repairedText;
               actualModel = repaired.model;
@@ -2815,10 +2988,13 @@ chatRouter.post('/stream', async (c) => {
             }
           } catch (repairError) {
             if (generationAbortController.signal.aborted) throw repairError;
-            console.warn('[chat] Assamese fallback-model repair failed:', repairError);
+            console.warn('[chat] Assamese fallback-model repair failed', {
+              error_class: sanitizedChatErrorClass(repairError),
+            });
           }
           if (!isDeliverableAssameseAnswer(fullResponse)) {
             timings.total_ms = Date.now() - startTime;
+            streamFailureStage = 'terminal_sse';
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
@@ -2830,7 +3006,9 @@ chatRouter.post('/stream', async (c) => {
               error_kind: 'assamese_unavailable',
             });
             await recordAnalytics('chat_failure', 'language_validation');
-            await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+            await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+              error_class: sanitizedChatErrorClass(e),
+            }));
             return;
           }
         }
@@ -2838,11 +3016,17 @@ chatRouter.post('/stream', async (c) => {
         // this is completion latency, never a misleading first-token metric.
         timings.buffered_completion_ms = Date.now() - startTime;
         firstTokenRecorded = true;
+        streamFailureStage = 'stream_write';
         await write({ content: fullResponse, done: false });
+        if (fullResponse.length > 0) tokensEmitted = true;
       }
 
       // ── syrabit_done event ────────────────────────────────────────────────
-      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+      streamFailureStage = 'terminal_sse';
+      if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+        reportTombstoneCancellation('terminal_sse');
+        return;
+      }
       const latencyMs = Date.now() - startTime;
       timings.total_ms = latencyMs;
       const doneEvent = {
@@ -2879,8 +3063,12 @@ chatRouter.post('/stream', async (c) => {
       // ── Fire-and-forget: persist chat + update user stats ────────────────
       // quota_usage was already incremented atomically in reserveAuthQuota /
       // reserveAnonQuota before streaming — do not increment again here.
+      streamFailureStage = 'persistence';
       try {
-        if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+        if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+          reportTombstoneCancellation('persistence');
+          return;
+        }
         await persistCompletedChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,
@@ -2899,8 +3087,7 @@ chatRouter.post('/stream', async (c) => {
         });
       } catch (error) {
         console.error('[chat] persistence failed before idempotency completion', {
-          requestId: serverRequestId,
-          error: error instanceof Error ? error.message : String(error),
+          error_class: sanitizedChatErrorClass(error),
         });
         // If the transactional history batch failed for a row-specific reason,
         // preserve replay safety with a minimal completion marker. A total D1
@@ -2914,22 +3101,27 @@ chatRouter.post('/stream', async (c) => {
           { sourceCard, doneEvent },
         ).catch(completionError => {
           console.error('[chat] idempotency completion marker failed', {
-            requestId: serverRequestId,
-            error: completionError instanceof Error
-              ? completionError.message
-              : String(completionError),
+            error_class: sanitizedChatErrorClass(completionError),
           });
         });
       }
 
     } catch (err) {
       if (generationAbortController.signal.aborted) {
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+        reportStreamFailure(
+          generationAbortController.signal.reason ?? err,
+          streamFailureStage,
+          streamAbortSource ?? 'response_stream',
+        );
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          error_class: sanitizedChatErrorClass(e),
+        }));
         return;
       }
-      console.error('[chat] Stream pipeline error:', err);
+      const failedAtStage = streamFailureStage;
       timings.total_ms = Date.now() - startTime;
       try {
+        streamFailureStage = 'terminal_sse';
         await write(terminalChatErrorEvent(
           'AI service temporarily unavailable. Please try again.',
           'provider_stream_failed',
@@ -2938,8 +3130,11 @@ chatRouter.post('/stream', async (c) => {
           timings,
         ));
       } catch { /* writer may already be closed */ }
+      reportStreamFailure(err, failedAtStage, null);
       // Release the reserved slot — provider/config errors must not consume quota
-      await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
+      await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+        error_class: sanitizedChatErrorClass(e),
+      }));
       await recordAnalytics('chat_failure', 'provider_stream');
     }
   })();

@@ -88,6 +88,12 @@ test('invalid streams preserve observed timing but cannot become passing samples
     targetMs,
     'direct emitted terminal chat_error',
     {
+      elapsed_ms: 5_100,
+      failure_stage: 'provider_stream',
+      error_class: 'TimeoutError',
+      error_code: 'timeout',
+      tokens_emitted: true,
+      terminal_sse_marker_observed: true,
       headers_ms: 1800,
       source_card_ms: 2100,
       observed_first_token_ms: 2800,
@@ -98,6 +104,10 @@ test('invalid streams preserve observed timing but cannot become passing samples
       terminal_event: 'chat_error:provider_stream_failed:provider_stream',
       worker_timings_ms: { quota_ms: 300, retrieval_ms: 900, generation_ms: 3000 },
       rag_path: 'chapter_direct',
+      student_prompt: 'private prompt',
+      generated_completion: 'private completion',
+      credential: 'private credential',
+      token_content: 'private token',
       first_token_ms: 100,
       target_met: true,
     },
@@ -106,6 +116,16 @@ test('invalid streams preserve observed timing but cannot become passing samples
   assert.equal(failed.first_token_ms, targetMs + 1);
   assert.equal(failed.target_met, false);
   assert.equal(failed.observed_first_token_ms, 2800);
+  assert.equal(failed.elapsed_ms, 5_100);
+  assert.equal(failed.failure_stage, 'provider_stream');
+  assert.equal(failed.error_class, 'TimeoutError');
+  assert.equal(failed.error_code, 'timeout');
+  assert.equal(failed.tokens_emitted, true);
+  assert.equal(failed.terminal_sse_marker_observed, true);
+  assert.equal(failed.student_prompt, undefined);
+  assert.equal(failed.generated_completion, undefined);
+  assert.equal(failed.credential, undefined);
+  assert.equal(failed.token_content, undefined);
   assert.equal(failed.event_count, 31);
   assert.equal(failed.output_chars, 162);
   assert.deepEqual(failed.worker_timings_ms, {

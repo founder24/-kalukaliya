@@ -41,6 +41,29 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortReason(signal);
 }
 
+const SAFE_AI_ERROR_CLASSES = new Set([
+  'AbortError',
+  'Error',
+  'NetworkError',
+  'RangeError',
+  'TimeoutError',
+  'TypeError',
+]);
+
+function sanitizedAiErrorDetails(error: unknown): { error_class: string; error_code: string } {
+  const name = error && typeof error === 'object'
+    ? (error as { name?: unknown }).name
+    : undefined;
+  return {
+    error_class: typeof name === 'string' && SAFE_AI_ERROR_CLASSES.has(name)
+      ? name
+      : 'ProviderError',
+    error_code: error instanceof Error && error.name === 'TimeoutError'
+      ? 'timeout'
+      : 'provider_exception',
+  };
+}
+
 function isTimeoutError(error: unknown): boolean {
   return error instanceof Error && error.name === 'TimeoutError';
 }
@@ -316,7 +339,7 @@ export async function generate(
     throw new Error('Primary model returned empty response');
   } catch (primaryErr) {
     throwIfAborted(opts.signal);
-    console.warn('[ai] Primary model failed, trying fallback:', primaryErr);
+    console.warn('[ai] Primary model failed, trying fallback', sanitizedAiErrorDetails(primaryErr));
   }
 
   throwIfAborted(opts.signal);
@@ -401,7 +424,10 @@ export async function* streamGenerate(
   } catch (primaryErr) {
     throwIfAborted(opts.signal);
     if (tokensEmitted > 0) throw primaryErr;
-    console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
+    console.warn(
+      '[ai] Primary stream model failed, trying fallback',
+      sanitizedAiErrorDetails(primaryErr),
+    );
     usedModel = fallbackModel;
     try {
       for await (const chunk of streamModel(ai, fallbackModel, opts, streamTimeoutMs)) {
@@ -415,7 +441,10 @@ export async function* streamGenerate(
       // historical buffered recovery path.
       if (isTimeoutError(fallbackErr)) throw fallbackErr;
       if (tokensEmitted > 0) throw fallbackErr;
-      console.warn('[ai] Both stream models failed, trying buffered generation:', fallbackErr);
+      console.warn(
+        '[ai] Both stream models failed, trying buffered generation',
+        sanitizedAiErrorDetails(fallbackErr),
+      );
       const buffered = await generate(ai, opts);
       usedModel = buffered.model;
       tokensEmitted++;

@@ -39,6 +39,12 @@ export function validateRouteResult(route, result) {
 }
 
 const FAILED_PROBE_OBSERVATIONS = [
+  'elapsed_ms',
+  'failure_stage',
+  'error_class',
+  'error_code',
+  'tokens_emitted',
+  'terminal_sse_marker_observed',
   'headers_ms',
   'source_card_ms',
   'observed_first_token_ms',
