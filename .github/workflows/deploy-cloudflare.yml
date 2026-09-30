@@ -234,7 +234,7 @@ jobs:
             exit 1
           fi
           printf '%s\n' "$applied_migrations" \
-            | node scripts/check-d1-migration-ledger.mjs --migrations-dir drizzle/migrations
+            | node scripts/check-d1-migration-ledger.mjs --migrations-dir drizzle/migrations --archive-dir drizzle/archived-applied
 
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production

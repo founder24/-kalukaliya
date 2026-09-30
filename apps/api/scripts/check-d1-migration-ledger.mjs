@@ -1,7 +1,7 @@
-import fs from 'node:fs';
 import path from 'node:path';
 
 import { assertD1MigrationLedgerMatchesFiles } from '../src/db/migration-ledger-contract.mjs';
+import { readD1MigrationNamesFromDirectories } from '../src/db/migration-ledger-files.mjs';
 
 function parseWranglerMigrationRows(rawOutput) {
   let payload;
@@ -31,12 +31,31 @@ function parseWranglerMigrationRows(rawOutput) {
   return names;
 }
 
-function getMigrationsDirectory(args) {
-  const optionIndex = args.indexOf('--migrations-dir');
-  if (optionIndex === -1 || !args[optionIndex + 1]) {
-    throw new Error('Usage: node check-d1-migration-ledger.mjs --migrations-dir <directory>');
+function getDirectoryArgument(args, option, { required = false } = {}) {
+  const optionIndexes = args
+    .map((argument, index) => argument === option ? index : -1)
+    .filter(index => index !== -1);
+
+  if (optionIndexes.length > 1) {
+    throw new Error(`Only one ${option} value may be supplied.`);
   }
-  return path.resolve(process.cwd(), args[optionIndex + 1]);
+
+  const optionIndex = optionIndexes[0];
+  if (optionIndex === undefined) {
+    if (required) {
+      throw new Error(
+        'Usage: node check-d1-migration-ledger.mjs --migrations-dir <directory> '
+        + '[--archive-dir <directory>]',
+      );
+    }
+    return null;
+  }
+
+  const value = args[optionIndex + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${option} requires a directory.`);
+  }
+  return path.resolve(process.cwd(), value);
 }
 
 async function readStdin() {
@@ -48,15 +67,21 @@ async function readStdin() {
 }
 
 async function main() {
-  const migrationsDirectory = getMigrationsDirectory(process.argv.slice(2));
-  const trackedMigrationNames = fs.readdirSync(migrationsDirectory, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.endsWith('.sql'))
-    .map(entry => entry.name);
+  const args = process.argv.slice(2);
+  const migrationsDirectory = getDirectoryArgument(args, '--migrations-dir', { required: true });
+  const archiveDirectory = getDirectoryArgument(args, '--archive-dir');
+  const trackedDirectories = [
+    { directory: migrationsDirectory, label: 'active migrations' },
+  ];
+  if (archiveDirectory) {
+    trackedDirectories.push({ directory: archiveDirectory, label: 'applied migration archive' });
+  }
+  const trackedMigrationNames = readD1MigrationNamesFromDirectories(trackedDirectories);
   const appliedMigrationNames = parseWranglerMigrationRows(await readStdin());
   const result = assertD1MigrationLedgerMatchesFiles(appliedMigrationNames, trackedMigrationNames);
 
   console.log(
-    `Production D1 migration ledger matches ${result.appliedMigrationCount} tracked SQL migration files.`,
+    `Production D1 migration ledger matches ${result.appliedMigrationCount} active or archived SQL migration identities.`,
   );
 }
 
