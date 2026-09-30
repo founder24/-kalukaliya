@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Local regression tests for live-deployment-test.sh; never targets production."""
+"""Local regression tests for live-deployment-test.sh; never targets production.
+
+Run with: python3 scripts/test_live_deployment_test.py
+"""
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 import unittest
 from contextlib import contextmanager
@@ -130,6 +135,10 @@ def make_handler(log: RequestLog) -> type[BaseHTTPRequestHandler]:
             self._record()
             self._respond(405)
 
+        def do_OPTIONS(self) -> None:
+            self._record()
+            self._respond(204, extra_headers={"Access-Control-Allow-Methods": "GET, OPTIONS"})
+
         def do_POST(self) -> None:
             self._record()
             self._respond(405, b'{"detail":"Method not allowed"}')
@@ -185,6 +194,10 @@ def run_live_test(
     frontend_url: str,
     category: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    real_curl = shutil.which("curl")
+    if real_curl is None:
+        raise RuntimeError("curl is required to run the local regression harness")
+
     command = [
         "bash",
         str(LIVE_TEST),
@@ -195,15 +208,42 @@ def run_live_test(
     ]
     if category:
         command.extend(["--category", category])
-    return subprocess.run(
-        command,
-        cwd=ROOT,
-        env=local_environment(),
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
+
+    with tempfile.TemporaryDirectory(prefix="live-test-curl-guard-") as temp_dir:
+        curl_guard = Path(temp_dir) / "curl"
+        curl_guard.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, sys\n"
+            "from urllib.parse import urlsplit\n"
+            "real_curl = os.environ['LIVE_TEST_REAL_CURL']\n"
+            "urls = [arg for arg in sys.argv[1:] if arg.startswith(('http://', 'https://'))]\n"
+            "if not urls:\n"
+            "    print('curl guard: blocked request without an explicit local URL', file=sys.stderr)\n"
+            "    sys.exit(98)\n"
+            "for url in urls:\n"
+            "    try:\n"
+            "        host = urlsplit(url).hostname\n"
+            "    except ValueError:\n"
+            "        host = None\n"
+            "    if host not in {'127.0.0.1', 'localhost', '::1'}:\n"
+            "        print('curl guard: blocked non-loopback URL', file=sys.stderr)\n"
+            "        sys.exit(98)\n"
+            "os.execv(real_curl, [real_curl, *sys.argv[1:]])\n",
+            encoding="utf-8",
+        )
+        curl_guard.chmod(0o755)
+        env = local_environment()
+        env["LIVE_TEST_REAL_CURL"] = real_curl
+        env["PATH"] = temp_dir + os.pathsep + env.get("PATH", "")
+        return subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
 
 
 class LiveDeploymentRegressionTests(unittest.TestCase):
@@ -230,11 +270,11 @@ class LiveDeploymentRegressionTests(unittest.TestCase):
 
         requests = log.snapshot()
         self.assertTrue(requests)
-        self.assertNotIn(("GET", "/health/full"), [])  # Keep request assertions explicit below.
         paths = [path for _method, path in requests]
         methods = {method for method, _path in requests}
         self.assertIn("/health/full", paths)
         self.assertIn("/health/deep", paths)
+        self.assertIn("/library", paths)
         self.assertLessEqual(methods, {"GET", "OPTIONS"})
         self.assertFalse(
             any(method in {"POST", "PUT", "PATCH", "DELETE"} for method, _ in requests),
