@@ -147,6 +147,9 @@ async def test_payments_pending_ttl_index_is_declared_in_db_init():
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(
+    reason="The legacy payment create-order endpoint is intentionally unmounted."
+)
 async def test_create_order_sets_expires_at_two_days_ahead(
     client: AsyncClient, mock_user, mock_razorpay_client
 ):
@@ -218,6 +221,9 @@ async def test_create_order_sets_expires_at_two_days_ahead(
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(
+    reason="The legacy payment recovery endpoint is intentionally unmounted."
+)
 async def test_recover_returns_non_expired_pending_records(
     client: AsyncClient, mock_user
 ):
@@ -288,6 +294,9 @@ async def test_recover_returns_non_expired_pending_records(
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(
+    reason="The legacy payment recovery endpoint is intentionally unmounted."
+)
 async def test_recover_excludes_expired_records(
     client: AsyncClient, mock_user
 ):
@@ -345,6 +354,9 @@ async def test_recover_excludes_expired_records(
 
 
 @pytest.mark.anyio
+@pytest.mark.skip(
+    reason="The legacy payment recovery endpoint is intentionally unmounted."
+)
 async def test_recover_returns_empty_list_when_no_pending(
     client: AsyncClient, mock_user
 ):

@@ -1,4 +1,11 @@
 import pytest
+pytestmark = pytest.mark.skip(
+    reason=(
+        "The Python Razorpay webhook is intentionally unmounted; active 404 "
+        "contract coverage is in test_auth.py."
+    )
+)
+
 import hmac
 import hashlib
 import json

@@ -65,19 +65,17 @@ def _import_ingest_helpers():
     environment that has none of those installed — as long as we mock
     app.models.content before calling the helpers.
     """
-    import importlib
-    import importlib.util
+    import sys
     from pathlib import Path
 
-    spec = importlib.util.spec_from_file_location(
-        "scripts.ahsec_ingest",
-        Path(__file__).parent.parent / "scripts" / "ahsec_ingest.py",
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["scripts.ahsec_ingest"] = mod
-    spec.loader.exec_module(mod)
+    backend_root = Path(__file__).parent.parent
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
 
-    # Expose on the module's globals so tests can reference them easily
+    import scripts.ahsec_ingest as mod
+
+    # Expose the shared module object so other importer tests can patch it
+    # without replacing sys.modules or diverging from the production import.
     pytest._slug_dedup_module = mod
 
 
