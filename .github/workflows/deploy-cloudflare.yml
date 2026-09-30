@@ -394,6 +394,8 @@ jobs:
     name: Deploy Frontend
     runs-on: ubuntu-latest
     needs: deploy-api
+    outputs:
+      pages_asset_smoke_outcome: ${{ steps.live-ad-smoke.outcome }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -507,6 +509,8 @@ jobs:
           pnpm exec wrangler pages deploy ../frontend/dist --project-name=syrabitfrontend --commit-dirty=false
 
       - name: Smoke-test live production ad route
+        id: live-ad-smoke
+        continue-on-error: true
         env:
           E2E_ADS_PRODUCTION: '1'
           BASE_URL: ${{ env.FRONTEND_URL }}
@@ -517,19 +521,24 @@ jobs:
           # Pages can briefly serve the new HTML before its hashed assets are
           # available at every edge. Keep the stale-asset assertions strict,
           # but give propagation a bounded window before failing the release.
+          # This step is non-blocking for dependent release checks; the final
+          # release summary still fails if the bounded smoke never passes.
           for attempt in 1 2 3 4; do
             echo "Live ad smoke attempt ${attempt}/4"
-            if pnpm --filter @workspace/syrabit exec playwright test e2e/ads-release.spec.ts; then
+            if E2E_ADS_ASSET_SMOKE_ATTEMPT="$attempt" \
+              pnpm --filter @workspace/syrabit exec playwright test e2e/ads-release.spec.ts \
+                --grep "live production AdSense smoke"; then
               exit 0
             fi
             if [[ "$attempt" -lt 4 ]]; then
               sleep 45
             fi
           done
+          echo "::error title=Live Pages smoke deadline reached::Route ${E2E_ADS_PRODUCTION_PATH}; all 4 attempts failed. See Playwright output for per-attempt asset URLs and statuses."
           exit 1
 
       - name: Upload live ad smoke diagnostics
-        if: ${{ failure() }}
+        if: ${{ always() && steps.live-ad-smoke.outcome == 'failure' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: live-ad-smoke-diagnostics
@@ -1051,14 +1060,15 @@ jobs:
   release-check-summary:
     name: Summarize independent release checks
     runs-on: ubuntu-latest
-    needs: [chat-performance, live-chat-contract, disposable-staff-auth]
+    needs: [chat-performance, live-chat-contract, disposable-staff-auth, deploy-frontend]
     if: ${{ always() }}
     steps:
-      - name: Report chat latency and staff access separately
+      - name: Report Pages assets and independent release checks
         env:
           CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}
           LIVE_CHAT_CONTRACT_RESULT: ${{ needs.live-chat-contract.result }}
           STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
+          PAGES_ASSET_SMOKE_RESULT: ${{ needs.deploy-frontend.outputs.pages_asset_smoke_outcome }}
           AUTH_VALIDATION_ENABLED: ${{ inputs.validate_authenticated == true }}
         run: |
           {
@@ -1066,11 +1076,15 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "| --- | --- |"
+            echo "| Pages hashed-asset propagation | ${PAGES_ASSET_SMOKE_RESULT} |"
             echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"
             echo "| Live chat/content contract | ${LIVE_CHAT_CONTRACT_RESULT} |"
             echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          if [[ "$PAGES_ASSET_SMOKE_RESULT" != "success" ]]; then
+            echo "::error::Pages hashed-asset propagation result: ${PAGES_ASSET_SMOKE_RESULT}"
+          fi
           if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
             echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
           fi
@@ -1084,7 +1098,8 @@ jobs:
           [[ "$CHAT_PERFORMANCE_RESULT" == "success" \
             && ( "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
               || ( "$AUTH_VALIDATION_ENABLED" != "true" && "$LIVE_CHAT_CONTRACT_RESULT" == "skipped" ) ) \
-            && "$STAFF_ACCESS_RESULT" == "success" ]]
+            && "$STAFF_ACCESS_RESULT" == "success" \
+            && "$PAGES_ASSET_SMOKE_RESULT" == "success" ]]
 
   request-reset-email:
     name: Request fresh disposable password-reset email
