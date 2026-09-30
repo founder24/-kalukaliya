@@ -2,7 +2,7 @@
 AHSEC Textbook Content Ingestion Pipeline
 ==========================================
 Crawls AHSEC HS 1st-year (Class 11) and 2nd-year (Class 12) textbook pages,
-downloads English and Assamese medium PDFs, extracts chapter text via PyMuPDF,
+downloads English and Assamese medium PDFs, extracts chapter text via pypdfium2,
 generates concise notes + Q&A solutions using Sarvam AI, and populates each
 chapter's notes, RAG sections and Q&A RAG sections in MongoDB.
 
@@ -580,8 +580,8 @@ def build_catalogue(class11: bool = True, class12: bool = True) -> list[dict]:
     # ── Biology XI English gap note ───────────────────────────────────────────
     # AHSEC does not publish an English-medium Biology textbook for Class XI;
     # only the Assamese edition (BIOLOGY_1ST-YR_*.pdf) is hosted.  That PDF
-    # also uses a proprietary non-Unicode Assamese font so PyMuPDF extracts
-    # garbled characters rather than readable text — passing that to Sarvam
+    # also uses a proprietary non-Unicode Assamese font, so embedded-text
+    # extraction returns garbled characters rather than readable text — passing that to Sarvam
     # would produce low-quality notes.
     #
     # Until AHSEC publishes a Biology XI (E) PDF, the 22 pre-seeded Biology XI
@@ -635,8 +635,17 @@ def _download_pdf(url: str, total_timeout: int = 300) -> bytes:
     return b"".join(chunks)
 
 
+def _pdf_page_text(page) -> str:
+    """Extract text from one PDFium page and release its text-page handle."""
+    text_page = page.get_textpage()
+    try:
+        return text_page.get_text_range()
+    finally:
+        text_page.close()
+
+
 def _ocr_page(page, lang: str = "asm+eng") -> str:
-    """Render a PyMuPDF page to an image and OCR it with Tesseract.
+    """Render a PDFium page to an image and OCR it with Tesseract.
 
     Performance tuning:
     - 1.5× zoom (225 dpi equivalent) — sufficient for clear Assamese/English
@@ -645,13 +654,15 @@ def _ocr_page(page, lang: str = "asm+eng") -> str:
       textbook body pages which are predominantly single-column prose.
     """
     import pytesseract
-    from PIL import Image
-    import io
-
-    matrix = __import__("fitz").Matrix(1.5, 1.5)
-    pix = page.get_pixmap(matrix=matrix, colorspace=__import__("fitz").csRGB)
-    img = Image.open(io.BytesIO(pix.tobytes("png")))
-    return pytesseract.image_to_string(img, lang=lang, config="--psm 6")
+    bitmap = page.render(scale=1.5)
+    try:
+        image = bitmap.to_pil()
+        try:
+            return pytesseract.image_to_string(image, lang=lang, config="--psm 6")
+        finally:
+            image.close()
+    finally:
+        bitmap.close()
 
 
 # Maximum wall-clock seconds allowed for a single Tesseract OCR call.
@@ -663,7 +674,7 @@ OCR_PAGE_TIMEOUT = 120
 
 async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
     """
-    Download a PDF and extract text per page using PyMuPDF (fitz).
+    Download a PDF and extract text per page using pypdfium2.
     For Assamese PDFs: if a page's embedded text is garbled (non-Unicode
     Assamese font), fall back to Tesseract OCR with lang='asm+eng'.
 
@@ -673,7 +684,7 @@ async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
 
     Returns [{page_num, text}].  Pages with < 20 chars are skipped.
     """
-    import fitz  # PyMuPDF
+    import pypdfium2 as pdfium
 
     data = await asyncio.to_thread(_download_pdf, url)
     pages = []
@@ -681,55 +692,59 @@ async def extract_pdf_text(url: str, medium: str = "en") -> list[dict]:
     ocr_skipped = 0
     ocr_start = time.monotonic()
 
-    with fitz.open(stream=data, filetype="pdf") as doc:
-        for i, page in enumerate(doc):
-            text = page.get_text("text")
-            text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    with pdfium.PdfDocument(data) as doc:
+        for i in range(len(doc)):
+            page = doc.get_page(i)
+            try:
+                text = _pdf_page_text(page)
+                text = re.sub(r"\n{3,}", "\n\n", text).strip()
 
-            # For Assamese medium: if the embedded text looks garbled
-            # (very few actual Assamese Unicode chars), fall back to OCR.
-            if medium == "as" and len(text) > 30 and not _is_readable_assamese(text):
-                try:
-                    text = await asyncio.wait_for(
-                        asyncio.to_thread(_ocr_page, page, "asm+eng"),
-                        timeout=OCR_PAGE_TIMEOUT,
-                    )
-                    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-                    ocr_count += 1
-                except asyncio.TimeoutError:
-                    log.warning(
-                        f"    OCR timeout on p{i+1} (>{OCR_PAGE_TIMEOUT}s) — skipping page"
-                    )
-                    ocr_skipped += 1
-                    continue
-                except Exception as e:
-                    log.debug(f"    OCR failed p{i+1}: {e}")
-
-            # For ANY medium: if the page is image-only (no embedded text at
-            # all), fall back to Tesseract.  This handles scanned PDFs like
-            # Hornbill and Chemistry Part II that return 0 chars from PyMuPDF.
-            elif len(text) < 20:
-                try:
-                    lang = "asm+eng" if medium == "as" else "eng"
-                    ocr_text = await asyncio.wait_for(
-                        asyncio.to_thread(_ocr_page, page, lang),
-                        timeout=OCR_PAGE_TIMEOUT,
-                    )
-                    ocr_text = re.sub(r"\n{3,}", "\n\n", ocr_text).strip()
-                    if len(ocr_text) >= 20:
-                        text = ocr_text
+                # For Assamese medium: if the embedded text looks garbled
+                # (very few actual Assamese Unicode chars), fall back to OCR.
+                if medium == "as" and len(text) > 30 and not _is_readable_assamese(text):
+                    try:
+                        text = await asyncio.wait_for(
+                            asyncio.to_thread(_ocr_page, page, "asm+eng"),
+                            timeout=OCR_PAGE_TIMEOUT,
+                        )
+                        text = re.sub(r"\n{3,}", "\n\n", text).strip()
                         ocr_count += 1
-                except asyncio.TimeoutError:
-                    log.warning(
-                        f"    OCR timeout on p{i+1} (>{OCR_PAGE_TIMEOUT}s) — skipping page"
-                    )
-                    ocr_skipped += 1
-                    continue
-                except Exception as e:
-                    log.debug(f"    OCR fallback failed p{i+1}: {e}")
+                    except asyncio.TimeoutError:
+                        log.warning(
+                            f"    OCR timeout on p{i+1} (>{OCR_PAGE_TIMEOUT}s) — skipping page"
+                        )
+                        ocr_skipped += 1
+                        continue
+                    except Exception as e:
+                        log.debug(f"    OCR failed p{i+1}: {e}")
 
-            if len(text) >= 20:
-                pages.append({"page_num": i + 1, "text": text})
+                # For ANY medium: if the page is image-only (no embedded text at
+                # all), fall back to Tesseract.  This handles scanned PDFs like
+                # Hornbill and Chemistry Part II that return no embedded text.
+                elif len(text) < 20:
+                    try:
+                        lang = "asm+eng" if medium == "as" else "eng"
+                        ocr_text = await asyncio.wait_for(
+                            asyncio.to_thread(_ocr_page, page, lang),
+                            timeout=OCR_PAGE_TIMEOUT,
+                        )
+                        ocr_text = re.sub(r"\n{3,}", "\n\n", ocr_text).strip()
+                        if len(ocr_text) >= 20:
+                            text = ocr_text
+                            ocr_count += 1
+                    except asyncio.TimeoutError:
+                        log.warning(
+                            f"    OCR timeout on p{i+1} (>{OCR_PAGE_TIMEOUT}s) — skipping page"
+                        )
+                        ocr_skipped += 1
+                        continue
+                    except Exception as e:
+                        log.debug(f"    OCR fallback failed p{i+1}: {e}")
+
+                if len(text) >= 20:
+                    pages.append({"page_num": i + 1, "text": text})
+            finally:
+                page.close()
 
     if ocr_count or ocr_skipped:
         ocr_elapsed = time.monotonic() - ocr_start
@@ -762,7 +777,7 @@ _AS_DIGIT_MAP = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
 # Exercise / questions section markers (English)
 # Primary: actual exercise/question/problem headings (preferred).
 # Require the line to end without a trailing period — a period signals a
-# mid-sentence word-wrap by PyMuPDF, not a standalone section heading.
+# mid-sentence word-wrap from PDF text extraction, not a standalone section heading.
 _EN_EXERCISE_RE = re.compile(
     r"^(?:"
     # Explicit exercise/question section headers (NCERT / AHSEC standard)

@@ -22,10 +22,15 @@ description: How this monorepo is configured to run in the Replit environment
 ## Dependencies
 - Frontend: `pnpm install` in `apps/frontend`
 - Backend: `pip install -r apps/backend/requirements.txt`
-- Backend test collection may require the optional PDF dependency (`fitz`) even
-  when focused credential-free generation tests can run without it.
+- Backend test collection may require the pypdfium2 PDF dependency even when
+  focused credential-free generation tests do not exercise PDF import paths.
 - Replit blocks `playwright install --with-deps` because it cannot use apt/sudo; use browser-only Playwright installation locally and keep OS dependency provisioning in Ubuntu CI.
 - Backend test dependencies are not included in the shared `.pythonlibs` environment, and package installation may fail when it tries to reinstall pinned app dependencies into read-only Nix paths.
+- The pinned `requirements-dev.txt` can conflict with the runtime lock; resolve tests against the development input file instead.
+
+**Why:** Resolving the generated dev lock together with the runtime lock fails on incompatible `python-dotenv` pins, while the development input file resolves successfully.
+
+**How to apply:** From `apps/backend`, run focused tests with `PYTHONPATH=. uv run --no-project --with-requirements requirements.txt --with-requirements requirements-dev.in pytest ...`; do not add test tools to production requirements.
 
 ## Dev behavior without full secrets
 - App loads and chapter pages render correctly with MongoDB connected
