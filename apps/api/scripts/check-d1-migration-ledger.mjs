@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { assertD1MigrationLedgerMatchesFiles } from '../src/db/migration-ledger-contract.mjs';
 
