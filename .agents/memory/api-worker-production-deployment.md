@@ -33,3 +33,21 @@ metadata could also appear before the running Worker accepted it.
 secret through stdin, verify the resolved Worker name, poll a token-protected
 readiness route, run the probes only after it succeeds, and delete the Worker
 and temporary config in `finally`.
+
+## API-only production releases
+
+The standard Cloudflare release workflow deploys the API Worker, edge Worker,
+and Pages together. For a backend-only release, use a clean checkout based on
+the deployed commit and include only the intended API changes. Preserve the
+API release safeguards: run tests and type-checking, verify secret names and
+the D1 migration ledger/required migrations, run the refresh-token bridge
+guard, deploy only the production API Worker, and record successful deployment
+evidence in D1. Do not apply migrations when the change has none.
+
+**Why:** Re-running the aggregate workflow for an API-only fix republishes
+unrelated edge and frontend assets. Bypassing the API job's checks or rollout
+recording loses important production safeguards.
+
+**How to apply:** Keep API-only changes isolated from unrelated workspace
+commits; use the aggregate workflow whenever edge, frontend, secrets, or D1
+schema changes are part of the release.
