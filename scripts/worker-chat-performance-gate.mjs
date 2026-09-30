@@ -85,12 +85,19 @@ function probeMatchesRoute(probe, route) {
   return false;
 }
 
+function probeIsMeasuredOutlier(probe, report, route) {
+  return probeMatchesRoute(probe, route)
+    && !probe.probe_error
+    && typeof probe.first_token_ms === 'number'
+    && Number.isFinite(probe.first_token_ms)
+    && probe.first_token_ms > report.first_token_target_ms;
+}
+
 function dominantSlowPhase(affectedReports, route) {
   const phases = new Map();
   for (const report of affectedReports) {
     for (const probe of report?.probes ?? []) {
-      if (!probeMatchesRoute(probe, route)
-          || !(probe.first_token_ms > report.first_token_target_ms)) continue;
+      if (!probeIsMeasuredOutlier(probe, report, route)) continue;
       for (const [phase, durationMs] of Object.entries(probe.worker_timings_ms ?? {})) {
         if (NON_PHASE_TIMINGS.has(phase)
             || typeof durationMs !== 'number'
@@ -124,7 +131,7 @@ export function recurringOutlierWarnings(reports, minimumRuns = 2) {
     const affected = reports.filter(report => {
       const summary = report?.summary?.[route];
       return summary?.passed === true
-        && summary.first_token_max_ms > report.first_token_target_ms;
+        && (report?.probes ?? []).some(probe => probeIsMeasuredOutlier(probe, report, route));
     });
     if (affected.length < minimumRuns) continue;
     const dominantPhase = dominantSlowPhase(affected, route);

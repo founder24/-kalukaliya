@@ -296,6 +296,48 @@ describe('streamGenerate fallback behavior', () => {
 });
 
 describe('Workers AI cancellation', () => {
+  it('tries the fallback after the primary stream attempt times out', async () => {
+    const calls: string[] = [];
+    const hanging = () => new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => {});
+      },
+    });
+    const ai = {
+      run: async (model: string) => {
+        calls.push(model);
+        if (model === AI_MODEL_PRIMARY) return hanging();
+        return makeStream([encode('data: {"response":"Recovered answer"}\n')]);
+      },
+    } as unknown as Ai;
+
+    await expect(collect(streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+      streamTimeoutMs: 20,
+    }))).resolves.toEqual([
+      'Recovered answer',
+      `\x00model:${AI_MODEL_FALLBACK}`,
+    ]);
+    expect(calls).toEqual([AI_MODEL_PRIMARY, AI_MODEL_FALLBACK]);
+  });
+
+  it('bounds an English stream that hangs after opening without tokens', async () => {
+    const hanging = () => new ReadableStream<Uint8Array>({
+      pull() {
+        return new Promise<void>(() => {});
+      },
+    });
+    const ai = {
+      run: async () => hanging(),
+    } as unknown as Ai;
+    await expect(collect(streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'hello',
+      streamTimeoutMs: 20,
+    }))).rejects.toThrow('streaming attempt timed out');
+  });
+
   it('passes the caller signal to buffered inference and does not retry after abort', async () => {
     const controller = new AbortController();
     const calls: string[] = [];
@@ -396,7 +438,7 @@ describe('Workers AI cancellation', () => {
     controller.abort(new Error('client disconnected'));
 
     await expect(pendingNext).rejects.toThrow('client disconnected');
-    expect(bindingSignal).toBe(controller.signal);
+    expect(bindingSignal).not.toBe(controller.signal);
     expect(streamCancelled).toBe(true);
   });
 });

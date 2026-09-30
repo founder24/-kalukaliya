@@ -18,6 +18,8 @@
 export const AI_MODEL_PRIMARY  = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const AI_MODEL_FALLBACK = '@cf/qwen/qwen3-30b-a3b-fp8';
 export const AI_MODEL_ASSAMESE = '@cf/aisingapore/gemma-sea-lion-v4-27b-it';
+/** Hard cap for one English streaming attempt, including a stalled provider. */
+export const AI_STREAM_TIMEOUT_MS = 3_000;
 
 export interface GenerateOptions {
   systemPrompt: string;
@@ -39,11 +41,16 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortReason(signal);
 }
 
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'TimeoutError';
+}
+
 async function runWithTimeout<T>(
   parentSignal: AbortSignal | undefined,
   timeoutMs: number,
   timeoutMessage: string,
   run: (signal: AbortSignal) => Promise<T>,
+  minimumTimeoutMs = 500,
 ): Promise<T> {
   const controller = new AbortController();
   let rejectAbort!: (reason: unknown) => void;
@@ -72,7 +79,7 @@ async function runWithTimeout<T>(
     if (!controller.signal.aborted) {
       timer = setTimeout(
         () => controller.abort(timeoutError),
-        Math.max(500, timeoutMs),
+        Math.max(minimumTimeoutMs, timeoutMs),
       );
     }
     const operation = controller.signal.aborted
@@ -191,6 +198,7 @@ export function parseSseLine(line: string): string | null {
 export async function* drainStream(
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
+  deadlineAt?: number,
 ): AsyncGenerator<string> {
   const reader  = stream.getReader();
   const decoder = new TextDecoder();
@@ -204,11 +212,32 @@ export async function* drainStream(
     if (signal) void cancelReader(abortReason(signal));
   };
   signal?.addEventListener('abort', cancelOnAbort, { once: true });
+  const remaining = deadlineAt === undefined ? undefined : Math.max(1, deadlineAt - Date.now());
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  let timeoutError: Error | undefined;
+  const deadlinePromise = remaining === undefined
+    ? undefined
+    : new Promise<never>((_, reject) => {
+        deadlineTimer = setTimeout(() => {
+          const error = new Error('AI streaming attempt timed out');
+          error.name = 'TimeoutError';
+          timedOut = true;
+          timeoutError = error;
+          void cancelReader(error);
+          reject(error);
+        }, remaining);
+      });
 
   try {
     throwIfAborted(signal);
     while (true) {
-      const { done, value } = await reader.read();
+      const read = reader.read();
+      const readResult = deadlinePromise === undefined
+        ? read
+        : Promise.race([read, deadlinePromise]);
+      const { done, value } = await readResult;
+      if (timedOut) throw timeoutError;
       throwIfAborted(signal);
       if (done) break;
       buf += decoder.decode(value, { stream: true });
@@ -228,6 +257,7 @@ export async function* drainStream(
       if (delta !== null) yield delta;
     }
   } finally {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
     signal?.removeEventListener('abort', cancelOnAbort);
     void cancelReader(signal?.aborted ? abortReason(signal) : undefined);
   }
@@ -317,10 +347,12 @@ export async function* streamGenerate(
   opts: GenerateOptions & {
     primaryModel?: string;
     fallbackModel?: string;
+    streamTimeoutMs?: number;
   },
 ): AsyncGenerator<string> {
   const primaryModel = opts.primaryModel ?? AI_MODEL_PRIMARY;
   const fallbackModel = opts.fallbackModel ?? AI_MODEL_FALLBACK;
+  const streamTimeoutMs = opts.streamTimeoutMs ?? AI_STREAM_TIMEOUT_MS;
   let usedModel = primaryModel;
   let tokensEmitted = 0;
 
@@ -329,7 +361,7 @@ export async function* streamGenerate(
   // as a failure, which prevents callers from receiving a successful-looking
   // completion with an empty answer.
   try {
-    for await (const chunk of streamModel(ai, primaryModel, opts)) {
+    for await (const chunk of streamModel(ai, primaryModel, opts, streamTimeoutMs)) {
       tokensEmitted++;
       yield chunk;
     }
@@ -339,12 +371,16 @@ export async function* streamGenerate(
     console.warn('[ai] Primary stream model failed, trying fallback:', primaryErr);
     usedModel = fallbackModel;
     try {
-      for await (const chunk of streamModel(ai, fallbackModel, opts)) {
+      for await (const chunk of streamModel(ai, fallbackModel, opts, streamTimeoutMs)) {
         tokensEmitted++;
         yield chunk;
       }
     } catch (fallbackErr) {
       throwIfAborted(opts.signal);
+      // Do not start an unbounded buffered recovery after a bounded stream
+      // attempt timed out. A transport/model failure still retains the
+      // historical buffered recovery path.
+      if (isTimeoutError(fallbackErr)) throw fallbackErr;
       if (tokensEmitted > 0) throw fallbackErr;
       console.warn('[ai] Both stream models failed, trying buffered generation:', fallbackErr);
       const buffered = await generate(ai, opts);
@@ -364,10 +400,20 @@ async function* streamModel(
   ai: Ai,
   model: string,
   opts: GenerateOptions,
+  timeoutMs: number,
 ): AsyncGenerator<string> {
-  const stream = await runModelStream(ai, model, opts);
+  const deadlineAt = Date.now() + Math.max(1, timeoutMs);
+  // A derived signal lets Workers AI observe local timeout/cancellation while
+  // the parent signal remains distinguishable as caller cancellation.
+  const stream = await runWithTimeout(
+    opts.signal,
+    timeoutMs,
+    `[ai] ${model} streaming setup timed out`,
+    (signal) => runModelStream(ai, model, { ...opts, signal }),
+    1,
+  );
   let emitted = 0;
-  for await (const chunk of drainStream(stream, opts.signal)) {
+  for await (const chunk of drainStream(stream, opts.signal, deadlineAt)) {
     emitted++;
     yield chunk;
   }
