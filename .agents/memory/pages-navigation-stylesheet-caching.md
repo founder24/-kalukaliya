@@ -33,3 +33,9 @@ browser contexts and deploy transitions. For crawler asset lookups, compare
 the snapshot's explicit output-route marker with the requested path before
 bypassing backend bot rendering. Keep declared SPA routes eligible for backend
 rendering when no snapshot exists; only synthesize a 404 for undeclared paths.
+
+Pages publish completion can precede propagation of the new navigation document and its hashed assets to the public edge. A live smoke check may temporarily see a previous document whose hashes were removed by the deploy; a later fresh request can reference the new asset set and every file can return 200.
+
+**Why:** On 2026-09-30, the immediate Pages smoke failed on stale-asset 404s after deploy, while a later production request returned a new asset set successfully. The early failure prevented unrelated chat-performance checks from running.
+
+**How to apply:** After publishing Pages, re-fetch the production document and verify each referenced content-hashed asset until a bounded deadline. Fail if the latest document still references missing assets at the deadline, and retain the early failures in diagnostics.
