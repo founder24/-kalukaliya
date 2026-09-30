@@ -325,6 +325,24 @@ describe('ChatPage transport recovery', () => {
     expect(screen.queryByTestId('ai-unavailable-card')).not.toBeInTheDocument();
   });
 
+  it('renders missing authoritative evidence as assistant guidance, not an outage', async () => {
+    const detail = 'No published syllabus entries were found. Please share the relevant syllabus text.';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      detail,
+      error_code: 'authoritative_context_empty',
+      failure_stage: 'authoritative_retrieval',
+    }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+    render(<ChatPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(screen.queryByTestId('ai-unavailable-card')).not.toBeInTheDocument();
+  });
+
   it('parses fragmented UTF-8, CRLF framing, and a final unterminated event', async () => {
     const encoder = new TextEncoder();
     const prefix = encoder.encode(`data:${JSON.stringify({ content: 'অসমীয়া' })}\r\n\r\n`);
