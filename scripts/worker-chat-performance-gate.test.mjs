@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   buildReport,
   failedRouteMessages,
+  invalidProbeSample,
   recurringOutlierWarnings,
   summarizeRoute,
   validateProbeEvents,
@@ -78,6 +79,47 @@ test('one invalid stream is a failed sample without aborting the majority rule',
   assert.equal(summary.samples, 3);
   assert.equal(summary.passing_samples, 2);
   assert.equal(summary.first_token_median_ms, 2100);
+  assert.equal(summary.passed, true);
+});
+
+test('invalid streams preserve observed timing but cannot become passing samples', () => {
+  const failed = invalidProbeSample(
+    'direct_chapter_rag_1',
+    targetMs,
+    'direct emitted terminal chat_error',
+    {
+      headers_ms: 1800,
+      source_card_ms: 2100,
+      observed_first_token_ms: 2800,
+      terminal_event_ms: 5100,
+      event_count: 31,
+      token_events: 28,
+      output_chars: 162,
+      terminal_event: 'chat_error:provider_stream_failed:provider_stream',
+      worker_timings_ms: { quota_ms: 300, retrieval_ms: 900, generation_ms: 3000 },
+      rag_path: 'chapter_direct',
+      first_token_ms: 100,
+      target_met: true,
+    },
+  );
+
+  assert.equal(failed.first_token_ms, targetMs + 1);
+  assert.equal(failed.target_met, false);
+  assert.equal(failed.observed_first_token_ms, 2800);
+  assert.equal(failed.event_count, 31);
+  assert.equal(failed.output_chars, 162);
+  assert.deepEqual(failed.worker_timings_ms, {
+    quota_ms: 300,
+    retrieval_ms: 900,
+    generation_ms: 3000,
+  });
+
+  const summary = summarizeRoute([
+    failed,
+    sample('direct_chapter_rag_2', 1800),
+    sample('direct_chapter_rag_3', 1900),
+  ], targetMs);
+  assert.equal(summary.passing_samples, 2);
   assert.equal(summary.passed, true);
 });
 

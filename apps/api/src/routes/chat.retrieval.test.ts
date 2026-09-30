@@ -50,6 +50,25 @@ describe('chapter-scoped chat retrieval', () => {
       });
   });
 
+  it('includes numeric phase timings on terminal SSE errors when available', () => {
+    expect(terminalChatErrorEvent(
+      'Unavailable',
+      'provider_stream_failed',
+      'provider_stream',
+      'r1',
+      { quota_ms: 40, retrieval_ms: 120, source_card_ms: 180, generation_ms: 3_000 },
+    )).toMatchObject({
+      event: 'chat_error',
+      error_code: 'provider_stream_failed',
+      timings_ms: {
+        quota_ms: 40,
+        retrieval_ms: 120,
+        source_card_ms: 180,
+        generation_ms: 3_000,
+      },
+    });
+  });
+
   it('bypasses embedding and Vectorize only for usable explicit chapter content', () => {
     expect(shouldBypassSemanticRetrieval('chapter-1', 'Chapter notes')).toBe(true);
   });

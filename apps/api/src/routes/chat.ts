@@ -553,7 +553,8 @@ export function terminalChatErrorEvent(
   errorCode: string,
   failureStage: string,
   requestId: string,
-): Record<string, string | boolean> {
+  timings?: Readonly<Record<string, number>>,
+): Record<string, unknown> {
   return {
     event: 'chat_error',
     content: '',
@@ -562,6 +563,7 @@ export function terminalChatErrorEvent(
     error_code: errorCode,
     failure_stage: failureStage,
     request_id: requestId,
+    ...(timings !== undefined && { timings_ms: { ...timings } }),
   };
 }
 
@@ -2578,6 +2580,7 @@ chatRouter.post('/stream', async (c) => {
   // the ID from the first SSE event. We must mint here (not in waitUntil) so
   // history and persistence both use the same ID and the client learns it early.
   const effectiveSessionId: string = sessionId ?? crypto.randomUUID();
+  const sourceEntriesStart = Date.now();
   const sourceEntries = await buildSourceEntries(
     c.env.DB,
     contextChunks,
@@ -2585,6 +2588,7 @@ chatRouter.post('/stream', async (c) => {
     lang,
     { skipHierarchyForDirect: Boolean(directChapterId) },
   );
+  timings.source_entries_ms = Date.now() - sourceEntriesStart;
   const primaryCurriculumSource = sourceEntries.find(entry => entry.kind === 'curriculum');
 
   // ── 8. Source card (emitted as the very first SSE event) ────────────────────
@@ -2691,7 +2695,9 @@ chatRouter.post('/stream', async (c) => {
       if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
       // Always emit source_card first — client uses this to learn the conversation_id
       await write(sourceCard);
+      timings.source_card_ms = Date.now() - startTime;
       if (verifiedWebEvidenceUnavailable) {
+        timings.total_ms = Date.now() - startTime;
         await write({
           ...terminalChatErrorEvent(
             lang === 'as'
@@ -2700,6 +2706,7 @@ chatRouter.post('/stream', async (c) => {
             'verified_web_evidence_unavailable',
             'web_evidence',
             serverRequestId,
+            timings,
           ),
           error_kind: 'web_evidence_unavailable',
         });
@@ -2712,8 +2719,10 @@ chatRouter.post('/stream', async (c) => {
       // generated non-streaming because the route must validate the complete
       // answer before exposing it, and SEA-LION uses an OpenAI-style response.
       let streamDone = false;
+      let generationStartedAt: number | undefined;
 
       try {
+        generationStartedAt = Date.now();
         if (lang === 'as') {
           const generated = await generateAssamese(c.env.AI, {
             systemPrompt,
@@ -2747,19 +2756,25 @@ chatRouter.post('/stream', async (c) => {
             await write({ content: chunk, done: false });
           }
         }
+        timings.generation_ms = Date.now() - generationStartedAt;
         streamDone = true;
       } catch (streamErr) {
+        if (generationStartedAt !== undefined) {
+          timings.generation_ms = Date.now() - generationStartedAt;
+        }
         console.warn('[chat] streamGenerate failed:', streamErr);
         throw streamErr;
       }
 
       if (!streamDone || !fullResponse) {
         // Provider returned an empty response — release the reserved slot
+        timings.total_ms = Date.now() - startTime;
         await write(terminalChatErrorEvent(
           'Empty response from AI. Please try again.',
           'provider_empty_response',
           'provider_stream',
           serverRequestId,
+          timings,
         ));
         await recordAnalytics('chat_failure', 'provider_stream');
         await releaseQuota().catch((e) => console.error('[chat] quota release failed:', e));
@@ -2790,12 +2805,14 @@ chatRouter.post('/stream', async (c) => {
             console.warn('[chat] Assamese fallback-model repair failed:', repairError);
           }
           if (!isDeliverableAssameseAnswer(fullResponse)) {
+            timings.total_ms = Date.now() - startTime;
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
                 'assamese_language_validation_failed',
                 'language_validation',
                 serverRequestId,
+                timings,
               ),
               error_kind: 'assamese_unavailable',
             });
@@ -2898,12 +2915,14 @@ chatRouter.post('/stream', async (c) => {
         return;
       }
       console.error('[chat] Stream pipeline error:', err);
+      timings.total_ms = Date.now() - startTime;
       try {
         await write(terminalChatErrorEvent(
           'AI service temporarily unavailable. Please try again.',
           'provider_stream_failed',
           'provider_stream',
           serverRequestId,
+          timings,
         ));
       } catch { /* writer may already be closed */ }
       // Release the reserved slot — provider/config errors must not consume quota
