@@ -74,11 +74,16 @@ def main() -> int:
     for marker in (
         "rehearse_chat_latency_failure:",
         "github.event_name == 'workflow_dispatch' && inputs.rehearse_chat_latency_failure",
-        "needs: [chat-performance, live-chat-contract, disposable-staff-auth]",
+        "needs: [chat-performance, live-chat-contract, disposable-staff-auth, deploy-frontend]",
+        "pages_asset_smoke_outcome: ${{ steps.live-ad-smoke.outcome }}",
+        "PAGES_ASSET_SMOKE_RESULT: ${{ needs.deploy-frontend.outputs.pages_asset_smoke_outcome }}",
         "CHAT_PERFORMANCE_RESULT: ${{ needs.chat-performance.result }}",
         "STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}",
+        'echo "| Pages hashed-asset propagation | ${PAGES_ASSET_SMOKE_RESULT} |"',
         'echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"',
         'echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"',
+        'if [[ "$PAGES_ASSET_SMOKE_RESULT" != "success" ]]; then',
+        '&& "$PAGES_ASSET_SMOKE_RESULT" == "success" ]]',
     ):
         if marker not in release:
             errors.append(
