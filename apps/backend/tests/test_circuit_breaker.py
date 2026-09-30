@@ -4,7 +4,7 @@ Circuit Breaker Tests: Resilience Pattern Validation
 
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.core.circuit_breaker import CircuitBreaker, CircuitState, CircuitBreakerError
 
 
@@ -134,7 +134,7 @@ class TestCircuitBreaker:
         from app.services.ai import workers_ai_client as module
 
         monkeypatch.setattr(module.settings, "EDGE_SHARED_SECRET", "test-edge-secret")
-        response = AsyncMock()
+        response = MagicMock()
         response.json.return_value = {"text": "generated"}
         response.raise_for_status.return_value = None
 

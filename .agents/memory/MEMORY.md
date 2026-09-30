@@ -100,3 +100,4 @@
 - [GitHub Actions runner context in job env](github-actions-runner-context-job-env.md) — job-level env can't use `runner` context; causes whole workflow to fail to start (0 jobs), not just a lint warning
 - [Dependabot stale manifest alerts](dependabot-stale-manifest-alerts.md) — alerts don't auto-close when their manifest file is deleted; dismiss via API with reason "inaccurate"; alerts endpoint needs Link-header pagination, not ?page=
 - [Drizzle migration history](drizzle-migration-history.md) — preserve applied names; verify parallel histories and clean-database replay before restoring or renumbering SQL.
+- [Backend test isolation](backend-test-isolation.md) — Keep endpoint lifespan mocks and canonical script module identity scoped; avoid replacing `sys.modules` in importer tests.

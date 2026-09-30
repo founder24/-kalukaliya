@@ -85,7 +85,9 @@ async def test_chat_request_replaces_caller_supplied_uuid(client):
 def test_chat_log_extras_do_not_include_client_metadata():
     from pathlib import Path
 
-    source = Path("app/api/v1/chat.py").read_text()
+    source = (
+        Path(__file__).resolve().parents[1] / "app/api/v1/chat.py"
+    ).read_text()
     tree = ast.parse(source)
     forbidden_keys = {
         "user_id",

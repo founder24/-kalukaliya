@@ -261,21 +261,36 @@ class TestTranslateKnowledgeObject:
 class TestAdminTranslateEndpoints:
     """Tests for admin translation API endpoints."""
 
+    @pytest.fixture(autouse=True)
+    def admin_dependency_overrides(self):
+        from app.api.v1.admin import csrf_guard, require_admin_session
+        from app.main import app
+
+        sentinel = object()
+        dependencies = (require_admin_session, csrf_guard)
+        previous = {
+            dependency: app.dependency_overrides.get(dependency, sentinel)
+            for dependency in dependencies
+        }
+
+        async def allow_admin():
+            return {"sub": "admin-id", "type": "admin", "role": "admin"}
+
+        async def allow_csrf():
+            return None
+
+        app.dependency_overrides[require_admin_session] = allow_admin
+        app.dependency_overrides[csrf_guard] = allow_csrf
+        yield
+        for dependency, original in previous.items():
+            if original is sentinel:
+                app.dependency_overrides.pop(dependency, None)
+            else:
+                app.dependency_overrides[dependency] = original
+
     async def test_bulk_translate_returns_started(self, client):
         """Test bulk translate endpoint returns started status."""
         with (
-            patch(
-                "app.api.v1.admin._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._csrf_check",
-                new_callable=AsyncMock,
-            ),
             patch(
                 "app.api.v1.admin_translate.translator.bulk_translate",
                 new_callable=AsyncMock,
@@ -297,46 +312,22 @@ class TestAdminTranslateEndpoints:
 
     async def test_status_endpoint_no_job(self, client):
         """Test status endpoint when no job has run."""
-        with (
-            patch(
-                "app.api.v1.admin._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-        ):
-            # Clear any translation_status from previous test
-            from app.main import app
+        # Clear any translation_status from previous test
+        from app.main import app
 
-            if hasattr(app.state, "translation_status"):
-                del app.state.translation_status
+        if hasattr(app.state, "translation_status"):
+            del app.state.translation_status
 
-            response = await client.get("/api/v1/admin/content/translate/status")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["running"] is False
+        response = await client.get("/api/v1/admin/content/translate/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is False
 
     async def test_translate_single_not_found(self, client):
         """Test single translate returns 404 for missing object."""
-        with (
-            patch(
-                "app.api.v1.admin._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._csrf_check",
-                new_callable=AsyncMock,
-            ),
-            patch(
-                "app.api.v1.admin_translate.KnowledgeObject",
-            ) as MockKO,
-        ):
+        with patch(
+            "app.api.v1.admin_translate.KnowledgeObject",
+        ) as MockKO:
             MockKO.find_one = AsyncMock(return_value=None)
             response = await client.post(
                 "/api/v1/admin/content/translate/nonexistent-slug",
@@ -349,23 +340,9 @@ class TestAdminTranslateEndpoints:
         mock_ko = MagicMock()
         mock_ko.slug = "test-slug"
 
-        with (
-            patch(
-                "app.api.v1.admin._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._validate_admin_session",
-                return_value={"sub": "admin-id", "type": "admin", "role": "admin"},
-            ),
-            patch(
-                "app.api.v1.admin_translate._csrf_check",
-                new_callable=AsyncMock,
-            ),
-            patch(
-                "app.api.v1.admin_translate.KnowledgeObject",
-            ) as MockKO,
-        ):
+        with patch(
+            "app.api.v1.admin_translate.KnowledgeObject",
+        ) as MockKO:
             # First call finds the object, second call finds existing translation
             MockKO.find_one = AsyncMock(return_value=mock_ko)
             response = await client.post(
@@ -376,13 +353,16 @@ class TestAdminTranslateEndpoints:
 
     async def test_cron_translate_unauthorized(self, client):
         """Test cron endpoint rejects missing token."""
-        response = await client.post("/api/v1/admin/content/translate/cron")
+        response = await client.post("/api/v1/admin/cron/translate")
         assert response.status_code == 401
 
-    async def test_cron_translate_invalid_token(self, client):
+    async def test_cron_translate_invalid_token(self, client, monkeypatch):
         """Test cron endpoint rejects wrong token."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "TRANSLATE_CRON_SECRET", "test-cron-secret")
         response = await client.post(
-            "/api/v1/admin/content/translate/cron",
+            "/api/v1/admin/cron/translate",
             headers={"Authorization": "Bearer wrong-token"},
         )
         assert response.status_code == 403

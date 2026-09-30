@@ -13,39 +13,10 @@ from app.config import settings
 
 
 @pytest.mark.anyio
-async def test_razorpay_503_when_not_configured(client: AsyncClient):
-    """Subscription create-order returns 503 when Razorpay keys are missing."""
-    from app.main import app
-    from app.api.v1.auth import get_current_user
-
-    mock_user = MagicMock()
-    mock_user.id = "test-user-id-123"
-    mock_user.email = "test@example.com"
-    mock_user.is_pro.return_value = False
-
-    async def override_get_current_user():
-        return mock_user
-
-    app.dependency_overrides[get_current_user] = override_get_current_user
-    try:
-        with (
-            patch(
-                "app.services.payment.razorpay_client.razorpay_client.key_id",
-                None,
-            ),
-            patch(
-                "app.services.payment.razorpay_client.razorpay_client.key_secret",
-                None,
-            ),
-        ):
-            response = await client.post(
-                "/api/v1/subscription/create-order",
-                headers={"Authorization": "Bearer fake-token"},
-            )
-            assert response.status_code == 503
-            assert "not configured" in response.json()["detail"]
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+async def test_retired_subscription_create_order_is_not_mounted(client: AsyncClient):
+    """Retired Python subscription endpoints return 404, regardless of config."""
+    response = await client.post("/api/v1/subscription/create-order")
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
@@ -73,15 +44,12 @@ async def test_beanie_uninitialized_returns_503(client: AsyncClient):
 
 
 @pytest.mark.anyio
-async def test_auth_rate_limit_fails_open_when_mongo_unavailable():
-    """Login proceeds (rate-limit fails open) when the MongoDB rate-limit backend is down.
+async def test_auth_rate_limit_fails_closed_when_mongo_unavailable():
+    """Login fails closed when the MongoDB rate-limit backend is down.
 
     The rate limiter moved off Redis to MongoDB (auth_rate_limit collection).
-    Unlike the old Redis fail-closed 503, the MongoDB-backed limiter fails OPEN:
-    if the datastore is unavailable it logs a warning and allows the request
-    through (bcrypt cost + Cloudflare WAF provide outer protection). The request
-    therefore reaches auth logic and returns 401 for an unknown user rather than
-    a 503 from the rate limiter.
+    It intentionally returns 503 rather than allowing authentication to proceed
+    without an atomic limiter.
     """
     from app.main import app
     from httpx import AsyncClient, ASGITransport
@@ -106,9 +74,8 @@ async def test_auth_rate_limit_fails_open_when_mongo_unavailable():
                     "password": "SomePassword123",
                 },
             )
-            # Rate limiter did not block (would be 503/429); auth ran and rejected.
-            assert response.status_code == 401
-            assert "Invalid credentials" in response.json()["detail"]
+            assert response.status_code == 503
+            assert "MongoDB not initialized" not in response.json()["detail"]
 
 
 @pytest.mark.anyio

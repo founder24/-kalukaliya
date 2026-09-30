@@ -25,6 +25,7 @@ def clean_env(monkeypatch):
         "CLOUDFLARE_ACCOUNT_ID",
         "CF_WORKER_AI_TOKEN",
         "CF_API_TOKEN",
+        "CLOUDFLARE_API_TOKEN",
         "RAG_LEGACY_FALLBACK_ENABLED",
     ]
     for var in env_vars_to_clear:

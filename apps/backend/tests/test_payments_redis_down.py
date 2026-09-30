@@ -17,6 +17,13 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Legacy payment endpoints are intentionally unmounted; active 404 "
+        "contract coverage is in test_auth.py."
+    )
+)
+
 from httpx import AsyncClient
 
 # ---------------------------------------------------------------------------
