@@ -63,6 +63,18 @@ unprotected force push.
 **How to apply:** after rebasing, run `git ls-remote origin refs/heads/<branch>`,
 then use that exact remote SHA as the explicit lease value.
 
+## Normal branch pushes through GIT_ASKPASS
+When the existing `GITHUB_TOKEN` secret can write to the repository, a temporary
+`GIT_ASKPASS` helper can supply it to Git without putting the token in a remote
+URL, command arguments, Git config, or logs. Use `x-access-token` as the username,
+disable terminal prompts, restrict the helper file, and remove it after the push.
+
+**Why:** the authenticated normal Git push succeeded for a protected-branch PR
+workflow where the GitHub connector proxy was unsuitable for bulk file transfer.
+
+**How to apply:** push only the named topic branch, never protected `main`; keep
+the secret in the process environment and verify the branch/PR after the push.
+
 **Why:** A reconciliation succeeded incrementally until the deployment workflow
 path, where both proxy and native Octokit tree creation returned 404 despite
 healthy repository write access.

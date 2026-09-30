@@ -8,6 +8,7 @@ by measuring elapsed time with all I/O operations mocked to return immediately.
 
 import time
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
@@ -48,23 +49,38 @@ def mocked_pipeline_client():
 
     patches = {
         "rate_limit": patch(
-            "app.api.deps.rate_limit.get_redis", return_value=mock_redis
+            "app.api.v1.chat.check_rate_limit",
+            new_callable=AsyncMock,
+            return_value=(True, 1, 6, "anonymous"),
         ),
         "redis_cache": patch("app.db.redis.get_redis", return_value=mock_redis),
-        "embedding": patch(
-            "app.services.ai.embedder.generate_embedding",
+        "topic_match": patch(
+            "app.services.chat_service.ChatService.check_topic_match_with_embedding",
             new_callable=AsyncMock,
-            return_value="mock-embedding-vector",
+            return_value=(None, None),
         ),
         "search": patch(
-            "app.services.search.vertex_search.search_service.search_context",
+            "app.services.chat_service.ChatService.retrieve_web_context",
             new_callable=AsyncMock,
-            return_value=mock_context_chunks,
+            return_value=[],
+        ),
+        "history": patch(
+            "app.services.chat_service.ChatService.load_conversation_history",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        "last_source": patch(
+            "app.services.chat_service.ChatService.load_last_source_ctx",
+            new_callable=AsyncMock,
+            return_value=None,
         ),
         "llm_generate": patch(
-            "app.services.ai.router.generate_response",
+            "app.services.chat_service.ChatService.call_llm",
             new_callable=AsyncMock,
-            return_value="This is a test response about Assam education.",
+            return_value=(
+                "This is a test response about Assam education.",
+                "mock-model",
+            ),
         ),
         "token_budget": patch(
             "app.core.token_budget.truncate_chunks_to_budget",
@@ -81,15 +97,24 @@ def mocked_pipeline_client():
         ),
     }
 
+    @asynccontextmanager
+    async def no_startup_lifespan(_app):
+        # These endpoint tests mock provider I/O and do not exercise expensive
+        # production startup tasks such as greeting-embedding warmup.
+        yield
+
     with (
         patches["rate_limit"],
         patches["redis_cache"],
-        patches["embedding"],
+        patches["topic_match"],
         patches["search"],
+        patches["history"],
+        patches["last_source"],
         patches["llm_generate"],
         patches["token_budget"],
         patches["posthog"],
         patches["auth_optional"],
+        patch.object(app.router, "lifespan_context", no_startup_lifespan),
     ):
         with TestClient(app, raise_server_exceptions=False) as client:
             yield client

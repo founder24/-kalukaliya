@@ -571,7 +571,7 @@ async def _ahsec_stuck_retry_background(app, stuck_chapters: list[dict]) -> None
             key     = (ch.get("key") or "").strip()
             if not pdf_url or not key:
                 continue
-            m = _re.search(r'\|ch(\d+)$', key)
+            m = _re.search(r'\|ch(\d+)(?:\|(en|as))?$', key)
             if not m:
                 logger.warning(f"ahsec_stuck_retry: cannot parse raw_num from key {key!r}")
                 continue
@@ -580,7 +580,7 @@ async def _ahsec_stuck_retry_background(app, stuck_chapters: list[dict]) -> None
                 "chapter_id": (ch.get("chapter_id") or "").strip(),
                 "key":        key,
                 "raw_num":    raw_num,
-                "medium":     ch.get("medium") or "en",
+                "medium":     ch.get("medium") or m.group(2) or "en",
             })
 
         for pdf_url, items in by_pdf.items():

@@ -81,6 +81,29 @@ test('one invalid stream is a failed sample without aborting the majority rule',
   assert.equal(summary.passed, true);
 });
 
+test('an incomplete sentinel sample does not create a recurring measured-latency warning', () => {
+  const current = reportFor([1500, 1700, 2100], [targetMs + 1, 1700, 1900]);
+  const previous = reportFor([1500, 1600, 2200], [targetMs + 1, 1700, 1900]);
+  for (const report of [current, previous]) {
+    const probe = report.probes.find(item => item.web_used === true);
+    probe.probe_error = 'SSE order invalid: source=0, token=-1, done=-1';
+  }
+
+  assert.equal(current.summary.rag_plus_bounded_web.passed, true);
+  assert.equal(previous.summary.rag_plus_bounded_web.passed, true);
+  assert.deepEqual(recurringOutlierWarnings([current, previous]), []);
+});
+
+test('recurring warnings still report genuine measured outliers', () => {
+  const current = reportFor([targetMs + 1, 1700, 2100], [1500, 1700, 1900]);
+  const previous = reportFor([targetMs + 1, 1600, 2200], [1500, 1700, 1900]);
+
+  assert.deepEqual(
+    recurringOutlierWarnings([current, previous]).map(warning => warning.route),
+    ['direct_chapter_rag'],
+  );
+});
+
 test('two slow samples out of three fail only the affected route', () => {
   const report = reportFor([1200, 4500, 4800], [4100, 1500, 1700]);
 

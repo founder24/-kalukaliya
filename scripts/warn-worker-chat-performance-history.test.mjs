@@ -21,7 +21,17 @@ function report(directMax, webMax, { directPassed = true, webPassed = true } = {
       direct_chapter_rag: route(directMax, directPassed),
       rag_plus_bounded_web: route(webMax, webPassed),
     },
-    probes: [],
+    probes: [
+      {
+        first_token_ms: directMax,
+        rag_path: 'chapter_direct',
+      },
+      {
+        first_token_ms: webMax,
+        web_used: true,
+        web_status: 'ok',
+      },
+    ],
   };
 }
 

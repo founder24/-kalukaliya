@@ -20,6 +20,13 @@ import pytest
 from httpx import AsyncClient
 from unittest.mock import AsyncMock, MagicMock, patch
 
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Legacy payment endpoints are intentionally unmounted; active 404 "
+        "contract coverage is in test_auth.py."
+    )
+)
+
 # Current plan prices in paise (1 INR = 100 paise)
 PLAN_PRICES = {"starter": 9900, "pro": 99900}
 

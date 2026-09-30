@@ -30,6 +30,8 @@ bcrypt==5.0.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
 beanie==2.1.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
+beautifulsoup4==4.15.0
+    # via -r /home/runner/workspace/apps/backend/requirements.in
 brotli==1.2.0
     # via httpx
 certifi==2026.5.20
@@ -198,7 +200,7 @@ pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.15.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
-pyjwt==2.13.0
+pyjwt==2.15.1
     # via -r /home/runner/workspace/apps/backend/requirements.in
 pymongo==4.17.0
     # via
@@ -235,6 +237,8 @@ six==1.17.0
     # via python-dateutil
 socksio==1.0.0
     # via httpx
+soupsieve==2.10
+    # via beautifulsoup4
 starlette==1.6.0
     # via
     #   -r /home/runner/workspace/apps/backend/requirements.in
@@ -247,6 +251,7 @@ typing-extensions==4.16.0
     #   aiosignal
     #   anyio
     #   beanie
+    #   beautifulsoup4
     #   fastapi
     #   grpcio
     #   posthog

@@ -558,6 +558,7 @@ class TestAutoCompactAfterRetry:
     async def test_compact_called_when_import_fails(self):
         """If the ingest module cannot be imported, compaction still runs so any
         previously-resolved entries are cleared from the log."""
+        import builtins
         import sys
         from pathlib import Path as _Path
 
@@ -574,21 +575,22 @@ class TestAutoCompactAfterRetry:
             return {"compacted": False, "resolved_cleared": 0, "still_stuck": 0,
                     "records_before": 0, "records_after": 0, "file_exists": False}
 
-        # Simulate the ingest module import failing by setting its sys.modules
-        # entry to None — Python raises ImportError when it finds None there.
-        import sys as _sys
-        original = _sys.modules.pop("scripts.ahsec_ingest", _SENTINEL := object())
-        _sys.modules["scripts.ahsec_ingest"] = None  # causes ImportError on import
-        try:
-            with patch.object(admin_mod, "_compact_progress_log",
-                              side_effect=_fake_compact):
-                await admin_mod._ahsec_stuck_retry_background(MagicMock(), [])
-        finally:
-            # Restore sys.modules exactly as it was
-            if original is _SENTINEL:
-                _sys.modules.pop("scripts.ahsec_ingest", None)
-            else:
-                _sys.modules["scripts.ahsec_ingest"] = original
+        original_import = builtins.__import__
+
+        def fail_ingest_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "scripts.ahsec_ingest":
+                raise ImportError("simulated AHSEC importer import failure")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with (
+            patch("builtins.__import__", side_effect=fail_ingest_import),
+            patch.object(
+                admin_mod,
+                "_compact_progress_log",
+                side_effect=_fake_compact,
+            ),
+        ):
+            await admin_mod._ahsec_stuck_retry_background(MagicMock(), [])
 
         assert len(compact_calls) == 1, (
             "_compact_progress_log() must fire via finally even when the ingest "
@@ -673,7 +675,7 @@ class TestStuckListSelfHealsAfterRetry:
 
     CHAPTER_ID = "5a1f87822c1a19d2142de3d6"   # 24-hex valid ObjectId
     PDF_URL    = "https://example.com/test_physics.pdf"
-    KEY        = f"{PDF_URL}|ch5"
+    KEY        = f"{PDF_URL}|ch5|en"
 
     def _stuck_record(self) -> str:
         """A single notes_provider_unavailable JSONL line for the test chapter."""
@@ -734,21 +736,21 @@ class TestStuckListSelfHealsAfterRetry:
 
         with (
             patch("app.services.ai.sarvam_client.sarvam_client", MagicMock()),
-            patch("scripts.ahsec_ingest.extract_pdf_text", new_callable=AsyncMock,
+            patch.object(ingest_mod, "extract_pdf_text", new_callable=AsyncMock,
                   return_value=[{"page_num": 1, "text": "content " * 20}]),
-            patch("scripts.ahsec_ingest.split_into_chapters", return_value=[{
+            patch.object(ingest_mod, "split_into_chapters", return_value=[{
                 "chapter_num": 5, "title": "Thermodynamics",
                 "body_text": "body " * 60, "exercises_text": "",
             }]),
             # generate_notes SUCCEEDS → _log_progress will write "done"
-            patch("scripts.ahsec_ingest.generate_notes",
+            patch.object(ingest_mod, "generate_notes",
                   new_callable=AsyncMock,
                   return_value="## Thermodynamics\n\n" + "Notes content. " * 200),
-            patch("scripts.ahsec_ingest.notes_to_rag_sections", return_value=[]),
-            patch("scripts.ahsec_ingest.extract_topics_from_notes", return_value=[]),
-            patch("scripts.ahsec_ingest.save_chapter_content",
+            patch.object(ingest_mod, "notes_to_rag_sections", return_value=[]),
+            patch.object(ingest_mod, "extract_topics_from_notes", return_value=[]),
+            patch.object(ingest_mod, "save_chapter_content",
                   new_callable=AsyncMock, return_value=True),
-            patch("scripts.ahsec_ingest.reindex_chapter",
+            patch.object(ingest_mod, "reindex_chapter",
                   new_callable=AsyncMock, return_value=None),
             patch("app.models.content.Chapter.get",
                   new_callable=AsyncMock, return_value=mock_chapter),
@@ -1293,7 +1295,9 @@ class TestProcessPdfEntryAssameseBlocked:
 
 
     @pytest.mark.anyio
-    async def test_assamese_run_with_real_progress_file_writes_medium_as(self, tmp_path):
+    async def test_assamese_run_with_real_progress_file_writes_medium_as(
+        self, tmp_path, monkeypatch
+    ):
         """End-to-end: when process_pdf_entry() runs with the real _log_progress
         writing to a temp file, the written JSONL record must have medium='as'."""
         import sys
@@ -1303,14 +1307,17 @@ class TestProcessPdfEntryAssameseBlocked:
         if str(backend_root) not in sys.path:
             sys.path.insert(0, str(backend_root))
 
-        from scripts.ahsec_ingest import (
-            NotesProviderUnavailableError,
-            process_pdf_entry,
-        )
         import scripts.ahsec_ingest as ingest_mod
 
         progress_file = tmp_path / ".ahsec_ingest_progress.jsonl"
         lock_file     = tmp_path / ".ahsec_ingest_progress.lock"
+        monkeypatch.setattr(ingest_mod, "PROGRESS_FILE", progress_file)
+        monkeypatch.setattr(ingest_mod, "PROGRESS_LOCK_FILE", lock_file)
+        assert ingest_mod.PROGRESS_FILE == progress_file
+        assert ingest_mod.PROGRESS_LOCK_FILE == lock_file
+
+        NotesProviderUnavailableError = ingest_mod.NotesProviderUnavailableError
+        process_pdf_entry = ingest_mod.process_pdf_entry
 
         entry = {
             "subject_name": "Physics",
@@ -1336,22 +1343,20 @@ class TestProcessPdfEntryAssameseBlocked:
 
         with (
             patch("app.services.ai.sarvam_client.sarvam_client", MagicMock()),
-            patch("scripts.ahsec_ingest.upsert_subject",
+            patch.object(ingest_mod, "upsert_subject",
                   new_callable=AsyncMock, return_value=mock_subject),
-            patch("scripts.ahsec_ingest.extract_pdf_text", new_callable=AsyncMock,
+            patch.object(ingest_mod, "extract_pdf_text", new_callable=AsyncMock,
                   return_value=[{"page_num": 1, "text": "পদার্থবিজ্ঞান " * 10}]),
-            patch("scripts.ahsec_ingest.split_into_chapters", return_value=[{
+            patch.object(ingest_mod, "split_into_chapters", return_value=[{
                 "chapter_num": 3,
                 "title": "গতিসূত্র",
                 "body_text": "body " * 40,
                 "exercises_text": "",
             }]),
-            patch("scripts.ahsec_ingest.upsert_chapter",
+            patch.object(ingest_mod, "upsert_chapter",
                   new_callable=AsyncMock, return_value=(mock_chapter, True)),
-            patch("scripts.ahsec_ingest.generate_notes",
+            patch.object(ingest_mod, "generate_notes",
                   new_callable=AsyncMock, side_effect=unavail_err),
-            patch.object(ingest_mod, "PROGRESS_FILE",      progress_file),
-            patch.object(ingest_mod, "PROGRESS_LOCK_FILE", lock_file),
         ):
             await process_pdf_entry(
                 entry,

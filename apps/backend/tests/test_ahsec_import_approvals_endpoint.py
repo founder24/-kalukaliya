@@ -553,6 +553,11 @@ def test_index_repair_queue_uses_latest_archived_state_and_attempt_limit(
     with (
         patch.object(admin_content, "_AHSEC_D1_APPROVAL_FILE", approvals),
         patch.object(admin_content, "_AHSEC_D1_IMPORT_PROGRESS_FILE", progress),
+        patch.object(
+            admin_content,
+            "_AHSEC_D1_LATEST_PROGRESS_INDEX_FILE",
+            state_dir / "latest-progress.json",
+        ),
         patch.object(admin_content, "_AHSEC_D1_ARCHIVE_DIR", state_dir / "archive"),
     ):
         response = client.get(

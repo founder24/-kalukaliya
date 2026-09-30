@@ -60,12 +60,17 @@ async def test_protected_endpoint_without_token(client: AsyncClient):
     [
         ("GET", "/api/v1/subscription/status"),
         ("POST", "/api/v1/subscription/create-order"),
+        ("POST", "/api/v1/payments/create-order"),
+        ("POST", "/api/v1/payments/verify"),
+        ("POST", "/api/v1/payments/credit-topup/verify"),
+        ("POST", "/api/v1/payments/recover"),
+        ("POST", "/api/webhooks/razorpay"),
     ],
 )
-async def test_retired_subscription_routes_remain_unmounted(
+async def test_retired_billing_routes_remain_unmounted(
     client: AsyncClient, method: str, path: str
 ):
-    """Legacy Python payment routes stay outside the Cloudflare-native API."""
+    """Legacy Python billing and webhook routes stay outside the active API."""
     response = await client.request(method, path)
     assert response.status_code == 404
 
