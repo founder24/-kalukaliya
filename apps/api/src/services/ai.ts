@@ -18,7 +18,7 @@
 export const AI_MODEL_PRIMARY  = '@cf/meta/llama-3.1-8b-instruct-fast';
 export const AI_MODEL_FALLBACK = '@cf/qwen/qwen3-30b-a3b-fp8';
 export const AI_MODEL_ASSAMESE = '@cf/aisingapore/gemma-sea-lion-v4-27b-it';
-/** Hard cap for one English streaming attempt, including a stalled provider. */
+/** Hard cap on local wall-clock time for one English attempt, including a stalled provider response. */
 export const AI_STREAM_TIMEOUT_MS = 3_000;
 
 export interface GenerateOptions {
@@ -50,7 +50,6 @@ async function runWithTimeout<T>(
   timeoutMs: number,
   timeoutMessage: string,
   run: (signal: AbortSignal) => Promise<T>,
-  minimumTimeoutMs = 500,
 ): Promise<T> {
   const controller = new AbortController();
   let rejectAbort!: (reason: unknown) => void;
@@ -79,7 +78,7 @@ async function runWithTimeout<T>(
     if (!controller.signal.aborted) {
       timer = setTimeout(
         () => controller.abort(timeoutError),
-        Math.max(minimumTimeoutMs, timeoutMs),
+        Math.max(500, timeoutMs),
       );
     }
     const operation = controller.signal.aborted
@@ -199,6 +198,7 @@ export async function* drainStream(
   stream: ReadableStream<Uint8Array>,
   signal?: AbortSignal,
   deadlineAt?: number,
+  onDeadline?: (error: Error) => void,
 ): AsyncGenerator<string> {
   const reader  = stream.getReader();
   const decoder = new TextDecoder();
@@ -208,10 +208,21 @@ export async function* drainStream(
     cancelPromise ??= reader.cancel(reason).catch(() => {});
     return cancelPromise;
   };
+  let rejectAbort!: (reason: unknown) => void;
+  const abortPromise = signal === undefined
+    ? undefined
+    : new Promise<never>((_resolve, reject) => {
+        rejectAbort = reject;
+      });
   const cancelOnAbort = () => {
-    if (signal) void cancelReader(abortReason(signal));
+    if (!signal) return;
+    const reason = abortReason(signal);
+    void cancelReader(reason);
+    rejectAbort(reason);
   };
   signal?.addEventListener('abort', cancelOnAbort, { once: true });
+  if (signal?.aborted) cancelOnAbort();
+  void abortPromise?.catch(() => {});
   const remaining = deadlineAt === undefined ? undefined : Math.max(1, deadlineAt - Date.now());
   let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
@@ -224,6 +235,7 @@ export async function* drainStream(
           error.name = 'TimeoutError';
           timedOut = true;
           timeoutError = error;
+          onDeadline?.(error);
           void cancelReader(error);
           reject(error);
         }, remaining);
@@ -233,9 +245,11 @@ export async function* drainStream(
     throwIfAborted(signal);
     while (true) {
       const read = reader.read();
-      const readResult = deadlinePromise === undefined
-        ? read
-        : Promise.race([read, deadlinePromise]);
+      const readResult = Promise.race([
+        read,
+        ...(deadlinePromise === undefined ? [] : [deadlinePromise]),
+        ...(abortPromise === undefined ? [] : [abortPromise]),
+      ]);
       const { done, value } = await readResult;
       if (timedOut) throw timeoutError;
       throwIfAborted(signal);
@@ -403,22 +417,68 @@ async function* streamModel(
   timeoutMs: number,
 ): AsyncGenerator<string> {
   const deadlineAt = Date.now() + Math.max(1, timeoutMs);
-  // A derived signal lets Workers AI observe local timeout/cancellation while
-  // the parent signal remains distinguishable as caller cancellation.
-  const stream = await runWithTimeout(
-    opts.signal,
-    timeoutMs,
-    `[ai] ${model} streaming setup timed out`,
-    (signal) => runModelStream(ai, model, { ...opts, signal }),
-    1,
-  );
-  let emitted = 0;
-  for await (const chunk of drainStream(stream, opts.signal, deadlineAt)) {
-    emitted++;
-    yield chunk;
+  const controller = new AbortController();
+  let rejectAbort!: (reason: unknown) => void;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(abortReason(controller.signal));
+  controller.signal.addEventListener('abort', onAbort, { once: true });
+  if (controller.signal.aborted) onAbort();
+  void abortPromise.catch(() => {});
+
+  const abortFromParent = () => {
+    controller.abort(
+      opts.signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'),
+    );
+  };
+  if (opts.signal?.aborted) {
+    abortFromParent();
+  } else {
+    opts.signal?.addEventListener('abort', abortFromParent, { once: true });
   }
-  if (emitted === 0) {
-    throw new Error(`[ai] ${model} returned an empty streaming response`);
+
+  const timeoutError = new Error(`[ai] ${model} streaming attempt timed out`);
+  timeoutError.name = 'TimeoutError';
+  const timeoutTimer = controller.signal.aborted
+    ? undefined
+    : setTimeout(
+        () => controller.abort(timeoutError),
+        Math.max(1, deadlineAt - Date.now()),
+      );
+  let emitted = 0;
+  let completed = false;
+  try {
+    throwIfAborted(controller.signal);
+    const stream = await Promise.race([
+      runModelStream(ai, model, { ...opts, signal: controller.signal }),
+      abortPromise,
+    ]);
+    for await (const chunk of drainStream(
+      stream,
+      controller.signal,
+      deadlineAt,
+      (error) => {
+        if (!controller.signal.aborted) controller.abort(error);
+      },
+    )) {
+      emitted++;
+      yield chunk;
+    }
+    if (emitted === 0) {
+      throw new Error(`[ai] ${model} returned an empty streaming response`);
+    }
+    completed = true;
+  } catch (error) {
+    if (controller.signal.aborted) throw abortReason(controller.signal);
+    throw error;
+  } finally {
+    if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
+    opts.signal?.removeEventListener('abort', abortFromParent);
+    controller.signal.removeEventListener('abort', onAbort);
+    if (!completed && !controller.signal.aborted) {
+      controller.abort(new DOMException('Streaming attempt ended before completion', 'AbortError'));
+    }
   }
 }
 

@@ -298,14 +298,20 @@ describe('streamGenerate fallback behavior', () => {
 describe('Workers AI cancellation', () => {
   it('tries the fallback after the primary stream attempt times out', async () => {
     const calls: string[] = [];
+    const bindingSignals: AbortSignal[] = [];
     const hanging = () => new ReadableStream<Uint8Array>({
       pull() {
         return new Promise<void>(() => {});
       },
     });
     const ai = {
-      run: async (model: string) => {
+      run: async (
+        model: string,
+        _input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => {
         calls.push(model);
+        if (options?.signal) bindingSignals.push(options.signal);
         if (model === AI_MODEL_PRIMARY) return hanging();
         return makeStream([encode('data: {"response":"Recovered answer"}\n')]);
       },
@@ -320,22 +326,36 @@ describe('Workers AI cancellation', () => {
       `\x00model:${AI_MODEL_FALLBACK}`,
     ]);
     expect(calls).toEqual([AI_MODEL_PRIMARY, AI_MODEL_FALLBACK]);
+    expect(bindingSignals).toHaveLength(2);
+    expect(bindingSignals[0]?.aborted).toBe(true);
+    expect(bindingSignals[1]?.aborted).toBe(false);
   });
 
   it('bounds an English stream that hangs after opening without tokens', async () => {
+    const bindingSignals: AbortSignal[] = [];
     const hanging = () => new ReadableStream<Uint8Array>({
       pull() {
         return new Promise<void>(() => {});
       },
     });
     const ai = {
-      run: async () => hanging(),
+      run: async (
+        _model: string,
+        _input: unknown,
+        options?: { signal?: AbortSignal },
+      ) => {
+        if (options?.signal) bindingSignals.push(options.signal);
+        return hanging();
+      },
     } as unknown as Ai;
     await expect(collect(streamGenerate(ai, {
       systemPrompt: 'system',
       userMessage: 'hello',
       streamTimeoutMs: 20,
     }))).rejects.toThrow('streaming attempt timed out');
+    expect(bindingSignals).toHaveLength(2);
+    expect(bindingSignals.every((signal) => signal.aborted)).toBe(true);
+    expect(bindingSignals.every((signal) => (signal.reason as Error).name === 'TimeoutError')).toBe(true);
   });
 
   it('passes the caller signal to buffered inference and does not retry after abort', async () => {
