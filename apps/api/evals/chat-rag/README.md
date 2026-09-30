@@ -4,6 +4,16 @@ This benchmark separates answer quality from source-card quality. The scorer rea
 
 The repository starts with empty case and observation files. There is no approved curriculum gold set in the local fixtures, so the initial report is **not scored**. Do not fill the set with guessed source IDs or the existing three keyword-smoke questions. Each gold case needs curriculum and language review before it can count.
 
+## Current prerequisite: approved evidence and reviewers
+
+The 100-case corpus is intentionally blocked until its evidence and review scope are explicitly approved. This repository currently contains no evaluation-specific approval manifest listing curriculum materials and canonical evidence identifiers, and no reviewer assignment for the required case and output reviews. Authoring cases or observations before those inputs exist would require guessing, so `cases.json` and `observations.json` must remain empty and the scorer must report `not_scored`.
+
+Before populating either file:
+
+1. Approve the exact curriculum materials, canonical source identifiers, board/class/subject scope, and evaluation languages for this benchmark. Do not infer approval from material merely being present in the product.
+2. Assign reviewers with capacity to verify curriculum correctness and language quality for at least 100 authored answer, clarify, and abstain cases.
+3. Specify a local or staging run and an independent reviewer with capacity to assess both response quality and source-card quality. Do not use production traffic.
+
 ## Add a reviewed case
 
 Append an object to `cases.json`:
