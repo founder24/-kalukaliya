@@ -224,6 +224,18 @@ jobs:
               print("All required API Worker secret names are present; values were not read.")
           '
 
+      - name: Verify production D1 migration history matches tracked SQL files
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          if ! applied_migrations="$(pnpm exec wrangler d1 execute syrabit-db --remote --env production --json \
+            --command "SELECT name FROM d1_migrations ORDER BY name")"; then
+            echo "::error::Could not read the production D1 migration ledger; refusing to apply migrations."
+            exit 1
+          fi
+          printf '%s\n' "$applied_migrations" \
+            | node scripts/check-d1-migration-ledger.mjs --migrations-dir drizzle/migrations
+
       - name: Apply D1 migrations
         run: pnpm --filter syrabit-api exec wrangler d1 migrations apply syrabit-db --remote --env production
 
