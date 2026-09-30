@@ -220,7 +220,8 @@ export function scoreBenchmark({
       cardDimensions[field].push(cardReview[field]);
     }
     const cardReviewAsFractions = {
-      ...card,
+      source_precision: card.precision,
+      source_recall: card.recall,
       passage_fidelity: cardReview.passage_fidelity / 5,
       hierarchy_accuracy: cardReview.hierarchy_accuracy / 5,
       confidence_honesty: cardReview.confidence_honesty / 5,
@@ -236,11 +237,15 @@ export function scoreBenchmark({
   const responseScore = average(answerScores);
   const sourceCardScore = average(cardScores);
   const retrievalRecallAt5 = average(retrievalRecalls);
+  const sourceCardPrecision = average(cardPrecisions);
+  const sourceCardRecall = average(cardRecalls);
   const targetMet = caseCount >= minimumCases
     && observationCount === caseCount
-    && responseScore === 10
-    && sourceCardScore === 10
-    && retrievalRecallAt5 === 1
+    && round(responseScore) === 10
+    && round(sourceCardScore) === 10
+    && round(retrievalRecallAt5) === 1
+    && round(sourceCardPrecision) === 1
+    && round(sourceCardRecall) === 1
     && criticalFailureCaseIds.size === 0;
 
   let status = 'complete_below_target';
@@ -259,8 +264,8 @@ export function scoreBenchmark({
     response_quality_score_10: round(responseScore),
     source_card_quality_score_10: round(sourceCardScore),
     retrieval_recall_at_5: round(retrievalRecallAt5),
-    source_card_source_precision: round(average(cardPrecisions)),
-    source_card_source_recall: round(average(cardRecalls)),
+    source_card_source_precision: round(sourceCardPrecision),
+    source_card_source_recall: round(sourceCardRecall),
     response_review_averages_0_to_5: Object.fromEntries(
       Object.entries(responseDimensions).map(([key, values]) => [key, round(average(values))]),
     ),
@@ -282,12 +287,15 @@ function parseArgs(args) {
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === '--help' || arg === '-h') {
+    if (arg === '--') {
+      continue;
+    } else if (arg === '--help' || arg === '-h') {
       options.help = true;
     } else if (['--cases', '--observations', '--out'].includes(arg)) {
       const value = args[index + 1];
       if (!value || value.startsWith('--')) fail(`${arg} requires a path`);
-      options[arg.slice(2)] = resolve(value);
+      const optionName = arg === '--out' ? 'output' : arg.slice(2);
+      options[optionName] = resolve(value);
       index += 1;
     } else {
       fail(`unknown option: ${arg}`);

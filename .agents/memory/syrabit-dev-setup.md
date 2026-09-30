@@ -39,11 +39,11 @@ description: How this monorepo is configured to run in the Replit environment
 
 ## Focused API Vitest runs
 
-Use `pnpm --filter syrabit-api exec vitest run <test-path>` to run specific API test files. Passing a path after `--` to the package's `test` script was observed to run the full suite instead of filtering.
+Use `pnpm --filter syrabit-api exec vitest run <test-path>` to run specific API test files. Passing a path after `--` to the package's `test` script was observed to run the full suite instead of filtering. Filtered package scripts can also receive the literal `--` separator in their argument list, so command-line parsers should ignore it.
 
-**Why:** Concurrent full-suite runs can collide in timing-sensitive atomic quota tests, creating failures that pass when run alone.
+**Why:** Concurrent full-suite runs can collide in timing-sensitive atomic quota tests, creating failures that pass when run alone; the forwarded separator also made an otherwise documented CLI invocation fail.
 
-**How to apply:** Use direct Vitest filters for focused checks and avoid running duplicate full API suites concurrently.
+**How to apply:** Use direct Vitest filters for focused checks, avoid running duplicate full API suites concurrently, and allow a standalone `--` token in package-script parsers.
 
 ## Production GCP resources
 - Cloud Run service: `syrabit-backend` (region `asia-south1`, project `blissful-acumen-495019-t6`)
