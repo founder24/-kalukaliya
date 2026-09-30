@@ -57,6 +57,9 @@ const CONFIDENCE_HIGH = 0.80;
 const CONFIDENCE_LOW  = 0.50;
 
 const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
+// The active request signal handles immediate Stop. Keep durable tombstone
+// polling as a bounded fallback instead of awaiting D1 once per streamed delta.
+const CHAT_CANCEL_TOMBSTONE_POLL_MS = 500;
 
 // Keep prompts small enough for fast prefill while retaining a useful slice of
 // curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
@@ -508,6 +511,10 @@ export function isDeliverableAssameseAnswer(text: string): boolean {
 export function normalizeCardContext(value: unknown): string {
   if (typeof value !== 'string') return '';
   return value.replace(/\u0000/g, '').trim().slice(0, CARD_CONTEXT_CHAR_CAP);
+}
+
+export function shouldPollChatCancellation(now: number, lastCheckedAt: number): boolean {
+  return now - lastCheckedAt >= CHAT_CANCEL_TOMBSTONE_POLL_MS;
 }
 
 type ChatContentSourceType = 'notes' | 'qa' | 'pyq';
@@ -2670,6 +2677,7 @@ chatRouter.post('/stream', async (c) => {
     let firstTokenRecorded = false;
     let assameseProseLeakage = false;
     let analyticsRecorded = false;
+    let lastStreamCancellationCheckAt = 0;
     const recordAnalytics = async (
       eventName: 'chat_completion' | 'chat_failure',
       failureStage: string | null = null,
@@ -2693,6 +2701,7 @@ chatRouter.post('/stream', async (c) => {
 
     try {
       if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+      lastStreamCancellationCheckAt = Date.now();
       // Always emit source_card first — client uses this to learn the conversation_id
       await write(sourceCard);
       timings.source_card_ms = Date.now() - startTime;
@@ -2742,7 +2751,11 @@ chatRouter.post('/stream', async (c) => {
             maxTokens: CHAT_MAX_OUTPUT_TOKENS,
             signal: generationAbortController.signal,
           })) {
-            if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+            const now = Date.now();
+            if (shouldPollChatCancellation(now, lastStreamCancellationCheckAt)) {
+              lastStreamCancellationCheckAt = now;
+              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) return;
+            }
             // Sentinel chunk carries the resolved model name — do not forward to client
             if (chunk.startsWith('\x00model:')) {
               actualModel = chunk.slice(7);
