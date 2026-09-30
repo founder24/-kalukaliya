@@ -35,7 +35,7 @@
 #   1  uptime-check.sh              — 5 endpoint liveness probes (~5s)
 #   2  fullstack-smoke-test.sh      — 30+ unauthenticated infra checks (~30s)
 #   3  test-frontend-features.sh    — 79 frontend/SEO/PWA checks (~60s)
-#   4  live-deployment-test.sh      — health,seo,security,performance (~30s)
+#   4  live-deployment-test.sh      — safe health,content,seo,edge,security,performance checks
 #   5  test-auth-live.sh            — full auth + admin flow [NEEDS CREDS]
 #   6  test-chat-live.sh            — full chat pipeline [NEEDS CREDS]
 #
@@ -179,12 +179,12 @@ run_suite "frontend" \
   "test-frontend-features.sh"
 
 # =============================================================================
-# Suite 4 — Live Deployment (health, SEO, security, performance categories)
+# Suite 4 — Safe Live Deployment Checks (no payment/webhook or destructive probes)
 # =============================================================================
 run_suite "deployment" \
-  "Live Deployment Test (health, SEO, security, performance)" \
+  "Safe Live Deployment Test (health, content, SEO, edge, security, performance)" \
   "live-deployment-test.sh" \
-  "--category" "health,seo,security,performance"
+  "--category" "health,content,seo,edge,security,performance"
 
 # =============================================================================
 # Suite 5 — Auth Live (full auth + admin flow)

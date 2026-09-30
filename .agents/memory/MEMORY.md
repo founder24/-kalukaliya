@@ -101,3 +101,4 @@
 - [Dependabot stale manifest alerts](dependabot-stale-manifest-alerts.md) — alerts don't auto-close when their manifest file is deleted; dismiss via API with reason "inaccurate"; alerts endpoint needs Link-header pagination, not ?page=
 - [Drizzle migration history](drizzle-migration-history.md) — preserve applied names; verify parallel histories and clean-database replay before restoring or renumbering SQL.
 - [Backend test isolation](backend-test-isolation.md) — Keep endpoint lifespan mocks and canonical script module identity scoped; avoid replacing `sys.modules` in importer tests.
+- [Live test request fidelity](live-test-request-fidelity.md) — Preserve raw traversal paths and validate every redirect hop before following it.
