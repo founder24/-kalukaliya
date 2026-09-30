@@ -2,6 +2,17 @@ export const PASS_RULE =
   'A strict majority of samples for each route must meet the target, and the median must be at or below the target.';
 
 export function validateProbeEvents(name, events) {
+  const terminalError = events.find(event => event.event === 'chat_error');
+  if (terminalError) {
+    const details = [
+      typeof terminalError.error_code === 'string' && `code=${terminalError.error_code}`,
+      typeof terminalError.failure_stage === 'string' && `stage=${terminalError.failure_stage}`,
+    ].filter(Boolean);
+    throw new Error(
+      `${name} emitted terminal chat_error${details.length ? ` (${details.join(', ')})` : ''}`,
+    );
+  }
+
   const sourceIndex = events.findIndex(event => event.event === 'source_card');
   const tokenIndex = events.findIndex(event =>
     typeof event.content === 'string' && event.content.length > 0 && !event.done);

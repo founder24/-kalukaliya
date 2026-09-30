@@ -190,6 +190,11 @@ export function parseSseLine(line: string): string | null {
   return null;
 }
 
+function isSseDoneLine(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith('data:') && trimmed.slice(5).trim() === '[DONE]';
+}
+
 /**
  * Drain a Workers AI streaming ReadableStream and yield text deltas.
  * Exported for unit testing.
@@ -260,13 +265,26 @@ export async function* drainStream(
       buf = lines.pop() ?? '';
 
       for (const line of lines) {
+        if (isSseDoneLine(line)) {
+          void cancelReader();
+          return;
+        }
         const delta = parseSseLine(line);
         if (delta !== null) yield delta;
       }
+      if (isSseDoneLine(buf)) {
+        void cancelReader();
+        return;
+      }
     }
 
-    // Flush any remaining bytes
+    // Flush any remaining decoder bytes and final unterminated line.
+    buf += decoder.decode();
     if (buf) {
+      if (isSseDoneLine(buf)) {
+        void cancelReader();
+        return;
+      }
       const delta = parseSseLine(buf.trim());
       if (delta !== null) yield delta;
     }

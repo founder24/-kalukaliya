@@ -22,6 +22,7 @@ import {
   AI_MODEL_PRIMARY,
   AI_MODEL_FALLBACK,
   AI_MODEL_ASSAMESE,
+  AI_STREAM_TIMEOUT_MS,
 } from './ai';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,6 +160,31 @@ describe('drainStream', () => {
     expect(chunks).toEqual(['A', 'B']);
   });
 
+  it('completes on Workers AI [DONE] without waiting for the body to close', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encode('data: {"response":"Complete answer"}\n'));
+        controller.enqueue(encode('data: [DO'));
+        controller.enqueue(encode('NE]'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const ai = { run: async () => stream } as unknown as Ai;
+
+    await expect(collect(streamGenerate(ai, {
+      systemPrompt: 'system',
+      userMessage: 'question',
+      streamTimeoutMs: 40,
+    }))).resolves.toEqual([
+      'Complete answer',
+      `\x00model:${AI_MODEL_PRIMARY}`,
+    ]);
+    expect(cancelled).toBe(true);
+  });
+
   it('yields nothing for an empty stream', async () => {
     const stream = makeStream([]);
     const chunks = await collect(drainStream(stream));
@@ -235,6 +261,10 @@ describe('streamGenerate sentinel convention', () => {
 });
 
 describe('streamGenerate fallback behavior', () => {
+  it('keeps each English streaming attempt capped at 3 seconds', () => {
+    expect(AI_STREAM_TIMEOUT_MS).toBe(3000);
+  });
+
   it('retries Workers AI fallback when the primary stream is empty', async () => {
     const calls: string[] = [];
     const ai = {
