@@ -187,6 +187,8 @@ interface CurriculumScope {
   boardName?: string;
   explicit: boolean;
   unresolved: boolean;
+  unsupportedClass?: boolean;
+  pageConflict?: boolean;
 }
 
 interface CurriculumScopeRow {
@@ -204,19 +206,38 @@ function normalizedScopeText(value: string): string {
   return ` ${value.toLowerCase().normalize('NFKC').replace(/[^a-z0-9\u0980-\u09ff]+/gu, ' ').trim()} `;
 }
 
+type DetectedCurriculumClass =
+  | '11'
+  | '12'
+  | 'semester-1'
+  | 'semester-3'
+  | 'semester-5'
+  | 'unsupported'
+  | null;
+
 /** Extract only explicit class references; never infer a class from the topic. */
-export function detectCurriculumClass(message: string): '11' | '12' | 'semester-1' | 'semester-3' | 'semester-5' | null {
+export function detectCurriculumClass(message: string): DetectedCurriculumClass {
   const text = normalizedScopeText(message);
   if (/\b(?:class\s*11|class\s*xi|hs\s*1(?:st)?\s*year|higher\s*secondary\s*1(?:st)?\s*year)\b/.test(text)) return '11';
   if (/\b(?:class\s*12|class\s*xii|hs\s*2(?:nd)?\s*year|higher\s*secondary\s*2(?:nd)?\s*year)\b/.test(text)) return '12';
   if (/\b(?:1st|first)\s*semester\b/.test(text)) return 'semester-1';
   if (/\b(?:3rd|third)\s*semester\b/.test(text)) return 'semester-3';
   if (/\b(?:5th|fifth)\s*semester\b/.test(text)) return 'semester-5';
+  const schoolClass = /\b(?:class|grade|standard|std)\s*(\d{1,2}|[ivxlcdm]+)\b/.exec(text)?.[1];
+  if (schoolClass) {
+    const normalizedClass = ({ xi: '11', xii: '12' } as Record<string, string>)[schoolClass]
+      ?? schoolClass;
+    if (normalizedClass === '11' || normalizedClass === '12') {
+      return normalizedClass;
+    }
+    return 'unsupported';
+  }
   return null;
 }
 
-function classMatches(row: CurriculumScopeRow, detected: ReturnType<typeof detectCurriculumClass>): boolean {
+function classMatches(row: CurriculumScopeRow, detected: DetectedCurriculumClass): boolean {
   if (!detected) return true;
+  if (detected === 'unsupported') return false;
   const text = normalizedScopeText([row.class_name, row.class_level, row.class_slug].filter(Boolean).join(' '));
   if (detected === '11') return /\b(?:11|xi|hs\s*1|1st\s*year)\b/.test(text);
   if (detected === '12') return /\b(?:12|xii|hs\s*2|2nd\s*year)\b/.test(text);
@@ -229,21 +250,34 @@ function phraseAppears(text: string, phrase: string): boolean {
   return normalizedPhrase.length >= 3 && text.includes(` ${normalizedPhrase} `);
 }
 
+function curriculumSubjectText(message: string): string {
+  return message
+    .replace(/\b(?:assam\s+)?higher\s+secondary\s+education\s+council\b/gi, ' ')
+    .replace(
+      /\b(?:in|answer in|reply in|respond in|write in|use)\s+(?:english|assamese)\b/gi,
+      ' ',
+    );
+}
+
 function hasExplicitSubjectWording(message: string): boolean {
-  return /\b(?:physics|chemistry|biology|mathematics|maths?|english|assamese|economics|accountancy|education|history|geography|sociology|psychology|philosophy|computer\s+science|political\s+science|business\s+studies)\b/i.test(message);
+  const curriculumText = curriculumSubjectText(message);
+  return /\b(?:physics|chemistry|biology|mathematics|maths?|english|assamese|economics|accountancy|education|history|geography|sociology|psychology|philosophy|computer\s+science|political\s+science|business\s+studies)\b/i.test(curriculumText);
 }
 
 /**
  * Resolve explicit curriculum wording against D1. An ambiguous or conflicting
  * request fails closed instead of broadening semantic search across catalogues.
  */
-async function resolveCurriculumScope(
+export async function resolveCurriculumScope(
   d1: D1Database,
   message: string,
   bodySubjectId?: string,
 ): Promise<CurriculumScope> {
-  const messageText = normalizedScopeText(message);
+  const messageText = normalizedScopeText(curriculumSubjectText(message));
   const detectedClass = detectCurriculumClass(message);
+  if (detectedClass === 'unsupported') {
+    return { explicit: true, unresolved: true, unsupportedClass: true };
+  }
   const rowsResult = await d1.prepare(`
     SELECT subjects.id AS subject_id, subjects.name AS subject_name,
            subjects.slug AS subject_slug, classes.name AS class_name,
@@ -264,19 +298,32 @@ async function resolveCurriculumScope(
     || phraseAppears(messageText, row.subject_slug.replace(/-/g, ' ')),
   );
   const explicitSubject = named.length > 0;
+  const explicitSubjectWording = hasExplicitSubjectWording(message);
   let candidates = explicitSubject ? named : rows;
   if (detectedClass) candidates = candidates.filter(row => classMatches(row, detectedClass));
 
   // A page-provided subject remains useful when the question does not name a
-  // different subject, but explicit wording always wins.
-  if (!explicitSubject && bodySubjectId) {
+  // different subject. If the named subject matches that page, use it to
+  // disambiguate same-named subjects across classes; otherwise explicit
+  // wording wins over page context.
+  if (explicitSubject && bodySubjectId && !named.some(row => row.subject_id === bodySubjectId)) {
+    return { explicit: true, unresolved: true, pageConflict: true };
+  }
+  if (explicitSubject && bodySubjectId && named.some(row => row.subject_id === bodySubjectId)) {
+    candidates = candidates.filter(row => row.subject_id === bodySubjectId);
+  } else if (!explicitSubject && explicitSubjectWording && bodySubjectId) {
+    return { explicit: true, unresolved: true, pageConflict: true };
+  } else if (!explicitSubject && bodySubjectId) {
     candidates = candidates.filter(row => row.subject_id === bodySubjectId);
   }
 
-  const explicit = Boolean(detectedClass || explicitSubject);
+  const explicit = Boolean(detectedClass || explicitSubjectWording || explicitSubject);
   const unique = [...new Map(candidates.map(row => [row.subject_id, row])).values()];
   if (unique.length !== 1) {
-    return { explicit, unresolved: explicit };
+    const classScopeMustResolve = detectedClass !== null;
+    const pageSubjectMustResolve = Boolean(bodySubjectId && explicitSubject);
+    const unresolved = classScopeMustResolve || pageSubjectMustResolve;
+    return { explicit: unresolved, unresolved };
   }
   const row = unique[0]!;
   return {
@@ -466,14 +513,17 @@ export function hasAssameseProseLeakage(text: string): boolean {
     || /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|কিন্তু|তবে|তাই|কারণ|যদি|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/u.test(text);
 }
 
+function countBengaliDialectMarkers(text: string): number {
+  return (text.match(
+    /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|তবে|তাই|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/gu,
+  ) ?? []).length;
+}
+
 export function isReliableAssameseAnswer(text: string): boolean {
   // U+0964/U+0965 danda punctuation is also standard in Assamese; reject
   // Devanagari letters/marks, not punctuation or digits.
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
-  const bengaliMarkers = text.match(
-    /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|তবে|তাই|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/gu,
-  ) ?? [];
-  if (bengaliMarkers.length >= 2) return false;
+  if (countBengaliDialectMarkers(text) >= 2) return false;
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (/^(?:হয়|নাই|ভাল|ঠিক আছে|অৱশ্যই|নহয়)[।.!]?$/u.test(normalized)) return true;
   // Assamese and Bengali share most of the Unicode block. Require affirmative
@@ -497,6 +547,7 @@ export function isReliableAssameseAnswer(text: string): boolean {
  */
 export function isUsableAssameseAnswer(text: string): boolean {
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
+  if (countBengaliDialectMarkers(text) >= 2) return false;
   const scriptChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
   const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
   const letterCount = scriptChars + latinChars;
@@ -1271,8 +1322,9 @@ export async function fetchChapterContent(
 export function shouldResolveCurriculumScopeForChat(
   directChapterId: string | undefined,
   authoritativeIntent: AuthoritativeIntent,
+  explicitScope = false,
 ): boolean {
-  return !directChapterId || authoritativeIntent !== null;
+  return explicitScope || !directChapterId || authoritativeIntent !== null;
 }
 
 export function shouldStartWebSearchForChat(
@@ -1408,6 +1460,18 @@ export async function fetchMatchedChunkContext(
     remaining -= content.length;
   }
   return result;
+}
+
+/** Try ranked chapters in order until one has validated published evidence. */
+export async function firstUsableContext<TCandidate, TContext>(
+  candidates: readonly TCandidate[],
+  loadContext: (candidate: TCandidate) => Promise<TContext[]>,
+): Promise<{ candidate: TCandidate; context: TContext[] } | null> {
+  for (const candidate of candidates) {
+    const context = await loadContext(candidate);
+    if (context.length > 0) return { candidate, context };
+  }
+  return null;
 }
 
 /**
@@ -2319,6 +2383,9 @@ chatRouter.post('/stream', async (c) => {
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
+  const explicitScopeInMessage = Boolean(
+    detectCurriculumClass(message) || hasExplicitSubjectWording(message),
+  );
   const requestedWebIntent = shouldUseWebSearch({
     question: message,
     chapterId: directChapterId,
@@ -2338,7 +2405,11 @@ chatRouter.post('/stream', async (c) => {
     : Promise.resolve(skippedWebSearch());
 
   let curriculumScope: CurriculumScope;
-  if (!shouldResolveCurriculumScopeForChat(directChapterId, authoritativeIntent)) {
+  if (!shouldResolveCurriculumScopeForChat(
+    directChapterId,
+    authoritativeIntent,
+    explicitScopeInMessage,
+  )) {
     // The chapter lookup below verifies this exact published chapter. Reuse
     // page-provided scope metadata instead of scanning the hierarchy first.
     curriculumScope = {
@@ -2358,19 +2429,48 @@ chatRouter.post('/stream', async (c) => {
       });
       curriculumScope = {
         ...(body.subject_id && { subjectId: body.subject_id }),
-        explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
-        unresolved: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+        explicit: explicitScopeInMessage,
+        unresolved: explicitScopeInMessage,
+        ...(detectCurriculumClass(message) === 'unsupported' && { unsupportedClass: true }),
       };
     }
+  }
+  if (
+    directChapterId
+    && curriculumScope.explicit
+    && !curriculumScope.unresolved
+    && (
+      (
+        curriculumScope.subjectId
+        && body.subject_id
+        && curriculumScope.subjectId !== body.subject_id
+      )
+      || (
+        hasExplicitSubjectWording(message)
+        && !curriculumScope.subjectId
+        && !body.subject_id
+      )
+    )
+  ) {
+    // If the page omits its subject metadata, do not let an unresolved explicit
+    // subject fall through to the chapter's broad content path.
+    curriculumScope = { ...curriculumScope, unresolved: true, pageConflict: true };
   }
   const scopedSubjectId = curriculumScope.unresolved
     ? undefined
     : (curriculumScope.subjectId ?? body.subject_id);
-  if (curriculumScope.unresolved) {
+  if (
+    curriculumScope.unresolved
+    && !(curriculumScope.unsupportedClass && explicitWebIntent && !directChapterId)
+  ) {
     await releaseQuota().catch(() => {});
     c.header('X-Failure-Stage', 'curriculum_scope');
     return c.json({
-      detail: 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
+      detail: curriculumScope.pageConflict
+        ? 'I could not verify the subject in your question against the selected chapter. Switch to a matching chapter or remove the conflicting subject.'
+        : curriculumScope.unsupportedClass
+          ? 'I could not match that class to a published curriculum. Please check the class or share the relevant chapter text.'
+          : 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
       error_code: 'curriculum_scope_ambiguous',
       request_id: serverRequestId,
       failure_stage: 'curriculum_scope',
@@ -2545,15 +2645,7 @@ chatRouter.post('/stream', async (c) => {
         matches = await queryVectorize(c.env.VECTORIZE, embedding, 'en', extraFilters);
       }
 
-      // noUncheckedIndexedAccess: array[0] is T | undefined; guard before access
-      const firstMatch = matches[0];
-      if (firstMatch !== undefined && matches.length > 0) {
-        topScore = firstMatch.score;
-
-        // Confidence tier assignment
-        if (topScore >= CONFIDENCE_HIGH)     confidenceTier = 'high';
-        else if (topScore >= CONFIDENCE_LOW) confidenceTier = 'low';
-
+      if (matches.length > 0) {
         // Group by chapterId and pick the chapter with the highest max score
         const byChapter = new Map<string, { score: number; meta: ChunkMeta }>();
         for (const m of matches) {
@@ -2567,31 +2659,33 @@ chatRouter.post('/stream', async (c) => {
         }
 
         const sorted = [...byChapter.entries()].sort((a, b) => b[1].score - a[1].score);
-        // noUncheckedIndexedAccess: sorted[0] is [...] | undefined; guard with at()
-        const topEntry = sorted.at(0);
-        if (topEntry !== undefined) {
-          const [bestId, best] = topEntry;
-          topChapterId = bestId;
-          topSubjectId = best.meta.subjectId;
-
-          const matchedChunks = await fetchMatchedChunkContext(
+        const usable = await firstUsableContext(
+          sorted,
+          ([candidateId]) => fetchMatchedChunkContext(
             c.env.DB,
             matches,
-            bestId,
+            candidateId,
             lang,
             scopedSubjectId,
             requestedSourceType ?? undefined,
-          );
-          if (matchedChunks.length > 0) {
-            topChapterTitle = matchedChunks[0]?.chapterTitle ?? best.meta.chapterTitle ?? bestId;
-            contextChunks = matchedChunks.map(chunk => ({
-              ...chunk,
-              sourceType: lang === 'as' && retrievalLang === 'en'
-                ? 'rag_chunk_english_fallback'
-                : chunk.sourceType,
-            }));
-            ragPath = 'vectorize_d1';
-          }
+          ),
+        );
+        if (usable) {
+          const [bestId, best] = usable.candidate;
+          const matchedChunks = usable.context;
+          topChapterId = bestId;
+          topScore = best.score;
+          if (topScore >= CONFIDENCE_HIGH) confidenceTier = 'high';
+          else if (topScore >= CONFIDENCE_LOW) confidenceTier = 'low';
+          topSubjectId = matchedChunks[0]?.subjectId ?? best.meta.subjectId;
+          topChapterTitle = matchedChunks[0]?.chapterTitle ?? best.meta.chapterTitle ?? bestId;
+          contextChunks = matchedChunks.map(chunk => ({
+            ...chunk,
+            sourceType: lang === 'as' && retrievalLang === 'en'
+              ? 'rag_chunk_english_fallback'
+              : chunk.sourceType,
+          }));
+          ragPath = 'vectorize_d1';
         }
       }
     } catch (err) {
@@ -3009,6 +3103,11 @@ chatRouter.post('/stream', async (c) => {
               fullResponse = repairedText;
               actualModel = repaired.model;
               assameseProseLeakage = false;
+            } else if (isUsableAssameseAnswer(repairedText)) {
+              // Do not strand the student when dialect detection is uncertain.
+              // The broad fallback still rejects clear Bengali marker clusters.
+              fullResponse = repairedText;
+              actualModel = repaired.model;
             }
           } catch (repairError) {
             if (generationAbortController.signal.aborted) throw repairError;

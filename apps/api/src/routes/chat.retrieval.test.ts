@@ -6,8 +6,10 @@ import {
   fetchAuthoritativeIntentContext,
   fetchChapterContent,
   fetchMatchedChunkContext,
+  firstUsableContext,
   normalizeChatSourceType,
   detectAuthoritativeIntent,
+  resolveCurriculumScope,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
   shouldSkipSemanticRetrievalForWebIntent,
@@ -75,6 +77,7 @@ describe('chapter-scoped chat retrieval', () => {
 
   it('does not scan the curriculum hierarchy before a direct chapter turn', () => {
     expect(shouldResolveCurriculumScopeForChat('chapter-1', null)).toBe(false);
+    expect(shouldResolveCurriculumScopeForChat('chapter-1', null, true)).toBe(true);
     expect(shouldResolveCurriculumScopeForChat('chapter-1', 'syllabus')).toBe(true);
     expect(shouldResolveCurriculumScopeForChat(undefined, null)).toBe(true);
   });
@@ -128,15 +131,161 @@ describe('chapter-scoped chat retrieval', () => {
   );
 
   it.each([
+    ['Class 10 Physics', 'unsupported'],
     ['Class 11 Physics', '11'],
     ['Explain this for Class XI', '11'],
     ['HS 1st year chemistry', '11'],
     ['Class 12 Biology', '12'],
     ['HS 2nd Year Assamese', '12'],
     ['third semester economics', 'semester-3'],
+    ['Explain the chapter for Class 9', 'unsupported'],
     ['Explain Newton’s first law', null],
   ] as const)('detects only explicit curriculum classes: %s', (message, expected) => {
     expect(detectCurriculumClass(message)).toBe(expected);
+  });
+
+  it('resolves an explicit class only against its matching published subject row', async () => {
+    const rows = [
+      {
+        subject_id: 'physics-ahsec-11',
+        subject_name: 'Physics',
+        subject_slug: 'physics',
+        class_name: 'Class 11',
+        class_level: '11',
+        class_slug: 'class-11',
+        board_name: 'AHSEC',
+        board_slug: 'ahsec',
+      },
+      {
+        subject_id: 'physics-ahsec-12',
+        subject_name: 'Physics',
+        subject_slug: 'physics',
+        class_name: 'Class 12',
+        class_level: '12',
+        class_slug: 'class-12',
+        board_name: 'AHSEC',
+        board_slug: 'ahsec',
+      },
+    ];
+    const d1 = {
+      prepare: vi.fn(() => ({
+        all: vi.fn(async () => ({ results: rows })),
+      })),
+    };
+
+    await expect(resolveCurriculumScope(
+      d1 as unknown as D1Database,
+      'Explain Class 11 Physics',
+    )).resolves.toEqual({
+      subjectId: 'physics-ahsec-11',
+      subjectName: 'Physics',
+      className: 'Class 11',
+      boardName: 'AHSEC',
+      explicit: true,
+      unresolved: false,
+    });
+  });
+
+  it('disambiguates page subjects, preserves conflicting subjects, and ignores output-language mentions', async () => {
+    const rows = [
+      {
+        subject_id: 'physics-ahsec-11',
+        subject_name: 'Physics',
+        subject_slug: 'physics',
+        class_name: 'Class 11',
+        class_level: '11',
+        class_slug: 'class-11',
+        board_name: 'AHSEC',
+        board_slug: 'ahsec',
+      },
+      {
+        subject_id: 'physics-ahsec-12',
+        subject_name: 'Physics',
+        subject_slug: 'physics',
+        class_name: 'Class 12',
+        class_level: '12',
+        class_slug: 'class-12',
+        board_name: 'AHSEC',
+        board_slug: 'ahsec',
+      },
+    ];
+    const d1 = {
+      prepare: vi.fn(() => ({
+        all: vi.fn(async () => ({ results: rows })),
+      })),
+    };
+
+    await expect(resolveCurriculumScope(
+      d1 as unknown as D1Database,
+      'Explain this Physics concept',
+      'physics-ahsec-11',
+    )).resolves.toMatchObject({
+      subjectId: 'physics-ahsec-11',
+      className: 'Class 11',
+      explicit: true,
+      unresolved: false,
+    });
+
+    await expect(resolveCurriculumScope(
+      d1 as unknown as D1Database,
+      'Explain Biology',
+      'physics-ahsec-11',
+    )).resolves.toMatchObject({
+      explicit: true,
+      unresolved: true,
+    });
+
+    await expect(resolveCurriculumScope(
+      d1 as unknown as D1Database,
+      'Explain this in English',
+      'physics-ahsec-11',
+    )).resolves.toMatchObject({
+      subjectId: 'physics-ahsec-11',
+      className: 'Class 11',
+      explicit: false,
+      unresolved: false,
+    });
+
+    await expect(resolveCurriculumScope(
+      d1 as unknown as D1Database,
+      'For AHSEC physics, explain when total internal reflection occurs.',
+    )).resolves.toMatchObject({
+      explicit: false,
+      unresolved: false,
+    });
+  });
+
+  it.each(['Explain Class 9 Physics', 'Explain Class 10 Physics'])(
+    'fails closed for an explicit unsupported class: %s',
+    async (message) => {
+      const d1 = { prepare: vi.fn() };
+
+      await expect(resolveCurriculumScope(
+        d1 as unknown as D1Database,
+        message,
+      )).resolves.toMatchObject({
+        explicit: true,
+        unresolved: true,
+        unsupportedClass: true,
+      });
+      expect(d1.prepare).not.toHaveBeenCalled();
+    });
+
+  it('tries lower-ranked chapter candidates until one has validated evidence', async () => {
+    const attempts: string[] = [];
+    const selected = await firstUsableContext(
+      ['stale-top-match', 'valid-second-match', 'unused-third-match'],
+      async (candidate) => {
+        attempts.push(candidate);
+        return candidate === 'valid-second-match' ? [{ chapterId: candidate }] : [];
+      },
+    );
+
+    expect(attempts).toEqual(['stale-top-match', 'valid-second-match']);
+    expect(selected).toEqual({
+      candidate: 'valid-second-match',
+      context: [{ chapterId: 'valid-second-match' }],
+    });
   });
 
   it('constrains authoritative chapter reads by subject and published hierarchy', async () => {
