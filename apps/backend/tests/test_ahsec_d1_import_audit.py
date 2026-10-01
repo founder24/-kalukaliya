@@ -435,6 +435,15 @@ def test_only_empty_import_filters_existing_notes_and_rag_content(
         "rag_text": "",
         "has_notes_rag_document": 1,
     }
+    rag_chunks_conflict = {
+        **populated,
+        "id": "chapter-rag-chunks-conflict",
+        "title": "RAG chunks only",
+        "chapter_number": 3,
+        "notes_en": "",
+        "rag_text": "",
+        "has_notes_rag_chunks": 1,
+    }
     empty = {
         **populated,
         "id": "chapter-empty",
@@ -475,6 +484,7 @@ def test_only_empty_import_filters_existing_notes_and_rag_content(
             populated,
             rag_conflict,
             rag_document_conflict,
+            rag_chunks_conflict,
             empty,
         ],
     )
@@ -492,6 +502,9 @@ def test_only_empty_import_filters_existing_notes_and_rag_content(
     assert client.generated == ["chapter-empty"]
     assert len(client.executed) == 2
     assert client.executed[0][1][-1] == "chapter-empty"
+    assert "FROM chunks ck" in client.executed[0][0]
+    assert "ck.source_type = 'notes'" in client.executed[0][0]
+    assert "ck.medium = 'english'" in client.executed[0][0]
     assert (
         "WHERE LENGTH(TRIM(COALESCE(rag_documents.content, ''))) = 0"
         in client.executed[1][0]
@@ -546,6 +559,9 @@ def test_only_empty_conditional_write_skips_index_if_content_appears(
     assert "LOWER(TRIM(rag_sections_en)) IN ('', '[]', 'null')" in sql
     assert "NOT EXISTS" in sql
     assert "ahsec-notes-en:' || chapters.id" in sql
+    assert "FROM chunks ck" in sql
+    assert "ck.source_type = 'notes'" in sql
+    assert "ck.medium = 'english'" in sql
 
 
 def test_normal_import_replaces_index_and_chunk_mappings_without_cleanup_preview(

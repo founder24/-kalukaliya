@@ -940,6 +940,13 @@ def fetch_chapters(client: CloudflareClient) -> list[dict[str, Any]]:
                    WHERE rd.id = 'ahsec-notes-en:' || ch.id
                      AND LENGTH(TRIM(COALESCE(rd.content, ''))) > 0
                ) AS has_notes_rag_document,
+                EXISTS (
+                    SELECT 1
+                    FROM chunks ck
+                    WHERE ck.chapter_id = ch.id
+                      AND ck.source_type = 'notes'
+                      AND ck.medium = 'english'
+                ) AS has_notes_rag_chunks,
                s.name AS subject_name, s.slug AS subject_slug,
                st.name AS stream_name, c.name AS class_name
         FROM chapters ch
@@ -1079,6 +1086,11 @@ def chapter_has_empty_notes_and_index(chapter: dict[str, Any]) -> bool:
     ).strip().lower()
     if has_notes_document not in {"", "0", "false", "none"}:
         return False
+    has_notes_chunks = str(
+        chapter.get("has_notes_rag_chunks") or ""
+    ).strip().lower()
+    if has_notes_chunks not in {"", "0", "false", "none"}:
+        return False
     rag_sections = str(chapter.get("rag_sections_en") or "").strip().lower()
     return rag_sections in {"", "[]", "null"}
 
@@ -1107,6 +1119,13 @@ def write_notes(
             FROM rag_documents rd
             WHERE rd.id = 'ahsec-notes-en:' || chapters.id
               AND LENGTH(TRIM(COALESCE(rd.content, ''))) > 0
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM chunks ck
+            WHERE ck.chapter_id = chapters.id
+              AND ck.source_type = 'notes'
+              AND ck.medium = 'english'
           )
         """
         if only_if_empty
