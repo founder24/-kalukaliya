@@ -135,3 +135,16 @@ The deploy workflow gates on `ci-deps.yml` which runs `bash scripts/compile-deps
 Always run `bash scripts/compile-deps.sh` (not raw pip-compile) to generate requirements.txt —
 the script uses Python 3.12, `--strip-extras`, `--no-header`, `--no-upgrade`, and prepends
 a standard header comment. The CI diff ignores comment lines but checks package lines exactly.
+
+## Updating pull requests with restricted token scopes
+
+`gh pr edit` can fail because its GraphQL query requires `read:org`, even when
+the token has repository write access. Use the REST endpoint through
+`gh api -X PATCH repos/{owner}/{repo}/pulls/{number}` for pull-request title or
+body updates; keep the token in `GH_TOKEN` and do not put it in command arguments.
+
+**Why:** the workspace token created a pull request but `gh pr edit` was rejected
+for missing GraphQL-only organization fields; the equivalent REST update succeeded.
+
+**How to apply:** when `gh pr edit` reports a GraphQL scope error, switch to the
+REST pull-request endpoint instead of requesting unrelated organization scopes.
