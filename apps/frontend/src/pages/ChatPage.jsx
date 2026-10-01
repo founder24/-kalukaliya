@@ -209,6 +209,9 @@ export default function ChatPage() {
   // Read the current one-minute D1 bucket without consuming a request.
   const [creditsRefreshKey, setCreditsRefreshKey] = useState(0);
   const creditsRequestKeyRef = useRef(null);
+  const refreshCredits = useCallback(() => {
+    setCreditsRefreshKey((currentKey) => currentKey + 1);
+  }, []);
   useEffect(() => {
     // Wait for the /me round-trip so logged-in students don't fire a
     // throwaway anonymous request first; on the very first paint
@@ -616,6 +619,7 @@ export default function ChatPage() {
               : m
           ));
           scheduleRetry(8000);
+          refreshCredits();
           return;
         }
         if (response.status === 429) {
@@ -675,6 +679,7 @@ export default function ChatPage() {
             );
           }
           setMessages((prev) => prev.filter((m) => m.id !== aiMsgId));
+          refreshCredits();
           return;
         }
         // CF Worker infrastructure error (cold-start or upstream 502 converted
@@ -700,6 +705,7 @@ export default function ChatPage() {
               : m
           ));
           scheduleRetry(5000);
+          refreshCredits();
           return;
         }
         throw new Error(errData.detail || errData.error || 'Stream failed');
@@ -849,7 +855,9 @@ export default function ChatPage() {
                     ...m,
                     content: fullContent,
                     isAiUnavailable: true,
-                    isConnectionInterrupted: Boolean(fullContent),
+                    // An explicit SSE error arrived successfully; partial text
+                    // does not make this a transport interruption.
+                    isConnectionInterrupted: false,
                     isPartialResponse: Boolean(fullContent),
                     isAssameseUnavailable,
                     retryText: text,
@@ -930,13 +938,14 @@ export default function ChatPage() {
         if (flushTimer) clearTimeout(flushTimer);
         pendingChunk = '';
         setSyncState('idle');
+        refreshCredits();
         return;
       }
       // Anonymous SSE responses omit quota totals. Re-read the current
       // minute bucket after a send so the informational RPM state stays
       // current without changing the reservation count.
       if (!user) {
-        setCreditsRefreshKey((k) => k + 1);
+        refreshCredits();
       }
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       if (pendingChunk) { fullContent += pendingChunk; pendingChunk = ''; }
@@ -965,7 +974,11 @@ export default function ChatPage() {
         }
       }
     } catch (err) {
-      if (err.name === 'AbortError') return;
+      if (err.name === 'AbortError') {
+        refreshCredits();
+        return;
+      }
+      refreshCredits();
       try { _perfTotal.putAttribute('error', '1'); } catch {}
       const isTransportFailure =
         !receivedHttpResponse ||

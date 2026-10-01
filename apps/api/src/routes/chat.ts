@@ -3043,6 +3043,9 @@ chatRouter.post('/stream', async (c) => {
       if (verifiedWebEvidenceUnavailable) {
         timings.total_ms = Date.now() - startTime;
         streamFailureStage = 'terminal_sse';
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          error_class: sanitizedChatErrorClass(e),
+        }));
         await write({
           ...terminalChatErrorEvent(
             lang === 'as'
@@ -3056,9 +3059,6 @@ chatRouter.post('/stream', async (c) => {
           error_kind: 'web_evidence_unavailable',
         });
         await recordAnalytics('chat_failure', 'web_evidence');
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-          error_class: sanitizedChatErrorClass(e),
-        }));
         return;
       }
 
@@ -3132,6 +3132,9 @@ chatRouter.post('/stream', async (c) => {
         // Provider returned an empty response — release the reserved slot
         timings.total_ms = Date.now() - startTime;
         streamFailureStage = 'terminal_sse';
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          error_class: sanitizedChatErrorClass(e),
+        }));
         await write(terminalChatErrorEvent(
           'Empty response from AI. Please try again.',
           'provider_empty_response',
@@ -3140,9 +3143,6 @@ chatRouter.post('/stream', async (c) => {
           timings,
         ));
         await recordAnalytics('chat_failure', 'provider_stream');
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-          error_class: sanitizedChatErrorClass(e),
-        }));
         return;
       }
 
@@ -3186,6 +3186,9 @@ chatRouter.post('/stream', async (c) => {
           if (!isDeliverableAssameseAnswer(fullResponse)) {
             timings.total_ms = Date.now() - startTime;
             streamFailureStage = 'terminal_sse';
+            await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+              error_class: sanitizedChatErrorClass(e),
+            }));
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
@@ -3197,9 +3200,6 @@ chatRouter.post('/stream', async (c) => {
               error_kind: 'assamese_unavailable',
             });
             await recordAnalytics('chat_failure', 'language_validation');
-            await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-              error_class: sanitizedChatErrorClass(e),
-            }));
             return;
           }
         }
@@ -3333,6 +3333,9 @@ chatRouter.post('/stream', async (c) => {
       }
       const failedAtStage = streamFailureStage;
       timings.total_ms = Date.now() - startTime;
+      await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+        error_class: sanitizedChatErrorClass(e),
+      }));
       try {
         streamFailureStage = 'terminal_sse';
         await write(terminalChatErrorEvent(
@@ -3344,10 +3347,8 @@ chatRouter.post('/stream', async (c) => {
         ));
       } catch { /* writer may already be closed */ }
       reportStreamFailure(err, failedAtStage, null);
-      // Release the reserved slot — provider/config errors must not consume quota
-      await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-        error_class: sanitizedChatErrorClass(e),
-      }));
+      // Release the reserved slot before notifying the client so its
+      // post-error quota refresh observes the refunded count.
       await recordAnalytics('chat_failure', 'provider_stream');
     }
   })();
