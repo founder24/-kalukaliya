@@ -747,6 +747,38 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Select chat performance probes from production config
+        run: |
+          mode="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          with Path("apps/api/wrangler.toml").open("rb") as config_file:
+              config = tomllib.load(config_file)
+          production_vars = (
+              config.get("env", {})
+              .get("production", {})
+              .get("vars", {})
+          )
+          raw_enabled = production_vars.get("WEB_SEARCH_ENABLED")
+          if isinstance(raw_enabled, bool):
+              web_search_enabled = raw_enabled
+          elif isinstance(raw_enabled, str) and raw_enabled.lower() in {"true", "false"}:
+              web_search_enabled = raw_enabled.lower() == "true"
+          else:
+              raise SystemExit(
+                  "Production WEB_SEARCH_ENABLED must be explicitly set to true or false."
+              )
+          print("both" if web_search_enabled else "direct")
+          PY
+          )"
+          printf 'CHAT_PERFORMANCE_MODE=%s\n' "$mode" >> "$GITHUB_ENV"
+          if [[ "$mode" == "direct" ]]; then
+            echo "::notice title=Chat performance coverage::Production web search is disabled; gating direct curriculum RAG only. Freshness requests remain fail-closed."
+          else
+            echo "::notice title=Chat performance coverage::Production web search is enabled; gating direct curriculum RAG and bounded web chat."
+          fi
+
       - name: Worker chat performance gate regression test
         run: node --test scripts/worker-chat-performance-gate.test.mjs
 
