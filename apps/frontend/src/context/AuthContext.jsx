@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
+import { toast } from 'sonner';
 import { API_BASE } from '@/utils/api';
 import { Analytics } from '@/utils/analytics';
 import {
@@ -225,6 +226,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    let serverRevocationConfirmed = true;
     try {
       const token = getToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -237,6 +239,7 @@ export const AuthProvider = ({ children }) => {
         { withCredentials: true, headers, timeout: 5000 },
       );
     } catch (err) {
+      serverRevocationConfirmed = false;
       try { Analytics.track('logout_backend_error', { status: err?.response?.status }); } catch {}
     }
     clearTokens();
@@ -248,6 +251,12 @@ export const AuthProvider = ({ children }) => {
     setAdsPlan(null);
     setUser(null);
     try { Analytics.logout(); } catch {}
+    if (!serverRevocationConfirmed) {
+      toast.warning(
+        'Signed out on this device, but server-side session revocation could not be confirmed. Reconnect and sign out again.',
+        { duration: 8000 },
+      );
+    }
   };
 
   const refreshUser = async () => {

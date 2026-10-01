@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import axios from 'axios';
+import { toast } from 'sonner';
 import { silentRefresh } from '@/hooks/useAuthRefresh';
 import { AuthProvider, useAuth } from './AuthContext';
 import { AuthGuard } from '@/components/AuthGuard';
@@ -14,6 +15,7 @@ const authState = vi.hoisted(() => ({
   storeToken: vi.fn(),
   storeRefreshToken: vi.fn(),
   clearTokens: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 vi.mock('axios', () => ({
@@ -21,6 +23,10 @@ vi.mock('axios', () => ({
     get: vi.fn(),
     post: vi.fn(),
   },
+}));
+
+vi.mock('sonner', () => ({
+  toast: { warning: authState.toastWarning },
 }));
 
 vi.mock('@/hooks/useTokenManager', () => ({
@@ -87,11 +93,45 @@ function SignupProbe() {
   );
 }
 
+function LogoutProbe() {
+  const { logout } = useAuth();
+  return (
+    <button type="button" onClick={() => { void logout(); }}>
+      Sign out
+    </button>
+  );
+}
+
 describe('AuthProvider authentication failure handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.accessToken = null;
     authState.refreshToken = null;
+  });
+
+  it('warns when server revocation fails while clearing local credentials', async () => {
+    authState.accessToken = 'stored-access';
+    authState.refreshToken = 'stored-refresh';
+    axios.get.mockResolvedValueOnce({
+      data: { id: 'user-1', email: 'student@example.com' },
+    });
+    axios.post.mockRejectedValueOnce({ response: { status: 503 } });
+
+    render(
+      <AuthProvider>
+        <LogoutProbe />
+      </AuthProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+    await waitFor(() => expect(authState.clearTokens).toHaveBeenCalled());
+    expect(authState.accessToken).toBeNull();
+    expect(authState.refreshToken).toBeNull();
+    expect(toast.warning).toHaveBeenCalledWith(
+      expect.stringContaining('server-side session revocation could not be confirmed'),
+      { duration: 8000 },
+    );
   });
 
   it('does not persist signup tokens when the profile request fails', async () => {

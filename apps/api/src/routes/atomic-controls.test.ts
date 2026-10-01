@@ -1112,6 +1112,51 @@ describe('atomic refresh-token rotation', () => {
     });
   });
 
+  it('invalidates access sessions before reporting a failed legacy revocation bridge', async () => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+       VALUES (?, ?, 'student', 'free', 0)`,
+    ).bind(userId, `${userId}@example.test`).run();
+
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const { token: refreshToken } = await signRefreshToken(userId, 'student', JWT_SECRET);
+    const unavailableKv = {
+      put: async () => { throw new Error('KV unavailable'); },
+    } as unknown as KVNamespace;
+    const response = await authRouter.fetch(
+      new Request('https://api.example/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      }),
+      { ...env, RATE_LIMIT_KV: unavailableKv },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error_code: 'auth_storage_unavailable',
+    });
+    const user = await env.DB.prepare(
+      'SELECT session_valid_after FROM users WHERE id = ?',
+    ).bind(userId).first<{ session_valid_after: number }>();
+    expect(user?.session_valid_after).toBeGreaterThan(0);
+
+    const accessCheck = await authRouter.fetch(
+      new Request('https://api.example/me', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      env,
+    );
+    expect(accessCheck.status).toBe(401);
+    await expect(accessCheck.json()).resolves.toMatchObject({
+      detail: 'Session expired after password change. Sign in again.',
+    });
+  });
+
   it('mints only one token pair from concurrent refresh requests', async () => {
     const userId = crypto.randomUUID();
     await env.DB.prepare(

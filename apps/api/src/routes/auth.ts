@@ -239,6 +239,7 @@ authRouter.post('/logout', async (c) => {
   }
 
   const token = bodyToken ?? bearerToken;
+  let legacyRevocationUnavailable = false;
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
     if (!userId && payload?.sub) userId = payload.sub;
@@ -270,10 +271,10 @@ authRouter.post('/logout', async (c) => {
           );
         } catch (err) {
           console.error('[auth] refresh-token KV revocation unavailable:', err);
-          return c.json({
-            detail: 'Unable to revoke session right now. Please try again.',
-            error_code: 'auth_storage_unavailable',
-          }, 503);
+          // Continue to the account-wide D1 cutoff below. The compatibility
+          // bridge may be unavailable, but that must not leave the presented
+          // access token valid after a logout attempt.
+          legacyRevocationUnavailable = true;
         }
       }
       // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:end
@@ -299,6 +300,13 @@ authRouter.post('/logout', async (c) => {
         error_code: 'auth_storage_unavailable',
       }, 503);
     }
+  }
+
+  if (legacyRevocationUnavailable) {
+    return c.json({
+      detail: 'The current session was revoked, but legacy session cleanup could not be confirmed. Please try again.',
+      error_code: 'auth_storage_unavailable',
+    }, 503);
   }
 
   return c.json({ message: 'Logged out successfully' });
