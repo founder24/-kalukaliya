@@ -64,6 +64,25 @@ async def test_library_bundle_get_and_head_share_schema_signal(
     assert get.headers["x-schema-version"] == head.headers["x-schema-version"]
 
 
+@pytest.mark.anyio
+async def test_library_bundle_core_query_failure_is_retryable_and_not_cached(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
+    class FailingQuery:
+        async def to_list(self, *, length):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(public_content.Board, "find", lambda *_args, **_kwargs: FailingQuery())
+
+    response = await client.get("/api/v1/content/library-bundle?slim=1")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Library catalog is temporarily unavailable; please retry."
+    )
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_library_bundle_schema_signal_changes_with_deployment_revision(
     monkeypatch: pytest.MonkeyPatch,
 ):

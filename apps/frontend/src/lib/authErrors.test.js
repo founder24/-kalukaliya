@@ -75,6 +75,19 @@ describe('formatAuthError — defaults', () => {
     );
   });
 
+  it('replaces a generic server detail with retry guidance and its request reference', () => {
+    const err = {
+      response: {
+        status: 500,
+        headers: { 'x-request-id': 'req-87654321' },
+        data: { detail: 'Internal server error', request_id: 'req-87654321' },
+      },
+    };
+    expect(formatAuthError(err)).toBe(
+      'The authentication service is temporarily unavailable. Please try again shortly. Reference: req-87654321.',
+    );
+  });
+
   it('explains a network failure without exposing transport internals', () => {
     const err = { code: 'ERR_NETWORK', message: 'Network Error' };
     expect(formatAuthError(err)).toBe(
@@ -88,7 +101,7 @@ describe('formatAuthError — defaults', () => {
       response: { status: 403, headers: { 'x-request-id': 'req-12345678' }, data: '<html></html>' },
     };
     expect(formatAuthError(err)).toBe(
-      'Sign-in succeeded, but your profile could not be loaded. No session was saved. Please try again. Reference: req-12345678.',
+      'Authentication succeeded, but your profile could not be loaded. No session was saved. Please try again. Reference: req-12345678.',
     );
   });
 

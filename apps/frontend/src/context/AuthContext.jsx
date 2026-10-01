@@ -26,6 +26,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(getToken);
   const [loading, setLoading] = useState(true);
   const [authChecked, setAuthChecked] = useState(false);
+  const [authVerificationError, setAuthVerificationError] = useState(false);
   const justAuthenticated = useRef(false);
   const fetchMeInFlight = useRef(null);
 
@@ -35,6 +36,8 @@ export const AuthProvider = ({ children }) => {
     // /users/me requests (and duplicate expected 401 responses).
     if (fetchMeInFlight.current) return fetchMeInFlight.current;
 
+    setAuthChecked(false);
+    setAuthVerificationError(false);
     const request = (async () => {
       let resolvedUserId = null;
       try {
@@ -60,8 +63,11 @@ export const AuthProvider = ({ children }) => {
                   withCredentials: true,
                   headers: newToken ? { Authorization: `Bearer ${newToken}` } : {},
                 });
-              } catch {
-                throw err;
+              } catch (refreshError) {
+                // Preserve the actual refresh failure. Re-throwing the first
+                // 401 would make a transient refresh outage look like an
+                // invalid session and send a still-authenticated user to login.
+                throw refreshError;
               }
             } else {
               throw err;
@@ -73,19 +79,30 @@ export const AuthProvider = ({ children }) => {
         const userData = res.data;
         if (userData && userData.id) {
           resolvedUserId = userData.id;
+          setAuthVerificationError(false);
           hydrateAdsOptOutFromServer(userData.ads_opt_out);
           // Set the plan before publishing the user so ad-bearing route
           // effects cannot run once with anonymous consent during hydration.
           setAdsPlan(userData.plan);
           setUser(userData);
         } else {
+          setAuthVerificationError(false);
           setAdsPlan(null);
           setUser(null);
         }
         justAuthenticated.current = false;
         return !!resolvedUserId;
-      } catch {
-        if (!justAuthenticated.current) {
+      } catch (err) {
+        const status = err?.response?.status;
+        const hasStoredToken = Boolean(getToken());
+        if (hasStoredToken && status !== 401) {
+          // A failed profile probe does not prove that the credentials are
+          // invalid. Keep them and give protected routes an explicit retry
+          // path instead of redirecting the user as though they were signed
+          // out. A 401 remains the authoritative invalid-session response.
+          setAuthVerificationError(true);
+        } else if (!justAuthenticated.current) {
+          setAuthVerificationError(false);
           setAdsPlan(null);
           setUser(null);
         }
@@ -157,6 +174,7 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setAuthToken(access_token);
       setUser(userData);
+      setAuthVerificationError(false);
       try { Analytics.login(userData.id, userData.email); } catch {}
       return userData;
     } catch (err) {
@@ -170,6 +188,7 @@ export const AuthProvider = ({ children }) => {
 
   const signup = async (name, email, password, consent_dpdp = false) => {
     justAuthenticated.current = true;
+    let authStage = 'signup';
     try {
       const res = await axios.post(
         `${API_BASE}/auth/signup`,
@@ -177,11 +196,8 @@ export const AuthProvider = ({ children }) => {
         { withCredentials: true },
       );
       const { access_token, refresh_token } = res.data;
-      storeToken(access_token);
-      storeRefreshToken(refresh_token);
-      setToken(access_token);
-      setAuthToken(access_token);
       // Fetch user profile immediately
+      authStage = 'profile';
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
         withCredentials: true,
@@ -189,11 +205,21 @@ export const AuthProvider = ({ children }) => {
       const userData = profileRes.data;
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
       setAdsPlan(userData?.plan);
+      // Commit the credentials only after profile loading succeeds, matching
+      // login's all-or-nothing authentication flow.
+      storeToken(access_token);
+      storeRefreshToken(refresh_token);
+      setToken(access_token);
+      setAuthToken(access_token);
       setUser(userData);
+      setAuthVerificationError(false);
       try { Analytics.signup(userData.email, userData.plan); } catch {}
       return userData;
     } catch (err) {
       justAuthenticated.current = false;
+      if (err && typeof err === 'object') {
+        try { err.authStage = authStage; } catch {}
+      }
       throw err;
     }
   };
@@ -217,6 +243,7 @@ export const AuthProvider = ({ children }) => {
     setAuthToken(null);
     setToken(null);
     justAuthenticated.current = false;
+    setAuthVerificationError(false);
     localStorage.removeItem('syrabit:onboarding');
     setAdsPlan(null);
     setUser(null);
@@ -237,6 +264,7 @@ export const AuthProvider = ({ children }) => {
       token,
       loading,
       authChecked,
+      authVerificationError,
       login,
       signup,
       logout,

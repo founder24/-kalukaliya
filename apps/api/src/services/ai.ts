@@ -312,6 +312,7 @@ export async function* drainStream(
       const delta = parseSseLine(buf.trim());
       if (delta !== null) yield delta;
     }
+    throw new Error('[ai] Workers AI stream ended without [DONE] sentinel');
   } finally {
     if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
     signal?.removeEventListener('abort', cancelOnAbort);
@@ -584,7 +585,9 @@ function contentToText(value: unknown): string | null {
 }
 
 function responseTextStream(text: string): ReadableStream<Uint8Array> {
-  const encoded = new TextEncoder().encode(JSON.stringify({ response: text }));
+  const encoded = new TextEncoder().encode(
+    `${JSON.stringify({ response: text })}\ndata: [DONE]\n\n`,
+  );
   return new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(encoded);

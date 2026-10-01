@@ -360,16 +360,18 @@ describe('ChatPage transport recovery', () => {
     expect(await screen.findByText('অসমীয়া')).toBeInTheDocument();
   });
 
-  it('stops reading after the SSE done marker', async () => {
+  it('treats syrabit_done as terminal without waiting for [DONE] or EOF', async () => {
     const body =
       `data: ${JSON.stringify({ content: 'Complete answer' })}\n\n` +
-      `data: ${JSON.stringify({ event: 'syrabit_done', done: true })}\n\n` +
-      'data: [DONE]\n\n';
+      `data: ${JSON.stringify({ event: 'syrabit_done', done: true })}\n\n`;
     vi.stubGlobal('fetch', vi.fn(async () => chunkedStream([body], { close: false })));
     render(<ChatPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
 
     expect(await screen.findByText('Complete answer')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send test message' })).toBeInTheDocument();
+    });
   });
 });

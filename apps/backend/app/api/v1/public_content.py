@@ -191,8 +191,15 @@ async def get_library_bundle(
         streams = await Stream.find(_status_q).to_list(length=None)
         chapters = await Chapter.find().to_list(length=None)
     except Exception as e:
-        logger.warning(f"Library bundle DB query failed (DB may not be ready): {e}")
-        return {"boards": []}
+        logger.warning(
+            "Library bundle DB query failed (DB may not be ready): %s",
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Library catalog is temporarily unavailable; please retry.",
+            headers={"Cache-Control": "no-store"},
+        ) from e
 
     # Load subjects separately so a validation error on one bad document
     # does not wipe out the entire library response.

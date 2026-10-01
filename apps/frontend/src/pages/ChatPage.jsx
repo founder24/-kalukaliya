@@ -877,6 +877,7 @@ export default function ChatPage() {
           }
           if (parsed.event === 'syrabit_done') {
             streamCompleted = true;
+            sawDoneMarker = true;
             if (parsed.sources) meta.libSources = parsed.sources;
             // Task #37 — capture the per-turn router trace so the
             // dev-mode QA badge can show decision/provider/namespace.
@@ -918,6 +919,7 @@ export default function ChatPage() {
               if (remaining <= 0) Analytics.chatCreditsExhausted();
             } catch {}
           }
+          if (sawDoneMarker) break;
         }
         if (done) break;
       }

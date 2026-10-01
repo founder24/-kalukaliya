@@ -12,8 +12,8 @@
  *   4. Build system prompt (curriculum context + memory + history)
  *   5. Emit source_card SSE event before LLM tokens
  *   6. Stream via Workers AI (primary: low-latency Llama 8B, fallback: Qwen 30B)
- *   7. Emit syrabit_done event (latency, model, route_trace, credits)
- *   8. waitUntil: persist user+assistant messages to D1 and update stats
+ *   7. Persist the completed answer and claim, then emit syrabit_done
+ *   8. Keep the stream task alive through final analytics and writer closure
  */
 
 import { Hono } from 'hono';
@@ -60,6 +60,7 @@ const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 // The active request signal handles immediate Stop. Keep durable tombstone
 // polling as a bounded fallback instead of awaiting D1 once per streamed delta.
 const CHAT_CANCEL_TOMBSTONE_POLL_MS = 500;
+const CHAT_CANCEL_TOMBSTONE_MAX_POLLS = 24;
 
 // Keep prompts small enough for fast prefill while retaining a useful slice of
 // curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
@@ -833,9 +834,9 @@ async function completeChatRequestClaim(
   sessionId: string,
   responseContent: string,
   responseMetadata: unknown,
-): Promise<void> {
-  if (!requestId) return;
-  await d1.prepare(`
+): Promise<boolean> {
+  if (!requestId) return true;
+  const result = await d1.prepare(`
     UPDATE chat_request_claims
     SET status = 'completed',
         session_id = ?,
@@ -849,6 +850,7 @@ async function completeChatRequestClaim(
     requestId,
     userId,
   ).run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 async function deleteChatRequestClaim(
@@ -1870,7 +1872,7 @@ export async function persistCompletedChat(
     chapterId?: string | undefined;
     subjectId?: string | undefined;
   },
-): Promise<void> {
+): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + 90 * 24 * 3600; // 90-day TTL (cleaned by cron)
 
@@ -1973,7 +1975,9 @@ export async function persistCompletedChat(
       uid,
     ));
   }
-  await d1.batch(statements);
+  const results = await d1.batch(statements);
+  if (!opts.requestId) return true;
+  return (results[results.length - 1]?.meta.changes ?? 0) > 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2963,6 +2967,68 @@ chatRouter.post('/stream', async (c) => {
         error_class: sanitizedChatErrorClass(error),
       }));
     };
+    let cancellationCheckInFlight: Promise<boolean> | null = null;
+    const pollCancellationTombstone = async (): Promise<boolean> => {
+      // A monitor tick and a just-arrived token can coincide. Share one D1
+      // read rather than issuing concurrent or per-token cancellation queries.
+      if (cancellationCheckInFlight) return cancellationCheckInFlight;
+      const now = Date.now();
+      if (!shouldPollChatCancellation(now, lastStreamCancellationCheckAt)) return false;
+      lastStreamCancellationCheckAt = now;
+      const check = isChatRequestCancelled(c.env.DB, clientRequestId, userId);
+      cancellationCheckInFlight = check;
+      try {
+        return await check;
+      } finally {
+        if (cancellationCheckInFlight === check) cancellationCheckInFlight = null;
+      }
+    };
+    const startCancellationMonitor = (): (() => Promise<void>) => {
+      if (!clientRequestId) return async () => {};
+      const monitorController = new AbortController();
+      let pollCount = 0;
+      let failureLogged = false;
+      const delay = (): Promise<void> => new Promise((resolve) => {
+        let timer: ReturnType<typeof setTimeout>;
+        const finish = () => {
+          clearTimeout(timer);
+          monitorController.signal.removeEventListener('abort', finish);
+          resolve();
+        };
+        timer = setTimeout(finish, CHAT_CANCEL_TOMBSTONE_POLL_MS);
+        monitorController.signal.addEventListener('abort', finish, { once: true });
+      });
+      const task = (async () => {
+        while (
+          !monitorController.signal.aborted
+          && pollCount < CHAT_CANCEL_TOMBSTONE_MAX_POLLS
+        ) {
+          await delay();
+          if (monitorController.signal.aborted) return;
+          pollCount++;
+          try {
+            if (await pollCancellationTombstone()) {
+              abortGeneration(
+                new DOMException('Chat request cancelled', 'AbortError'),
+                'cancellation_tombstone',
+              );
+              return;
+            }
+          } catch (error) {
+            if (!failureLogged) {
+              console.warn('[chat] cancellation tombstone monitor failed', {
+                error_class: sanitizedChatErrorClass(error),
+              });
+              failureLogged = true;
+            }
+          }
+        }
+      })();
+      return async () => {
+        monitorController.abort();
+        await task;
+      };
+    };
 
     try {
       if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
@@ -3002,6 +3068,7 @@ chatRouter.post('/stream', async (c) => {
       let streamDone = false;
       let generationStartedAt: number | undefined;
 
+      const stopCancellationMonitor = startCancellationMonitor();
       try {
         streamFailureStage = 'provider_stream';
         generationStartedAt = Date.now();
@@ -3027,13 +3094,12 @@ chatRouter.post('/stream', async (c) => {
             maxTokens: CHAT_MAX_OUTPUT_TOKENS,
             signal: generationAbortController.signal,
           })) {
-            const now = Date.now();
-            if (shouldPollChatCancellation(now, lastStreamCancellationCheckAt)) {
-              lastStreamCancellationCheckAt = now;
-              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
-                reportTombstoneCancellation('provider_stream');
-                return;
-              }
+            if (await pollCancellationTombstone()) {
+              abortGeneration(
+                new DOMException('Chat request cancelled', 'AbortError'),
+                'cancellation_tombstone',
+              );
+              throw generationAbortController.signal.reason;
             }
             // Sentinel chunk carries the resolved model name — do not forward to client
             if (chunk.startsWith('\x00model:')) {
@@ -3058,6 +3124,8 @@ chatRouter.post('/stream', async (c) => {
           timings.generation_ms = Date.now() - generationStartedAt;
         }
         throw streamErr;
+      } finally {
+        await stopCancellationMonitor();
       }
 
       if (!streamDone || !fullResponse) {
@@ -3180,19 +3248,20 @@ chatRouter.post('/stream', async (c) => {
         request_id: serverRequestId,
         assamese_prose_leakage: lang === 'as' ? assameseProseLeakage : false,
       };
-      await write(doneEvent);
-      await recordAnalytics('chat_completion');
 
-      // ── Fire-and-forget: persist chat + update user stats ────────────────
+      // ── Persist chat + settle the request claim before success ───────────
       // quota_usage was already incremented atomically in reserveAuthQuota /
-      // reserveAnonQuota before streaming — do not increment again here.
+      // reserveAnonQuota before streaming — do not increment again here. The
+      // persistence batch and cancellation endpoint both condition their
+      // transition on status='reserved', so exactly one can win the race.
       streamFailureStage = 'persistence';
+      let claimCompleted = false;
       try {
         if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
           reportTombstoneCancellation('persistence');
           return;
         }
-        await persistCompletedChat(c.env.DB, {
+        claimCompleted = await persistCompletedChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,
           userMessage:       message,
@@ -3215,7 +3284,7 @@ chatRouter.post('/stream', async (c) => {
         // If the transactional history batch failed for a row-specific reason,
         // preserve replay safety with a minimal completion marker. A total D1
         // outage may still reject this, but no partial batch state is committed.
-        await completeChatRequestClaim(
+        claimCompleted = await completeChatRequestClaim(
           c.env.DB,
           clientRequestId,
           userId,
@@ -3226,8 +3295,29 @@ chatRouter.post('/stream', async (c) => {
           console.error('[chat] idempotency completion marker failed', {
             error_class: sanitizedChatErrorClass(completionError),
           });
+          return false;
         });
+        if (!claimCompleted) {
+          if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId).catch(() => false)) {
+            reportTombstoneCancellation('persistence');
+            return;
+          }
+          throw error;
+        }
       }
+      if (!claimCompleted) {
+        if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId).catch(() => false)) {
+          reportTombstoneCancellation('persistence');
+        }
+        return;
+      }
+
+      await recordAnalytics('chat_completion');
+
+      // This Worker event is the client-visible terminal success signal. Emit
+      // it only after persistence and the reserved-claim transition have won.
+      streamFailureStage = 'terminal_sse';
+      await write(doneEvent);
 
     } catch (err) {
       if (generationAbortController.signal.aborted) {

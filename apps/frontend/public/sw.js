@@ -25,7 +25,7 @@ const CACHED_API_PATTERNS = [
   // library-bundle is fetched on every page load by useBoards/useClasses/useStreams/useSubjects.
   // Caching with stale-while-revalidate eliminates the 130ms+ round-trip on repeat visits.
   // Covers both the slim variant (?slim=1) and the full bundle (?boot=...).
-  /^\/api\/content\/library-bundle/,
+  /^\/api\/(?:v1\/)?content\/library-bundle/,
   /^\/api\/content\/boards$/,
   /^\/api\/content\/classes/,
   /^\/api\/content\/streams/,

@@ -311,6 +311,76 @@ describe('atomic quota controls', () => {
     expect(claim).toEqual({ status: 'completed', monthly_period: claimPeriod });
   });
 
+  it('does not persist a response when cancellation wins the claim transition', async () => {
+    const userId = await createFreeUser();
+    const requestId = `cancel_persist_${crypto.randomUUID().replace(/-/g, '')}`;
+    const minutePeriod = currentQuotaMinutePeriod();
+    const monthlyPeriod = currentQuotaMonthPeriod();
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO quota_usage (user_id, period, count) VALUES (?, ?, 1)',
+      ).bind(userId, minutePeriod),
+      env.DB.prepare(`
+        INSERT INTO chat_request_claims
+          (request_id, user_id, period, is_anon, quota_reserved,
+           monthly_quota_reserved, monthly_period, status, created_at, expires_at)
+        VALUES (?, ?, ?, 0, 1, 1, ?, 'reserved', ?, ?)
+      `).bind(
+        requestId,
+        userId,
+        minutePeriod,
+        monthlyPeriod,
+        Math.floor(Date.now() / 1000),
+        expiresAt,
+      ),
+    ]);
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const cancelled = await chatRouter.fetch(
+      new Request('https://api.example/cancel', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ client_request_id: requestId }),
+      }),
+      env,
+    );
+    expect(cancelled.status).toBe(202);
+
+    await expect(persistCompletedChat(env.DB, {
+      userId,
+      sessionId: `cancelled_${crypto.randomUUID()}`,
+      userMessage: 'Remember this cancelled question',
+      assistantResponse: 'This answer must not be stored in history or memory.',
+      lang: 'en',
+      modelUsed: 'test-model',
+      isAnon: false,
+      requestId,
+      responseMetadata: {},
+      confidenceTier: 'high',
+    })).resolves.toBe(false);
+
+    const chatRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const memoryRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM memory_brain WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const minuteQuota = await env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, minutePeriod).first<{ count: number }>();
+    const monthQuota = await env.DB.prepare(
+      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, monthlyPeriod).first<{ count: number }>();
+
+    expect(chatRows?.count).toBe(0);
+    expect(memoryRows?.count).toBe(0);
+    expect(minuteQuota?.count).toBe(0);
+    expect(monthQuota).toBeNull();
+  });
+
   it('allows exactly the anonymous limit under parallel reservations', async () => {
     const anonId = 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const results = await Promise.all(
@@ -499,6 +569,217 @@ describe('atomic quota controls', () => {
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
     expect(row?.count).toBe(0);
+  });
+
+  it('emits syrabit_done only after the claim, history, and memory commit', async () => {
+    const userId = await createFreeUser();
+    const requestId = `complete_before_done_${crypto.randomUUID().replace(/-/g, '')}`;
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const answer = 'Gravity is the force that attracts objects with mass toward one another.';
+    const encoder = new TextEncoder();
+    const completeEnv = {
+      ...env,
+      AI: {
+        run: async (model: string) => {
+          if (model === '@cf/baai/bge-m3') {
+            return { data: [{ values: [0.1, 0.2, 0.3] }] };
+          }
+          return new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ response: answer })}\n`,
+              ));
+              controller.enqueue(encoder.encode('data: [DONE]\n'));
+              controller.close();
+            },
+          });
+        },
+      } as unknown as Ai,
+      VECTORIZE: {
+        query: async () => ({ matches: [] }),
+      } as unknown as VectorizeIndex,
+    };
+    const background: Promise<unknown>[] = [];
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+    } as unknown as ExecutionContext;
+
+    const response = await chatRouter.fetch(
+      new Request('https://api.example/stream', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: 'Explain gravity',
+          lang: 'en',
+          client_request_id: requestId,
+        }),
+      }),
+      completeEnv,
+      context,
+    );
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let streamText = '';
+    while (!streamText.includes('"event":"syrabit_done"')) {
+      const read = await reader.read();
+      if (read.done) throw new Error('chat stream closed before syrabit_done');
+      streamText += decoder.decode(read.value, { stream: true });
+    }
+
+    const claim = await env.DB.prepare(
+      'SELECT status FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string }>();
+    const history = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const memories = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM memory_brain WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    expect(claim?.status).toBe('completed');
+    expect(history?.count).toBe(2);
+    expect(memories?.count).toBe(1);
+
+    while (true) {
+      const read = await reader.read();
+      if (read.done) break;
+      streamText += decoder.decode(read.value, { stream: true });
+    }
+    await Promise.all(background);
+  });
+
+  it('aborts a stalled provider when cancellation is recorded only as a tombstone', async () => {
+    const userId = await createFreeUser();
+    const requestId = `cancel_monitor_${crypto.randomUUID().replace(/-/g, '')}`;
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    let providerSignal: AbortSignal | undefined;
+    let providerStreamCancelled = false;
+    const encoder = new TextEncoder();
+    const monitorEnv = {
+      ...env,
+      AI: {
+        run: async (
+          model: string,
+          _input: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (model === '@cf/baai/bge-m3') {
+            return { data: [{ values: [0.1, 0.2, 0.3] }] };
+          }
+          providerSignal = options?.signal;
+          return new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode('data: {"response":"Partial answer before stall"}\n'));
+            },
+            cancel() {
+              providerStreamCancelled = true;
+            },
+          });
+        },
+      } as unknown as Ai,
+      VECTORIZE: {
+        query: async () => ({ matches: [] }),
+      } as unknown as VectorizeIndex,
+    };
+    const background: Promise<unknown>[] = [];
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+    } as unknown as ExecutionContext;
+
+    const response = await chatRouter.fetch(
+      new Request('https://api.example/stream', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: 'Explain gravity briefly',
+          lang: 'en',
+          client_request_id: requestId,
+        }),
+      }),
+      monitorEnv,
+      context,
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let streamText = '';
+    let initialReadTimer: ReturnType<typeof setTimeout> | undefined;
+    const initialReadTimeout = new Promise<never>((_, reject) => {
+      initialReadTimer = setTimeout(
+        () => reject(new Error('provider did not emit the initial chunk')),
+        5_000,
+      );
+    });
+    try {
+      while (!streamText.includes('Partial answer before stall')) {
+        const read = await Promise.race([reader.read(), initialReadTimeout]);
+        if (read.done) throw new Error('chat stream closed before the provider chunk');
+        streamText += decoder.decode(read.value, { stream: true });
+      }
+    } finally {
+      if (initialReadTimer !== undefined) clearTimeout(initialReadTimer);
+    }
+
+    const cancelled = await chatRouter.fetch(
+      new Request('https://api.example/cancel', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ client_request_id: requestId }),
+      }),
+      monitorEnv,
+      context,
+    );
+    expect(cancelled.status).toBe(202);
+
+    while (true) {
+      const read = await reader.read();
+      if (read.done) break;
+      streamText += decoder.decode(read.value, { stream: true });
+    }
+    await Promise.all(background);
+
+    expect(providerSignal?.aborted).toBe(true);
+    expect((providerSignal?.reason as Error | undefined)?.name).toBe('AbortError');
+    expect((providerSignal?.reason as Error | undefined)?.message).toBe('Chat request cancelled');
+    expect(providerStreamCancelled).toBe(true);
+    expect(streamText).not.toContain('"event":"syrabit_done"');
+    expect(streamText).not.toContain('"done":true');
+
+    const claim = await env.DB.prepare(
+      'SELECT status FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string }>();
+    const chatRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const memoryRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM memory_brain WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const minuteQuota = await env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const monthQuota = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM monthly_quota_usage WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+
+    expect(claim?.status).toBe('cancelled');
+    expect(chatRows?.count).toBe(0);
+    expect(memoryRows?.count).toBe(0);
+    expect(minuteQuota?.count ?? 0).toBe(0);
+    expect(monthQuota?.count).toBe(0);
   });
 
   it('keeps authenticated chat identity and releases its quota on provider failure', async () => {

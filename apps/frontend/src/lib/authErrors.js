@@ -82,7 +82,7 @@ function withRequestReference(message, err) {
 function getFallbackForFailure(err, fallback) {
   if (err?.authStage === 'profile') {
     return withRequestReference(
-      'Sign-in succeeded, but your profile could not be loaded. No session was saved. Please try again.',
+      'Authentication succeeded, but your profile could not be loaded. No session was saved. Please try again.',
       err,
     );
   }
@@ -109,6 +109,14 @@ function getFallbackForFailure(err, fallback) {
 
 export function formatAuthError(err, fallback = 'Something went wrong. Please try again.') {
   const data = err?.response?.data;
+  const status = err?.response?.status;
+  const detail = data?.detail;
+  const isGenericServerError = typeof detail === 'string' &&
+    /^internal server error[.!]?$/i.test(detail.trim());
+  if (Number.isFinite(status) && status >= 500 && isGenericServerError) {
+    return getFallbackForFailure(err, fallback);
+  }
+
   const detailMessage = formatDetail(data?.detail);
   if (detailMessage) return detailMessage;
 

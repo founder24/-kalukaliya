@@ -39,7 +39,7 @@ export default function ResetPasswordPage() {
         { email },
       );
       setStep('confirm');
-      toast.success('Reset token sent! Check your email or ask admin.');
+      toast.success('If an account exists, reset instructions will be sent.');
     } catch (err) {
       toast.error(formatAuthError(err, 'Request failed. Please try again.'));
     } finally {
@@ -80,7 +80,9 @@ export default function ResetPasswordPage() {
             <>
               <div className="mb-6">
                 <h1 className="text-xl font-semibold text-foreground">Reset Password</h1>
-                <p className="text-muted-foreground text-sm mt-1">Enter your email — we'll send you a reset token</p>
+                <p className="text-muted-foreground text-sm mt-1">
+                  If an account exists for this email, reset instructions will be sent.
+                </p>
               </div>
               <form onSubmit={handleRequest} className="space-y-4">
                 <div className="space-y-1.5">
@@ -115,8 +117,20 @@ export default function ResetPasswordPage() {
             <>
               <div className="mb-6">
                 <h1 className="text-xl font-semibold text-foreground">Enter Reset Token</h1>
-                <p className="text-muted-foreground text-sm mt-1">Enter the token sent to your email and choose a new password</p>
-                <p className="text-muted-foreground/50 text-xs mt-2">Didn't receive an email? Contact admin@syrabit.ai with your email address.</p>
+                <p className="text-muted-foreground text-sm mt-1">
+                  If reset instructions arrive, enter the token here and choose a new password.
+                </p>
+                <p className="text-muted-foreground/50 text-xs mt-2">
+                  Didn&apos;t receive instructions?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setStep('request')}
+                    className="text-violet-600 hover:text-violet-700 underline underline-offset-2"
+                  >
+                    Request again
+                  </button>{' '}
+                  or contact admin@syrabit.ai.
+                </p>
               </div>
               <form onSubmit={handleConfirm} className="space-y-4">
                 <div className="space-y-1.5">
