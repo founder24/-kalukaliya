@@ -133,6 +133,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     justAuthenticated.current = true;
+    let authStage = 'login';
     try {
       const res = await axios.post(
         `${API_BASE}/auth/login`,
@@ -140,11 +141,8 @@ export const AuthProvider = ({ children }) => {
         { withCredentials: true },
       );
       const { access_token, refresh_token } = res.data;
-      storeToken(access_token);
-      storeRefreshToken(refresh_token);
-      setToken(access_token);
-      setAuthToken(access_token);
       // Fetch user profile immediately
+      authStage = 'profile';
       const profileRes = await axios.get(`${API_BASE}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
         withCredentials: true,
@@ -152,11 +150,20 @@ export const AuthProvider = ({ children }) => {
       const userData = profileRes.data;
       hydrateAdsOptOutFromServer(userData?.ads_opt_out);
       setAdsPlan(userData?.plan);
+      // Do not persist credentials until both the login and profile requests
+      // succeed; otherwise a failed profile fetch leaves a partial session.
+      storeToken(access_token);
+      storeRefreshToken(refresh_token);
+      setToken(access_token);
+      setAuthToken(access_token);
       setUser(userData);
       try { Analytics.login(userData.id, userData.email); } catch {}
       return userData;
     } catch (err) {
       justAuthenticated.current = false;
+      if (err && typeof err === 'object') {
+        try { err.authStage = authStage; } catch {}
+      }
       throw err;
     }
   };
