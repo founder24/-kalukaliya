@@ -1001,14 +1001,16 @@ jobs:
   live-chat-contract:
     name: Live chat and content contract
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: post-native-smoke
     if: |
       always() &&
-      inputs.validate_authenticated &&
       needs.post-native-smoke.result == 'success'
     env:
       PUBLIC_EDGE_URL: https://api.syrabit.ai
-      STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+      LIVE_CHAT_TIMEOUT_MS: '30000'
+      LIVE_CHAT_AUTHENTICATED: ${{ inputs.validate_authenticated }}
+      STUDENT_TOKEN: ${{ inputs.validate_authenticated && secrets.CUTOVER_STUDENT_TOKEN || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -1101,7 +1103,6 @@ jobs:
           LIVE_CHAT_CONTRACT_RESULT: ${{ needs.live-chat-contract.result }}
           STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
           PAGES_ASSET_SMOKE_RESULT: ${{ needs.deploy-frontend.outputs.pages_asset_smoke_outcome }}
-          AUTH_VALIDATION_ENABLED: ${{ inputs.validate_authenticated == true }}
         run: |
           {
             echo "## Independent release checks"
@@ -1120,16 +1121,14 @@ jobs:
           if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
             echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
           fi
-          if [[ "$LIVE_CHAT_CONTRACT_RESULT" != "success" \
-            && ! ( "$AUTH_VALIDATION_ENABLED" != "true" && "$LIVE_CHAT_CONTRACT_RESULT" == "skipped" ) ]]; then
+          if [[ "$LIVE_CHAT_CONTRACT_RESULT" != "success" ]]; then
             echo "::error::Live chat/content contract result: ${LIVE_CHAT_CONTRACT_RESULT}"
           fi
           if [[ "$STAFF_ACCESS_RESULT" != "success" ]]; then
             echo "::error::Disposable staff access check result: ${STAFF_ACCESS_RESULT}"
           fi
           [[ "$CHAT_PERFORMANCE_RESULT" == "success" \
-            && ( "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
-              || ( "$AUTH_VALIDATION_ENABLED" != "true" && "$LIVE_CHAT_CONTRACT_RESULT" == "skipped" ) ) \
+            && "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
             && "$STAFF_ACCESS_RESULT" == "success" \
             && "$PAGES_ASSET_SMOKE_RESULT" == "success" ]]
 
