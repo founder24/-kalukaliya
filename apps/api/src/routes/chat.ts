@@ -2183,7 +2183,7 @@ chatRouter.post('/stream', async (c) => {
   // Free authenticated requests need a claim even when older clients omit the
   // stable request key. This gives cancellation and failure cleanup a period-
   // bound reservation record without changing retry semantics for those clients.
-  const claimRequestId = clientRequestId
+  let claimRequestId = clientRequestId
     ?? (monthlyReservation ? `monthly-${crypto.randomUUID()}` : null);
   try {
     const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
@@ -2235,6 +2235,12 @@ chatRouter.post('/stream', async (c) => {
           await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
       }
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
+    }
+
+    // D1-backed reservations need a claim key even for legacy clients without
+    // client_request_id. The claim makes cleanup retries idempotent.
+    if (quotaAllowed && ownsQuotaReservation && !claimRequestId) {
+      claimRequestId = `quota-${crypto.randomUUID()}`;
     }
 
     if (quotaAllowed && claimRequestId) {
@@ -2356,12 +2362,30 @@ chatRouter.post('/stream', async (c) => {
   }
   timings.quota_ms = Date.now() - quotaStart;
 
-  // Helper to release a reserved quota slot on failure paths.
-  const releaseQuota = async (): Promise<void> => {
+  // Claim-scoped cleanup is idempotent, so one bounded retry is safe even if
+  // D1 committed the batch but the caller observed a transient failure.
+  let quotaReleaseAttempts = 0;
+  const releaseQuota = async (failureStage = 'chat_failure'): Promise<void> => {
     if (ownsQuotaReservation || ownsMonthlyQuotaReservation) {
-      await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon);
-      ownsQuotaReservation = false;
-      ownsMonthlyQuotaReservation = false;
+      const maxAttempts = claimRequestId ? 2 : 1;
+      quotaReleaseAttempts = 0;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        quotaReleaseAttempts = attempt;
+        try {
+          await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon);
+          ownsQuotaReservation = false;
+          ownsMonthlyQuotaReservation = false;
+          return;
+        } catch (error) {
+          if (attempt === maxAttempts) throw error;
+          console.warn('[chat] quota release retry', {
+            failure_stage: failureStage,
+            attempt,
+            error_class: sanitizedChatErrorClass(error),
+          });
+          await new Promise<void>((resolve) => setTimeout(resolve, 50 * attempt));
+        }
+      }
     }
   };
 
@@ -2467,7 +2491,11 @@ chatRouter.post('/stream', async (c) => {
     curriculumScope.unresolved
     && !(curriculumScope.unsupportedClass && explicitWebIntent && !directChapterId)
   ) {
-    await releaseQuota().catch(() => {});
+    await releaseQuota('curriculum_scope').catch((error) => console.error('[chat] quota release failed', {
+      failure_stage: 'curriculum_scope',
+      attempts: quotaReleaseAttempts,
+      error_class: sanitizedChatErrorClass(error),
+    }));
     c.header('X-Failure-Stage', 'curriculum_scope');
     return c.json({
       detail: curriculumScope.pageConflict
@@ -2509,7 +2537,11 @@ chatRouter.post('/stream', async (c) => {
       // general knowledge. Explicit current-information requests continue
       // through the verified-web path below.
       if (contextChunks.length === 0 && !requestedWebIntent) {
-        await releaseQuota().catch(() => {});
+        await releaseQuota('authoritative_retrieval').catch((error) => console.error('[chat] quota release failed', {
+          failure_stage: 'authoritative_retrieval',
+          attempts: quotaReleaseAttempts,
+          error_class: sanitizedChatErrorClass(error),
+        }));
         c.header('X-Failure-Stage', 'authoritative_retrieval');
         const detail = authoritativeIntent === 'pyq'
           ? lang === 'as'
@@ -2528,7 +2560,11 @@ chatRouter.post('/stream', async (c) => {
     } catch (error) {
       // This occurs before SSE headers/body are committed, so keep it a typed
       // HTTP error clients can safely retry instead of a misleading stream.
-      await releaseQuota().catch(() => {});
+      await releaseQuota('authoritative_retrieval').catch((releaseError) => console.error('[chat] quota release failed', {
+        failure_stage: 'authoritative_retrieval',
+        attempts: quotaReleaseAttempts,
+        error_class: sanitizedChatErrorClass(releaseError),
+      }));
       c.header('X-Failure-Stage', 'authoritative_retrieval');
       return c.json({
         detail: 'Authoritative curriculum records are temporarily unavailable. Please try again.',
@@ -3044,6 +3080,7 @@ chatRouter.post('/stream', async (c) => {
         timings.total_ms = Date.now() - startTime;
         streamFailureStage = 'terminal_sse';
         await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          attempts: quotaReleaseAttempts,
           error_class: sanitizedChatErrorClass(e),
         }));
         await write({
@@ -3133,6 +3170,7 @@ chatRouter.post('/stream', async (c) => {
         timings.total_ms = Date.now() - startTime;
         streamFailureStage = 'terminal_sse';
         await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          attempts: quotaReleaseAttempts,
           error_class: sanitizedChatErrorClass(e),
         }));
         await write(terminalChatErrorEvent(
@@ -3187,6 +3225,7 @@ chatRouter.post('/stream', async (c) => {
             timings.total_ms = Date.now() - startTime;
             streamFailureStage = 'terminal_sse';
             await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+              attempts: quotaReleaseAttempts,
               error_class: sanitizedChatErrorClass(e),
             }));
             await write({
@@ -3327,6 +3366,7 @@ chatRouter.post('/stream', async (c) => {
           streamAbortSource ?? 'response_stream',
         );
         await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          attempts: quotaReleaseAttempts,
           error_class: sanitizedChatErrorClass(e),
         }));
         return;
@@ -3334,6 +3374,7 @@ chatRouter.post('/stream', async (c) => {
       const failedAtStage = streamFailureStage;
       timings.total_ms = Date.now() - startTime;
       await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+        attempts: quotaReleaseAttempts,
         error_class: sanitizedChatErrorClass(e),
       }));
       try {

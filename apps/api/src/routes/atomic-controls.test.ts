@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
 import { revokedRtKey, signAccessToken, signRefreshToken } from '../middleware/auth';
@@ -64,6 +64,67 @@ async function createFreeUser(): Promise<string> {
      VALUES (?, ?, 'student', 'free', 0)`,
   ).bind(userId, `${userId}@example.test`).run();
   return userId;
+}
+
+function databaseWithBatchFailures(failureCount: number, failAuthoritativeRead = false) {
+  let batchCalls = 0;
+  const database = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'batch') {
+        return async (statements: Parameters<Env['DB']['batch']>[0]) => {
+          batchCalls += 1;
+          if (batchCalls <= failureCount) {
+            throw new Error('Synthetic D1 failure with PRIVATE_TEST_MARKER');
+          }
+          return target.batch(statements);
+        };
+      }
+      if (property === 'prepare' && failAuthoritativeRead) {
+        return (query: Parameters<Env['DB']['prepare']>[0]) => {
+          if (query.includes('FROM chapters')) {
+            throw new Error('Synthetic D1 lookup failure with PRIVATE_LOOKUP_MARKER');
+          }
+          return target.prepare(query);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as Env['DB'];
+  return {
+    database,
+    get batchCalls() {
+      return batchCalls;
+    },
+  };
+}
+
+async function postAuthenticatedChat(
+  database: Env['DB'],
+  input: {
+    userId: string;
+    message: string;
+    requestId?: string;
+    subjectId?: string;
+  },
+): Promise<Response> {
+  const accessToken = await signAccessToken(input.userId, 'student', JWT_SECRET);
+  return chatRouter.fetch(
+    new Request('https://api.example/stream', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: input.message,
+        lang: 'en',
+        ...(input.requestId && { client_request_id: input.requestId }),
+        ...(input.subjectId && { subject_id: input.subjectId }),
+      }),
+    }),
+    { ...env, DB: database },
+  );
 }
 
 function previousMonthPeriod(period: string): string {
@@ -780,6 +841,210 @@ describe('atomic quota controls', () => {
     expect(memoryRows?.count).toBe(0);
     expect(minuteQuota?.count ?? 0).toBe(0);
     expect(monthQuota?.count).toBe(0);
+  });
+
+  it('retries and releases a monthly reservation after curriculum-scope rejection', async () => {
+    const userId = await createFreeUser();
+    const requestId = `scope_release_${crypto.randomUUID().replace(/-/g, '')}`;
+    const message = 'Explain forces in Class 99 Physics PRIVATE_PROMPT_MARKER';
+    const flakyDb = databaseWithBatchFailures(1);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const response = await postAuthenticatedChat(flakyDb.database, {
+        userId,
+        message,
+        requestId,
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'curriculum_scope_ambiguous',
+        failure_stage: 'curriculum_scope',
+      });
+      expect(flakyDb.batchCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('[chat] quota release retry', {
+        failure_stage: 'curriculum_scope',
+        attempt: 1,
+        error_class: 'Error',
+      });
+
+      const minuteUsage = await env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(userId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      const claim = await env.DB.prepare(
+        'SELECT status FROM chat_request_claims WHERE request_id = ?',
+      ).bind(requestId).first<{ status: string }>();
+      expect(minuteUsage?.count ?? 0).toBe(0);
+      expect(await getAuthMonthlyQuotaUsage(env.DB, userId)).toBe(0);
+      expect(claim).toBeNull();
+
+      const warningData = JSON.stringify(warnSpy.mock.calls);
+      expect(warningData).not.toContain(message);
+      expect(warningData).not.toContain(userId);
+      expect(warningData).not.toContain(requestId);
+      expect(warningData).not.toContain('PRIVATE_TEST_MARKER');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('retries idempotent cleanup on empty authoritative retrieval for a legacy request', async () => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+       VALUES (?, ?, 'student', 'premium', 0)`,
+    ).bind(userId, `${userId}@example.test`).run();
+    const subjectId = `quota-cleanup-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Quota cleanup test', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
+    const message = 'Show me the syllabus PRIVATE_AUTHORITATIVE_MARKER';
+    const flakyDb = databaseWithBatchFailures(1);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      // Omit client_request_id to exercise the server-generated cleanup claim.
+      const response = await postAuthenticatedChat(flakyDb.database, {
+        userId,
+        message,
+        subjectId,
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'authoritative_context_empty',
+        failure_stage: 'authoritative_retrieval',
+      });
+      expect(flakyDb.batchCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('[chat] quota release retry', {
+        failure_stage: 'authoritative_retrieval',
+        attempt: 1,
+        error_class: 'Error',
+      });
+
+      const minuteUsage = await env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(userId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      const reservedClaims = await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM chat_request_claims
+         WHERE user_id = ? AND status = 'reserved'`,
+      ).bind(userId).first<{ count: number }>();
+      expect(minuteUsage?.count ?? 0).toBe(0);
+      expect(reservedClaims?.count ?? 0).toBe(0);
+
+      const warningData = JSON.stringify(warnSpy.mock.calls);
+      expect(warningData).not.toContain(message);
+      expect(warningData).not.toContain(userId);
+      expect(warningData).not.toContain('PRIVATE_TEST_MARKER');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('retries quota cleanup when authoritative retrieval throws before returning', async () => {
+    const userId = await createFreeUser();
+    const requestId = `authoritative_read_${crypto.randomUUID().replace(/-/g, '')}`;
+    const subjectId = `quota-read-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Quota read failure test', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
+    const message = 'Show me the syllabus PRIVATE_READ_PROMPT_MARKER';
+    const flakyDb = databaseWithBatchFailures(1, true);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const response = await postAuthenticatedChat(flakyDb.database, {
+        userId,
+        message,
+        requestId,
+        subjectId,
+      });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'authoritative_context_unavailable',
+        failure_stage: 'authoritative_retrieval',
+      });
+      expect(flakyDb.batchCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('[chat] quota release retry', {
+        failure_stage: 'authoritative_retrieval',
+        attempt: 1,
+        error_class: 'Error',
+      });
+
+      const minuteUsage = await env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(userId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      const claim = await env.DB.prepare(
+        'SELECT status FROM chat_request_claims WHERE request_id = ?',
+      ).bind(requestId).first<{ status: string }>();
+      expect(minuteUsage?.count ?? 0).toBe(0);
+      expect(await getAuthMonthlyQuotaUsage(env.DB, userId)).toBe(0);
+      expect(claim).toBeNull();
+
+      const loggedData = JSON.stringify([
+        ...warnSpy.mock.calls,
+        ...errorSpy.mock.calls,
+      ]);
+      expect(loggedData).not.toContain(message);
+      expect(loggedData).not.toContain(userId);
+      expect(loggedData).not.toContain(requestId);
+      expect(loggedData).not.toContain('PRIVATE_TEST_MARKER');
+      expect(loggedData).not.toContain('PRIVATE_LOOKUP_MARKER');
+      expect(loggedData).not.toContain('PRIVATE_READ_PROMPT_MARKER');
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('logs a final early-return cleanup failure without student data', async () => {
+    const userId = await createFreeUser();
+    const requestId = `scope_cleanup_failure_${crypto.randomUUID().replace(/-/g, '')}`;
+    const message = 'Explain forces in Class 99 Physics PRIVATE_FINAL_MARKER';
+    const failedDb = databaseWithBatchFailures(2);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const response = await postAuthenticatedChat(failedDb.database, {
+        userId,
+        message,
+        requestId,
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'curriculum_scope_ambiguous',
+        failure_stage: 'curriculum_scope',
+      });
+      expect(failedDb.batchCalls).toBe(2);
+      expect(errorSpy).toHaveBeenCalledWith('[chat] quota release failed', {
+        failure_stage: 'curriculum_scope',
+        attempts: 2,
+        error_class: 'Error',
+      });
+
+      const claim = await env.DB.prepare(
+        'SELECT status FROM chat_request_claims WHERE request_id = ?',
+      ).bind(requestId).first<{ status: string }>();
+      expect(claim?.status).toBe('reserved');
+      expect(await getAuthMonthlyQuotaUsage(env.DB, userId)).toBe(1);
+
+      const loggedData = JSON.stringify([
+        ...warnSpy.mock.calls,
+        ...errorSpy.mock.calls,
+      ]);
+      expect(loggedData).not.toContain(message);
+      expect(loggedData).not.toContain(userId);
+      expect(loggedData).not.toContain(requestId);
+      expect(loggedData).not.toContain('PRIVATE_TEST_MARKER');
+      expect(loggedData).not.toContain('PRIVATE_FINAL_MARKER');
+      expect(loggedData).not.toContain('Synthetic D1 failure');
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 
   it('keeps authenticated chat identity and releases its quota on provider failure', async () => {
