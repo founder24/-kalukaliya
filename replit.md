@@ -22,6 +22,13 @@ pnpm --filter @workspace/syrabit run test
 pnpm --filter syrabit-api run type-check
 ```
 
+## Live QA credentials
+
+Use credentials stored in Replit Secrets for admin-panel and student-interface
+QA. Use admin credentials for admin flows and a student-role account for
+student-only flows; ask before creating a student account if none is available.
+Never print credential values or write them to project files.
+
 Cloudflare and provider credentials should be configured through Replit
 Secrets or the Cloudflare deployment environment; do not commit local
 environment files.
