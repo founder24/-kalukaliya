@@ -1575,7 +1575,7 @@ describe('Staff password change session protection', () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({
-        message: 'If an account exists, a reset email has been sent',
+        message: 'If an account exists, reset instructions will be sent',
       });
       const href = emailPayload?.html?.match(/href="([^"]+)"/)?.[1];
       expect(href).toBeTruthy();
