@@ -72,54 +72,26 @@ export default function ChatWidget(props) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="rounded-xl p-4 flex flex-col items-center gap-2 bg-gray-50 border border-gray-100">
             <div className="flex items-center justify-between w-full mb-1">
               <span className="text-gray-500 text-xs font-medium flex items-center gap-1">
-                <Target size={11} /> RAG Accuracy
+                <Target size={11} /> Positive Chat Feedback
               </span>
               <AlertBadge alert={ragAlert} />
             </div>
-            <RagAccuracyGauge accuracy={ragAccuracy?.accuracy_pct ?? 98} />
-            <p className="text-xs text-gray-400 text-center">
-              {ragAccuracy?.has_data
-                ? `${ragAccuracy.answered_queries} / ${ragAccuracy.total_queries} queries answered`
-                : 'No queries yet — showing default'}
-            </p>
-          </div>
-
-          <div className="rounded-xl p-4 bg-gray-50 border border-gray-100">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-gray-500 text-xs font-medium flex items-center gap-1">
-                <Activity size={11} /> Daily Fallback Rate
-              </span>
-              <AlertBadge alert={fallbackAlert} />
-            </div>
-            {chatFallbacks?.has_data && fallbackDaily.length > 0 ? (
-              <ResponsiveContainer width="100%" height={90}>
-                <LineChart data={fallbackDaily}>
-                  <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={d => d.slice(5)} />
-                  <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[0, 'auto']} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <ReferenceLine y={5} stroke="#ef4444" strokeDasharray="3 3" label={{ value: '5% max', fill: '#ef4444', fontSize: 9 }} />
-                  <Line type="monotone" dataKey="fallback_rate" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : safeFailedSections.includes('fallbacks') ? (
-              <div className="flex flex-col items-center justify-center h-[90px] text-gray-400 text-xs gap-1">
-                <Activity size={20} className="opacity-30" />
-                <span className="text-amber-600">Could not load fallback data</span>
-              </div>
+            {ragAccuracy?.has_data ? (
+              <RagAccuracyGauge accuracy={ragAccuracy.accuracy_pct} />
             ) : (
-              <div className="flex flex-col items-center justify-center h-[90px] text-gray-400 text-xs gap-1">
-                <Activity size={20} className="opacity-30" />
-                <span>No query data yet</span>
-                <span className="text-emerald-600 text-xs font-medium">
-                  {chatFallbacks?.fallback_rate_pct ?? 0}% fallback rate
-                </span>
+              <div className="flex items-center justify-center min-h-[88px] text-xs text-gray-400">
+                No feedback responses in the last 30 days
               </div>
             )}
-            <p className="text-xs text-gray-400 mt-1">Target: &lt;5% fallback rate</p>
+            <p className="text-xs text-gray-400 text-center">
+              {ragAccuracy?.has_data
+                ? `${ragAccuracy.positive_count} positive ratings / ${ragAccuracy.feedback_count} feedback responses`
+                : 'Feedback rating, not a measure of RAG accuracy'}
+            </p>
           </div>
 
           <div className="rounded-xl p-4 bg-gray-50 border border-gray-100">
@@ -129,10 +101,10 @@ export default function ChatWidget(props) {
               </span>
               <AlertBadge alert={vectorAlert} />
             </div>
-            {vectorStats ? (
+            {vectorStats?.has_data ? (
               <div className="space-y-3">
                 {[
-                  { label: 'SEO Pages', pct: vectorStats.pages?.coverage_pct ?? 0, color: '#8b5cf6' },
+                  { label: 'Non-chapter sources', pct: vectorStats.pages?.coverage_pct ?? 0, color: '#8b5cf6' },
                   { label: 'Chapters', pct: vectorStats.chapters?.coverage_pct ?? 0, color: '#3b82f6' },
                   { label: 'Overall', pct: vectorStats.overall_coverage_pct ?? 0, color: '#10b981' },
                 ].map(({ label, pct, color }) => (
@@ -160,16 +132,16 @@ export default function ChatWidget(props) {
               </div>
             ) : (
               <div className="flex items-center justify-center h-20 text-gray-400 text-xs">
-                No vector data
+                No vector chunks have been indexed
               </div>
             )}
-            <p className="text-xs text-gray-400 mt-1">Target: &ge;90%</p>
+            {vectorStats?.has_data && <p className="text-xs text-gray-400 mt-1">Target: &ge;90%</p>}
           </div>
         </div>
       </GlassCard>
       </SectionErrorBoundary>
 
-      <SectionErrorBoundary name="Chat Speed-up">
+      {chatSpeedups?.source === 'd1' && <SectionErrorBoundary name="Chat Speed-up">
       <GlassCard className="p-5">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -432,7 +404,7 @@ export default function ChatWidget(props) {
           );
         })()}
       </GlassCard>
-      </SectionErrorBoundary>
+      </SectionErrorBoundary>}
     </>
   );
 }

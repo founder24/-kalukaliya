@@ -225,9 +225,9 @@ export function PipelineWidget({ token }) {
   if (!pipe) return null;
   const bars = [
     { label: 'Published', value: pipe.published, total: pipe.total_topics, color: '#10b981' },
-    { label: 'Has Content', value: pipe.has_content, total: pipe.total_topics, color: '#7c3aed' },
-    { label: 'Needs Schema', value: pipe.needs_schema, total: pipe.total_topics, color: '#f59e0b', invert: true },
-    { label: 'Needs Links', value: pipe.needs_internal_links, total: pipe.total_topics, color: '#3b82f6', invert: true },
+    { label: 'English notes', value: pipe.has_content, total: pipe.total_topics, color: '#7c3aed' },
+    { label: 'Assamese notes', value: pipe.with_assamese_notes, total: pipe.total_topics, color: '#3b82f6' },
+    { label: 'Needs English notes', value: pipe.needs_english_notes, total: pipe.total_topics, color: '#f59e0b' },
   ];
   return (
     <GlassCard className="p-5">

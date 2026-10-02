@@ -78,7 +78,7 @@ describe('admin dashboard widgets with missing or null API props', () => {
     render(<TrafficWidget cfVisitors24h={null} cfCrawlControl={null} vs={null} />);
 
     expect(screen.getByTestId('traffic-empty-state')).toHaveTextContent(
-      'No traffic data yet',
+      'No consented page-view events in the last 30 days',
     );
   });
 
@@ -86,7 +86,7 @@ describe('admin dashboard widgets with missing or null API props', () => {
     render(<TrafficWidget cfVisitors24h={{ totals: {} }} vs={{}} />);
 
     expect(screen.getByTestId('traffic-empty-state')).toHaveTextContent(
-      'No traffic data yet',
+      'No consented page-view events in the last 30 days',
     );
   });
 
@@ -94,7 +94,10 @@ describe('admin dashboard widgets with missing or null API props', () => {
     render(<SeoWidget alertHistory={null} seoHealth={null} seoLive={null} />);
 
     expect(screen.getByText('SEO Sitemap Health')).toBeInTheDocument();
-    expect(screen.getByText('Loading sitemap probes…')).toBeInTheDocument();
+    expect(screen.getByTestId('seo-live-empty-state')).toHaveTextContent(
+      'No sitemap probe results yet. Run a probe to check the sitemaps.',
+    );
+    expect(screen.getByTestId('seo-live-refresh')).toBeInTheDocument();
   });
 
   it('shows readable no-data states for chat health', () => {
@@ -107,15 +110,15 @@ describe('admin dashboard widgets with missing or null API props', () => {
       />,
     );
 
-    expect(screen.getByText('No query data yet')).toBeInTheDocument();
-    expect(screen.getByText('No vector data')).toBeInTheDocument();
-    expect(screen.getByText('No chat speed-up data yet')).toBeInTheDocument();
+    expect(screen.getByText('No vector chunks have been indexed')).toBeInTheDocument();
+    expect(screen.queryByText('No query data yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('No chat speed-up data yet')).not.toBeInTheDocument();
   });
 
   it('handles a chat fallback response with no daily series', () => {
     render(<ChatWidget chatFallbacks={{ has_data: true }} failedSections={[]} />);
 
-    expect(screen.getByText('No query data yet')).toBeInTheDocument();
+    expect(screen.queryByText('Fallbacks (Vertex → legacy)')).not.toBeInTheDocument();
   });
 
   it('shows readable no-data states for user analytics', () => {
@@ -123,23 +126,23 @@ describe('admin dashboard widgets with missing or null API props', () => {
       <UserAnalyticsWidget
         anonQuotaDays={null}
         anonQuotaWall={null}
-        coverage={null}
+        coverage={{ source: 'd1', total: 0, notes: 0, assamese: 0 }}
         latency={null}
         topQueries={null}
+        funnel={{ source: 'users.subscription_tier', has_data: false, total_count: 0, funnel: [] }}
       />,
     );
 
-    expect(screen.getByTestId('anon-quota-empty-state')).toHaveTextContent(
-      'No wall hits in the last 14 days',
-    );
+    expect(screen.queryByTestId('anon-quota-empty-state')).not.toBeInTheDocument();
     expect(screen.getByText('No latency data yet')).toBeInTheDocument();
-    expect(screen.getByText('No subjects found')).toBeInTheDocument();
+    expect(screen.getByText('No chapters recorded in D1')).toBeInTheDocument();
   });
 
   it('handles user analytics responses with missing nested collections', () => {
     render(
       <UserAnalyticsWidget
-        coverage={{ has_data: true }}
+        coverage={{ source: 'd1', total: 0, notes: 0, assamese: 0 }}
+        funnel={{ source: 'users.subscription_tier', has_data: false, total_count: 0, funnel: [] }}
         latency={{ has_data: true }}
         topQueries={{ has_data: true }}
         tokenSpend={{ has_data: true }}
@@ -148,15 +151,13 @@ describe('admin dashboard widgets with missing or null API props', () => {
 
     expect(screen.getByText('No latency data yet')).toBeInTheDocument();
     expect(screen.getByText('No query data yet')).toBeInTheDocument();
-    expect(screen.getByText('No token data yet')).toBeInTheDocument();
-    expect(screen.getByText('No subjects found')).toBeInTheDocument();
+    expect(screen.queryByText('No token data yet')).not.toBeInTheDocument();
+    expect(screen.getByText('No chapters recorded in D1')).toBeInTheDocument();
   });
 
   it('shows a readable no-activity state', () => {
     render(<ActivityWidget quickActions={null} recentEvents={null} vs={null} />);
 
-    expect(screen.getByTestId('recent-activity')).toHaveTextContent(
-      'No activity yet',
-    );
+    expect(screen.queryByTestId('recent-activity')).not.toBeInTheDocument();
   });
 });

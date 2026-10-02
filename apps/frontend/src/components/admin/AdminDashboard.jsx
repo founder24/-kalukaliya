@@ -29,7 +29,6 @@ import {
   normalizeChatFallbacks, normalizeLatency, normalizeTokenSpend,
   normalizeTopQueries, normalizeChatSpeedups, normalizeVectorStats,
 } from './dashboard/shared';
-import AiHealthWidget from './dashboard/AiHealthWidget';
 import TrafficWidget from './dashboard/TrafficWidget';
 import SeoWidget from './dashboard/SeoWidget';
 import ChatWidget from './dashboard/ChatWidget';
@@ -254,59 +253,28 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   };
 
   const loadNotifPrefs = useCallback(async () => {
-    const [prefsResult, statsResult, settingsResult, dispResult, kvResult, r2Result, ciResult, vpResult] = await Promise.allSettled([
+    const [prefsResult, settingsResult] = await Promise.allSettled([
       axios.get(`${API_BASE}/admin/notification-prefs`, adminHdr(adminToken)),
-      axios.get(`${API_BASE}/admin/push/delivery-stats?days=7`, adminHdr(adminToken)),
       axios.get(`${API_BASE}/admin/alert-settings`, adminHdr(adminToken)),
-      axios.get(`${API_BASE}/admin/seo/daily-summary-dispatches?limit=5`, adminHdr(adminToken)),
-      axios.get(`${API_BASE}/admin/kv-health`, adminHdr(adminToken)),
-      axios.get(`${API_BASE}/admin/r2-storage-health`, adminHdr(adminToken)),
-      axios.get(`${API_BASE}/admin/ci-status`, adminHdr(adminToken)),
-      axios.get(`${API_BASE}/admin/vertex/probe-status`, adminHdr(adminToken)),
     ]);
 
-    // Process results
     if (prefsResult.status === 'fulfilled') {
       setNotifPrefs(prefsResult.value.data);
     } else {
       log.error('Failed to load notification prefs', { error: prefsResult.reason?.message });
       setNotifPrefs({ sound_enabled: true, push_enabled: false, chime_tone: 'default', sound_severities: ['high_error_rate', 'high_latency', 'spoofed_bot_surge', 'high_fallback_rate', 'endpoint_down', 'auto_block_expired'], push_severities: ['high_error_rate', 'spoofed_bot_surge', 'endpoint_down', 'auto_block_expired'] });
     }
-    if (statsResult.status === 'fulfilled') {
-      setPushDeliverySummary(statsResult.value.data);
-    } else {
-      console.warn('AdminDashboard: /admin/push/delivery-stats fetch failed:', statsResult.reason);
-    }
     if (settingsResult.status === 'fulfilled') {
       setPushChannelStatus(settingsResult.value.data?.channel_status?.push || null);
     } else {
       setPushChannelStatus(null);
     }
-    if (dispResult.status === 'fulfilled') {
-      setSeoSummaryDispatches(dispResult.value.data?.dispatches || []);
-    } else {
-      setSeoSummaryDispatches([]);
-    }
-    if (kvResult.status === 'fulfilled') {
-      setKvHealth(kvResult.value.data || null);
-    } else {
-      setKvHealth({ configured: false, reason: 'Backend unreachable' });
-    }
-    if (r2Result.status === 'fulfilled') {
-      setR2Health(r2Result.value.data || null);
-    } else {
-      setR2Health({ configured: false, reason: 'Backend unreachable' });
-    }
-    if (ciResult.status === 'fulfilled') {
-      setCiStatus(ciResult.value.data || null);
-    } else {
-      setCiStatus({ configured: false, reason: 'Backend unreachable' });
-    }
-    if (vpResult.status === 'fulfilled') {
-      setVertexProbe(vpResult.value.data || null);
-    } else {
-      setVertexProbe({ status: 'unknown', reason: 'Backend unreachable' });
-    }
+    setPushDeliverySummary(null);
+    setSeoSummaryDispatches(null);
+    setKvHealth(null);
+    setR2Health(null);
+    setCiStatus(null);
+    setVertexProbe(null);
   }, [adminToken]);
 
   const saveNotifPrefs = useCallback(async (updates) => {
@@ -451,63 +419,44 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     try {
       const [
         dashRes, metricsRes,
-        ragAccRes, fallbackRes, vectorRes, latencyRes,
-        queriesRes, tokenRes, funnelRes, coverageRes, pwaRes, botRes, cfCrawlRes, indexNowRes, indexNowHistRes,
-        prewarmRes, alertHistRes, seoHealthRes,
+        ragAccRes, vectorRes, latencyRes,
+        queriesRes, funnelRes, coverageRes,
       ] = await Promise.allSettled([
         adminGetDashboard(adminToken),
         axios.get(`${API_BASE}/admin/dashboard/metrics`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/rag/accuracy`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/chat/fallbacks`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/vector/stats`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/perf/latency`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/analytics/queries`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/billing/tokens`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/monetization/funnel`, adminHdr(adminToken)),
         axios.get(`${API_BASE}/admin/content/coverage`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/pwa/stats`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/analytics/bot-traffic?days=30`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/analytics/cf-ai-crawl-control?days=7`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/indexnow/stats`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/indexnow/history?limit=20`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/seo/prewarm-coverage`, adminHdr(adminToken)),
-        axios.get(`${API_BASE}/admin/alerts?limit=50${showSyntheticAlerts ? '&include_synthetic=true' : ''}`, adminHdr(adminToken)),
-        adminSeoHealthHistory(adminToken, 168),
       ]);
       const failed = [];
       if (dashRes.status === 'fulfilled') setData(dashRes.value.data); else { failed.push('overview'); setData(null); }
       if (metricsRes.status === 'fulfilled') setMetrics(metricsRes.value.data); else { failed.push('metrics'); setMetrics(null); }
       if (ragAccRes.status === 'fulfilled') setRagAccuracy(ragAccRes.value.data); else { failed.push('rag'); setRagAccuracy(null); }
-      if (fallbackRes.status === 'fulfilled') setChatFallbacks(normalizeChatFallbacks(fallbackRes.value.data)); else { failed.push('fallbacks'); setChatFallbacks(null); }
+      setChatFallbacks(null);
       if (vectorRes.status === 'fulfilled') setVectorStats(normalizeVectorStats(vectorRes.value.data)); else { failed.push('vector'); setVectorStats(null); }
       if (latencyRes.status === 'fulfilled') setLatency(normalizeLatency(latencyRes.value.data)); else { failed.push('latency'); setLatency(null); }
       if (queriesRes.status === 'fulfilled') setTopQueries(normalizeTopQueries(queriesRes.value.data)); else { failed.push('queries'); setTopQueries(null); }
-      if (tokenRes.status === 'fulfilled') setTokenSpend(normalizeTokenSpend(tokenRes.value.data)); else { failed.push('tokens'); setTokenSpend(null); }
       if (funnelRes.status === 'fulfilled') setFunnel(funnelRes.value.data); else { failed.push('funnel'); setFunnel(null); }
       if (coverageRes.status === 'fulfilled') setCoverage(coverageRes.value.data); else { failed.push('coverage'); setCoverage(null); }
-      if (pwaRes.status === 'fulfilled') setPwaStats(pwaRes.value.data); else { failed.push('pwa'); setPwaStats(null); }
-      if (botRes.status === 'fulfilled') setBotAnalytics(botRes.value.data); else { failed.push('bot-analytics'); setBotAnalytics(null); }
-      if (cfCrawlRes.status === 'fulfilled') setCfCrawlControl(cfCrawlRes.value.data); else { failed.push('cf-ai-crawl-control'); setCfCrawlControl(null); }
-      if (indexNowRes.status === 'fulfilled') setIndexNowStats(indexNowRes.value.data); else { failed.push('indexnow'); setIndexNowStats(null); }
-      if (indexNowHistRes.status === 'fulfilled') setIndexNowHistory(indexNowHistRes.value.data); else setIndexNowHistory(null);
-      if (alertHistRes.status === 'fulfilled') setAlertHistory(alertHistRes.value.data); else { failed.push('alerts'); setAlertHistory(null); }
-      if (seoHealthRes.status === 'fulfilled') setSeoHealth(seoHealthRes.value.data); else { failed.push('seo-health'); setSeoHealth(null); }
-      if (prewarmRes.status === 'fulfilled') setPrewarmCoverage(prewarmRes.value.data); else { failed.push('prewarm-coverage'); setPrewarmCoverage(null); }
-      seoHealthLive()
-        .then((r) => { setSeoLive(r.data); setSeoLiveError(null); })
-        .catch((e) => { setSeoLive(null); setSeoLiveError(e?.message || 'Failed to load SEO health'); });
-      // Task #350: piggy-back on the dashboard refresh — fetch the
-      // most recent auto-deep-scan summary per sitemap so each row
-      // can show the alert-loop's true blast-radius numbers without
-      // the on-call admin having to re-click "Deep scan" per sitemap.
-      adminSeoDeepScanHistory(adminToken)
-        .then((r) => setSeoAutoDeepScans(r.data || null))
-        .catch(() => setSeoAutoDeepScans(null));
+      setTokenSpend(null);
+      setPwaStats(null);
+      setBotAnalytics(null);
+      setCfCrawlControl(null);
+      setIndexNowStats(null);
+      setIndexNowHistory(null);
+      setPrewarmCoverage(null);
+      setAlertHistory(null);
+      setSeoHealth(null);
+      setSeoLive(null);
+      setSeoAutoDeepScans(null);
       setFailedSections(failed);
       setLastRefresh(new Date());
     } catch (e) {
       log.error('Admin dashboard load failed', { error: e.message, status: e.response?.status });
-      setFailedSections(['overview', 'metrics', 'rag', 'fallbacks', 'vector', 'latency', 'queries', 'tokens', 'funnel', 'coverage']);
+      setFailedSections(['overview', 'metrics', 'rag', 'vector', 'latency', 'queries', 'funnel', 'coverage']);
     }
     finally {
       setLoading(false);
@@ -538,29 +487,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     return () => clearInterval(id);
   }, [hasMetricsMeta]);
 
-  // Task #991 — poll the persistent alert-cooldown active count so the
-  // Alert History header can surface a "N on hold" pill whenever the
-  // 6h cross-worker cooldown is silencing alerts that would otherwise
-  // fire. Cheap call (the route returns just `active_count` plus the
-  // first row); we ask for limit=1 because the badge only needs the
-  // count, never the body. Failures are swallowed — the badge simply
-  // hides, matching the unack-count poll's behaviour in AdminPage.
-  useEffect(() => {
-    if (!adminToken) return undefined;
-    const fetchCount = () => {
-      adminGetAlertCooldowns(adminToken, { only_active: true, limit: 1 })
-        .then((res) => setCooldownActiveCount(res.data?.active_count ?? 0))
-        // On a transient failure, reset to 0 so a stale positive
-        // count from an earlier successful poll doesn't keep the
-        // badge visible and misleading. The next successful poll
-        // will repopulate the real number.
-        .catch(() => setCooldownActiveCount(0));
-    };
-    fetchCount();
-    const id = setInterval(fetchCount, 60000);
-    return () => clearInterval(id);
-  }, [adminToken]);
-
   // Cloudflare Account Analytics overview — fetch on mount and whenever
   // the user clicks a different range pill on the Traffic card.
   const loadCfOverview = useCallback(async (range) => {
@@ -577,10 +503,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     }
   }, [adminToken]);
 
-  useEffect(() => {
-    loadCfOverview(cfRange);
-  }, [cfRange, loadCfOverview]);
-
   // NOTE: previously kept a separate "locked 30d" CF fetch and used it to
   // drive the Unique Visitors tile on the Traffic card. That intentionally
   // ignored the 24h / 7d / 30d range pills, which (correctly) read as a
@@ -594,24 +516,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
   // rolling 24-hour unique count and the "last hour" sub-value is the most
   // recent hourly bucket. Refreshes every 5 minutes.
   const [cfVisitors24h, setCfVisitors24h] = useState(null);
-  useEffect(() => {
-    if (!adminToken) return;
-    let cancelled = false;
-    const fetch24h = async () => {
-      try {
-        const r = await adminGetCfOverview(adminToken, '24h');
-        if (!cancelled && r?.data?.totals?.visitors != null) {
-          setCfVisitors24h(r.data);
-        }
-      } catch (e) {
-        log.warn('CF 24h visitors fetch failed', { error: e.message });
-      }
-    };
-    fetch24h();
-    const interval = setInterval(fetch24h, 5 * 60 * 1000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [adminToken]);
-
   const loadChatSpeedups = useCallback(async (days) => {
     setSpeedupLoading(true);
     try {
@@ -625,12 +529,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
-
-  useEffect(() => {
-    loadChatSpeedups(speedupDays);
-    const interval = setInterval(() => loadChatSpeedups(speedupDays), 60000);
-    return () => clearInterval(interval);
-  }, [loadChatSpeedups, speedupDays]);
 
   // Task #810 — pull the anonymous-quota wall stats produced by Task
   // #798's `chat.anon_quota_exhausted` counter. The endpoint can be
@@ -670,12 +568,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken]);
-
-  useEffect(() => {
-    loadAnonQuotaWall(anonQuotaDays);
-    const interval = setInterval(() => loadAnonQuotaWall(anonQuotaDays), 60000);
-    return () => clearInterval(interval);
-  }, [loadAnonQuotaWall, anonQuotaDays]);
 
   // Task #626 — Chat Model config tab deep-links here with
   // { scrollTo: 'chat-speedup-providers' } to land the admin on the
@@ -839,19 +731,15 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
     }
   };
 
-  const vs = data?.visitor_stats || {};
+  const vs = data?.visitor_stats || metrics?.visitor_stats || {};
   const recentEvents = data?.recent_events || [];
   const deps = metrics?.dependencies || {};
 
   const ragAlert = failedSections.includes('rag') ? 'yellow' : (ragAccuracy?.alert || 'green');
-  const fallbackAlert = failedSections.includes('fallbacks') ? 'yellow' : (chatFallbacks?.alert || 'green');
+  const fallbackAlert = 'green';
   const latencyAlert = failedSections.includes('latency') ? 'yellow' : (latency?.alert || 'green');
   const vectorAlert = failedSections.includes('vector') ? 'yellow'
     : (vectorStats?.overall_coverage_pct ?? 100) < 90 ? 'yellow' : 'green';
-  // botAlert was used by the legacy "Bot Traffic Analytics" card,
-  // which has been replaced by the Cloudflare AI Crawl Control card.
-  // botAnalytics is still fetched (other consumers may rely on it),
-  // but the alert badge for it is no longer rendered here.
 
   const hasRagIssue = ragAlert === 'red' || latencyAlert === 'red';
 
@@ -1122,7 +1010,6 @@ export default function AdminDashboard({ adminToken, onNavigate, navContext }) {
       </SectionErrorBoundary>
 
 
-      <AiHealthWidget {...ctx} />
       <TrafficWidget {...ctx} />
       <SeoWidget {...ctx} />
       <ChatWidget {...ctx} />

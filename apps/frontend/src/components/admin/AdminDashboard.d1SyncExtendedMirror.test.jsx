@@ -149,6 +149,10 @@ async function mountAndWaitForButton() {
   }, { timeout: 4000 });
   await flushEffects();
   await waitFor(() => {
+    expect(screen.getByTestId('seo-live-refresh')).toBeInTheDocument();
+  }, { timeout: 4000 });
+  fireEvent.click(screen.getByTestId('seo-live-refresh'));
+  await waitFor(() => {
     expect(screen.getByTestId('d1-sync-trigger')).toBeInTheDocument();
   }, { timeout: 4000 });
 }

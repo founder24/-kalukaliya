@@ -60,6 +60,40 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; }
 }
 
+function metricCount(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+
+const DEFAULT_NOTIFICATION_PREFS = {
+  sound_enabled: true,
+  push_enabled: false,
+  chime_tone: 'default',
+  sound_severities: ['high_error_rate', 'high_latency', 'high_fallback_rate', 'endpoint_down'],
+  push_severities: ['high_error_rate', 'endpoint_down'],
+  email_failing_csv_enabled: true,
+  email_seo_daily_summary_enabled: true,
+  custom_chime_url: null,
+};
+
+const DEFAULT_ALERT_SETTINGS = {
+  thresholds: {},
+  expiration: { enabled: false, days: 7 },
+};
+
+async function readAdminConfig<T>(env: Env, key: string, fallback: T): Promise<T> {
+  const row = await env.DB.prepare('SELECT value FROM admin_config WHERE key = ?')
+    .bind(key).first<{ value: string | null }>();
+  return parseJson(row?.value, fallback);
+}
+
+async function writeAdminConfig(env: Env, key: string, value: unknown): Promise<void> {
+  await env.DB.prepare(`
+    INSERT INTO admin_config (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).bind(key, JSON.stringify(value), now()).run();
+}
+
 function cookieValue(cookie: string, key: string): string | null {
   const prefix = `${key}=`;
   return cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix))
@@ -154,7 +188,6 @@ adminContentRouter.get('/dashboard', async c => {
   c.header('Cache-Control', 'private, no-store');
   const nowSeconds = now();
   const todayStart = Math.floor(nowSeconds / 86_400) * 86_400;
-  const dayAgo = nowSeconds - 86_400;
 
   const [userStats, chatStats, subjectStats, feedbackStats] = await Promise.all([
     c.env.DB.prepare(`
@@ -204,54 +237,6 @@ adminContentRouter.get('/dashboard', async c => {
     }>(),
   ]);
 
-  let tokenSpend: {
-    source: string;
-    window_hours?: number;
-    providers?: Array<{
-      provider: string;
-      calls: number;
-      input_tokens: number;
-      output_tokens: number;
-    }>;
-  } = { source: 'unavailable' };
-  try {
-    const usage = await c.env.DB.prepare(`
-      SELECT provider,
-             COUNT(*) AS calls,
-             COALESCE(SUM(input_tokens), 0) AS input_tokens,
-             COALESCE(SUM(output_tokens), 0) AS output_tokens
-      FROM ai_usage_logs
-      WHERE created_at >= ?
-        AND (expires_at IS NULL OR expires_at > ?)
-      GROUP BY provider
-      ORDER BY provider
-    `).bind(dayAgo, nowSeconds).all<{
-      provider: string | null;
-      calls: number | string;
-      input_tokens: number | string | null;
-      output_tokens: number | string | null;
-    }>();
-    const providers = usage.results ?? [];
-    if (providers.length) {
-      const asCount = (value: number | string | null | undefined): number => {
-        const parsed = Number(value ?? 0);
-        return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
-      };
-      tokenSpend = {
-        source: 'ai_usage_logs',
-        window_hours: 24,
-        providers: providers.map(row => ({
-          provider: row.provider ?? 'unknown',
-          calls: asCount(row.calls),
-          input_tokens: asCount(row.input_tokens),
-          output_tokens: asCount(row.output_tokens),
-        })),
-      };
-    }
-  } catch {
-    // The overview remains available if the optional usage ledger is absent.
-  }
-
   const asCount = (value: number | string | null | undefined): number => {
     const parsed = Number(value ?? 0);
     return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
@@ -277,19 +262,367 @@ adminContentRouter.get('/dashboard', async c => {
     },
     signups_today: asCount(userStats?.signups_today),
     system_health: 'ok',
-    revenue_total: 0,
-    revenue_total_source: 'unavailable',
-    revenue_month: 0,
     feedback: {
       total: feedbackTotal,
       positive: positiveFeedback,
       positive_rate: feedbackTotal ? Math.round((positiveFeedback / feedbackTotal) * 1000) / 1000 : 0,
     },
-    vector_stats: { source: 'unavailable' },
-    token_spend: tokenSpend,
-    top_queries: { source: 'unavailable' },
-    chat_fallbacks: { source: 'unavailable' },
   });
+});
+
+adminContentRouter.get('/dashboard/metrics', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  c.header('Cache-Control', 'private, no-store');
+
+  const startedAt = Date.now();
+  const nowSeconds = now();
+  const todayStart = Math.floor(nowSeconds / 86_400) * 86_400;
+  const since = nowSeconds - 30 * 86_400;
+  const [users, chapters, traffic, dailyTraffic] = await Promise.all([
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS total,
+        SUM(CASE WHEN subscription_tier = 'free' THEN 1 ELSE 0 END) AS free,
+        SUM(CASE WHEN subscription_tier = 'starter' THEN 1 ELSE 0 END) AS starter,
+        SUM(CASE WHEN subscription_tier = 'pro' THEN 1 ELSE 0 END) AS pro,
+        SUM(CASE WHEN subscription_tier = 'premium' THEN 1 ELSE 0 END) AS premium
+      FROM users WHERE deleted_at IS NULL
+    `).first<Record<string, number | string | null>>(),
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS total,
+        SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published,
+        SUM(CASE WHEN notes_en IS NOT NULL AND TRIM(notes_en) != '' THEN 1 ELSE 0 END) AS english_notes,
+        SUM(CASE WHEN notes_as IS NOT NULL AND TRIM(notes_as) != '' THEN 1 ELSE 0 END) AS assamese_notes
+      FROM chapters
+    `).first<Record<string, number | string | null>>(),
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS page_views,
+        SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS page_views_today,
+        COUNT(DISTINCT json_extract(payload, '$.session_id')) AS sessions,
+        COUNT(DISTINCT CASE WHEN created_at >= ?
+          THEN json_extract(payload, '$.session_id') END) AS sessions_today
+      FROM analytics_events
+      WHERE event_subtype = 'page_view'
+        AND classification = 'optional_analytics'
+        AND created_at >= ?
+    `).bind(todayStart, todayStart, since)
+      .first<Record<string, number | string | null>>(),
+    c.env.DB.prepare(`
+      SELECT date(created_at, 'unixepoch') AS date,
+        COUNT(*) AS page_views,
+        COUNT(DISTINCT json_extract(payload, '$.session_id')) AS sessions
+      FROM analytics_events
+      WHERE event_subtype = 'page_view'
+        AND classification = 'optional_analytics'
+        AND created_at >= ?
+      GROUP BY date(created_at, 'unixepoch')
+      ORDER BY date(created_at, 'unixepoch')
+    `).bind(since).all<{ date: string; page_views: number | string; sessions: number | string }>(),
+  ]);
+
+  const pageViews = metricCount(traffic?.page_views);
+  const sessionCount = metricCount(traffic?.sessions);
+  const daily = (dailyTraffic.results ?? []).map(row => ({
+    date: row.date,
+    page_views: metricCount(row.page_views),
+    sessions: metricCount(row.sessions),
+  }));
+  const responseTimeMs = Date.now() - startedAt;
+  const totalChapters = metricCount(chapters?.total);
+  const publishedChapters = metricCount(chapters?.published);
+
+  return c.json({
+    source: 'd1',
+    generated_at: new Date(nowSeconds * 1000).toISOString(),
+    response_time_ms: responseTimeMs,
+    dependencies: { d1: { status: 'ok', latency: responseTimeMs } },
+    users: {
+      total: metricCount(users?.total),
+      free: metricCount(users?.free),
+      starter: metricCount(users?.starter),
+      pro: metricCount(users?.pro),
+      premium: metricCount(users?.premium),
+    },
+    seo: {
+      published_pages: publishedChapters,
+      topics: totalChapters,
+      published_chapters: publishedChapters,
+      chapters_with_english_notes: metricCount(chapters?.english_notes),
+      chapters_with_assamese_notes: metricCount(chapters?.assamese_notes),
+    },
+    visitor_stats: {
+      source: 'analytics_events',
+      window_days: 30,
+      has_data: pageViews > 0,
+      page_views: pageViews,
+      page_views_today: metricCount(traffic?.page_views_today),
+      sessions: sessionCount,
+      sessions_today: metricCount(traffic?.sessions_today),
+      daily,
+    },
+  });
+});
+
+adminContentRouter.get('/rag/accuracy', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const nowSeconds = now();
+  const since = nowSeconds - 30 * 86_400;
+  const row = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS feedback_count,
+      SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS positive_count,
+      AVG(rating) AS average_rating
+    FROM chat_feedback
+    WHERE created_at >= ? AND (expires_at IS NULL OR expires_at > ?)
+  `).bind(since, nowSeconds)
+    .first<{ feedback_count: number | string | null; positive_count: number | string | null; average_rating: number | string | null }>();
+  const feedbackCount = metricCount(row?.feedback_count);
+  const positiveCount = metricCount(row?.positive_count);
+  return c.json({
+    source: 'chat_feedback',
+    metric: 'positive_feedback_rate',
+    window_days: 30,
+    has_data: feedbackCount > 0,
+    feedback_count: feedbackCount,
+    positive_count: positiveCount,
+    average_rating: Number(row?.average_rating ?? 0),
+    accuracy_pct: feedbackCount ? Math.round(positiveCount * 1000 / feedbackCount) / 10 : 0,
+  });
+});
+
+adminContentRouter.get('/vector/stats', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const row = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS total,
+      SUM(CASE WHEN vector_id IS NOT NULL AND TRIM(vector_id) != '' THEN 1 ELSE 0 END) AS embedded,
+      SUM(CASE WHEN chapter_id IS NULL THEN 1 ELSE 0 END) AS other_total,
+      SUM(CASE WHEN chapter_id IS NULL AND vector_id IS NOT NULL AND TRIM(vector_id) != '' THEN 1 ELSE 0 END) AS other_embedded,
+      SUM(CASE WHEN chapter_id IS NOT NULL THEN 1 ELSE 0 END) AS chapter_total,
+      SUM(CASE WHEN chapter_id IS NOT NULL AND vector_id IS NOT NULL AND TRIM(vector_id) != '' THEN 1 ELSE 0 END) AS chapter_embedded
+    FROM chunks
+  `).first<Record<string, number | string | null>>();
+  const total = metricCount(row?.total);
+  const embedded = metricCount(row?.embedded);
+  const otherTotal = metricCount(row?.other_total);
+  const otherEmbedded = metricCount(row?.other_embedded);
+  const chapterTotal = metricCount(row?.chapter_total);
+  const chapterEmbedded = metricCount(row?.chapter_embedded);
+  const coverage = (count: number, denominator: number) => denominator
+    ? Math.round(count * 1000 / denominator) / 10
+    : 0;
+  return c.json({
+    source: 'chunks',
+    has_data: total > 0,
+    total,
+    embedded,
+    overall_coverage_pct: coverage(embedded, total),
+    pages: {
+      total: otherTotal,
+      embedded: otherEmbedded,
+      coverage_pct: coverage(otherEmbedded, otherTotal),
+    },
+    chapters: {
+      total: chapterTotal,
+      embedded: chapterEmbedded,
+      coverage_pct: coverage(chapterEmbedded, chapterTotal),
+    },
+  });
+});
+
+adminContentRouter.get('/perf/latency', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const since = now() - 7 * 86_400;
+  const predicate = `
+    FROM analytics_events
+    WHERE event_subtype = 'chat_completion'
+      AND classification = 'essential_operational'
+      AND created_at >= ?
+      AND CAST(json_extract(payload, '$.latency_ms') AS REAL) > 0
+  `;
+  const [overall, daily] = await Promise.all([
+    c.env.DB.prepare(`
+      WITH samples AS (
+        SELECT CAST(json_extract(payload, '$.latency_ms') AS REAL) AS latency_ms
+        ${predicate}
+      ), ranked AS (
+        SELECT latency_ms,
+          ROW_NUMBER() OVER (ORDER BY latency_ms) AS rank_no,
+          COUNT(*) OVER () AS sample_count
+        FROM samples
+      )
+      SELECT MAX(sample_count) AS sample_count,
+        ROUND(AVG(latency_ms), 1) AS avg_ms,
+        MAX(CASE WHEN rank_no = CAST((sample_count * 95 + 99) / 100 AS INTEGER)
+          THEN latency_ms END) AS p95_ms
+      FROM ranked
+    `).bind(since).first<{ sample_count: number | string | null; avg_ms: number | string | null; p95_ms: number | string | null }>(),
+    c.env.DB.prepare(`
+      WITH samples AS (
+        SELECT date(created_at, 'unixepoch') AS date,
+          CAST(json_extract(payload, '$.latency_ms') AS REAL) AS latency_ms
+        ${predicate}
+      ), ranked AS (
+        SELECT date, latency_ms,
+          ROW_NUMBER() OVER (PARTITION BY date ORDER BY latency_ms) AS rank_no,
+          COUNT(*) OVER (PARTITION BY date) AS sample_count
+        FROM samples
+      )
+      SELECT date, MAX(sample_count) AS samples,
+        ROUND(AVG(latency_ms), 1) AS avg_ms,
+        MAX(CASE WHEN rank_no = CAST((sample_count * 95 + 99) / 100 AS INTEGER)
+          THEN latency_ms END) AS p95_ms
+      FROM ranked
+      GROUP BY date
+      ORDER BY date
+    `).bind(since).all<{ date: string; samples: number | string; avg_ms: number | string; p95_ms: number | string }>(),
+  ]);
+  const sampleCount = metricCount(overall?.sample_count);
+  return c.json({
+    source: 'analytics_events',
+    window_days: 7,
+    has_data: sampleCount > 0,
+    sample_count: sampleCount,
+    avg_ms: Number(overall?.avg_ms ?? 0),
+    p95_ms: Number(overall?.p95_ms ?? 0),
+    daily: (daily.results ?? []).map(row => ({
+      date: row.date,
+      samples: metricCount(row.samples),
+      avg_ms: Number(row.avg_ms ?? 0),
+      p95_ms: Number(row.p95_ms ?? 0),
+    })),
+  });
+});
+
+adminContentRouter.get('/analytics/queries', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const since = now() - 7 * 86_400;
+  const [totals, rows] = await Promise.all([
+    c.env.DB.prepare(`
+      SELECT COUNT(DISTINCT lower(trim(content))) AS total_unique
+      FROM chats
+      WHERE role = 'user' AND created_at >= ?
+        AND (expires_at IS NULL OR expires_at > ?)
+        AND length(trim(content)) > 0
+    `).bind(since, now()).first<{ total_unique: number | string | null }>(),
+    c.env.DB.prepare(`
+      SELECT MIN(trim(content)) AS query, COUNT(*) AS count
+      FROM chats
+      WHERE role = 'user' AND created_at >= ?
+        AND (expires_at IS NULL OR expires_at > ?)
+        AND length(trim(content)) > 0
+      GROUP BY lower(trim(content))
+      ORDER BY count DESC, query COLLATE NOCASE
+      LIMIT 10
+    `).bind(since, now()).all<{ query: string; count: number | string }>(),
+  ]);
+  const topQueries = (rows.results ?? []).map(row => ({ query: row.query, count: metricCount(row.count) }));
+  return c.json({
+    source: 'chats',
+    window_days: 7,
+    has_data: metricCount(totals?.total_unique) > 0,
+    total_unique: metricCount(totals?.total_unique),
+    top_queries: topQueries,
+  });
+});
+
+adminContentRouter.get('/monetization/funnel', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const rows = await c.env.DB.prepare(`
+    SELECT COALESCE(subscription_tier, 'free') AS tier, COUNT(*) AS count
+    FROM users
+    WHERE deleted_at IS NULL AND role NOT IN ('admin', 'staff')
+    GROUP BY COALESCE(subscription_tier, 'free')
+  `).all<{ tier: string; count: number | string }>();
+  const counts = new Map((rows.results ?? []).map(row => [row.tier, metricCount(row.count)]));
+  const funnel = [
+    { stage: 'Free-tier records', count: counts.get('free') ?? 0 },
+    { stage: 'Starter-tier records', count: counts.get('starter') ?? 0 },
+    { stage: 'Pro / premium-tier records', count: (counts.get('pro') ?? 0) + (counts.get('premium') ?? 0) },
+  ];
+  const totalCount = funnel.reduce((sum, row) => sum + row.count, 0);
+  return c.json({
+    source: 'users.subscription_tier',
+    note: 'Historical account labels only; this is not billing or conversion data.',
+    has_data: totalCount > 0,
+    total_count: totalCount,
+    funnel,
+  });
+});
+
+adminContentRouter.get('/seo/pipeline-status', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const row = await c.env.DB.prepare(`
+    SELECT COUNT(*) AS total_chapters,
+      SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published,
+      SUM(CASE WHEN notes_en IS NOT NULL AND TRIM(notes_en) != '' THEN 1 ELSE 0 END) AS with_english_notes,
+      SUM(CASE WHEN notes_as IS NOT NULL AND TRIM(notes_as) != '' THEN 1 ELSE 0 END) AS with_assamese_notes
+    FROM chapters
+  `).first<Record<string, number | string | null>>();
+  const total = metricCount(row?.total_chapters);
+  const published = metricCount(row?.published);
+  const english = metricCount(row?.with_english_notes);
+  const assamese = metricCount(row?.with_assamese_notes);
+  return c.json({
+    source: 'chapters',
+    total_chapters: total,
+    total_topics: total,
+    pages_total: published,
+    published,
+    has_content: english,
+    with_assamese_notes: assamese,
+    needs_english_notes: Math.max(0, total - english),
+  });
+});
+
+adminContentRouter.get('/notification-prefs', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const stored = await readAdminConfig(c.env, 'notification-prefs', DEFAULT_NOTIFICATION_PREFS);
+  return c.json({ ...DEFAULT_NOTIFICATION_PREFS, ...stored });
+});
+
+adminContentRouter.put('/notification-prefs', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const body = await c.req.json<Record<string, unknown>>();
+  const allowed = Object.keys(DEFAULT_NOTIFICATION_PREFS);
+  const current = await readAdminConfig(c.env, 'notification-prefs', DEFAULT_NOTIFICATION_PREFS);
+  const updates = Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key)));
+  if (!Object.keys(updates).length) return c.json({ detail: 'No valid fields to update' }, 400);
+  const saved = { ...current, ...updates };
+  await writeAdminConfig(c.env, 'notification-prefs', saved);
+  return c.json({ ...DEFAULT_NOTIFICATION_PREFS, ...saved });
+});
+
+adminContentRouter.get('/alert-settings', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const stored = await readAdminConfig(c.env, 'alert-settings', DEFAULT_ALERT_SETTINGS);
+  const settings = {
+    thresholds: { ...DEFAULT_ALERT_SETTINGS.thresholds, ...(stored.thresholds ?? {}) },
+    expiration: { ...DEFAULT_ALERT_SETTINGS.expiration, ...(stored.expiration ?? {}) },
+  };
+  return c.json({ ...settings, defaults: DEFAULT_ALERT_SETTINGS, source: 'd1' });
+});
+
+adminContentRouter.put('/alert-settings', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  const body = await c.req.json<{ thresholds?: Record<string, unknown>; expiration?: Record<string, unknown> }>();
+  if (!body || typeof body !== 'object' || !body.thresholds || !body.expiration) {
+    return c.json({ detail: 'thresholds and expiration are required' }, 400);
+  }
+  const saved = {
+    thresholds: body.thresholds,
+    expiration: body.expiration,
+  };
+  await writeAdminConfig(c.env, 'alert-settings', saved);
+  return c.json({ ...saved, defaults: DEFAULT_ALERT_SETTINGS, source: 'd1' });
 });
 
 adminContentRouter.post('/content/boards', async c => {
@@ -974,7 +1307,18 @@ adminContentRouter.get('/content/coverage', async c => {
       SUM(CASE WHEN notes_as IS NOT NULL AND TRIM(notes_as) != '' THEN 1 ELSE 0 END) AS assamese
     FROM chapters
   `).first();
-  return c.json(row ?? { total: 0, notes: 0, assamese: 0 });
+  const total = metricCount(row?.total as number | string | null | undefined);
+  const notes = metricCount(row?.notes as number | string | null | undefined);
+  const assamese = metricCount(row?.assamese as number | string | null | undefined);
+  return c.json({
+    source: 'd1',
+    has_data: total > 0,
+    total,
+    notes,
+    assamese,
+    english_coverage_pct: total ? Math.round(notes * 1000 / total) / 10 : 0,
+    assamese_coverage_pct: total ? Math.round(assamese * 1000 / total) / 10 : 0,
+  });
 });
 
 adminContentRouter.post('/content/regenerate-sitemap', async c => {
