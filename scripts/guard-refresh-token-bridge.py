@@ -26,8 +26,11 @@ ROUTE_GUARDS = {
         # (from when the guard script was added) went stale and started
         # failing closed on every release. Confirmed via `git show` that the
         # only diff since the previous baseline is that reviewed addition.
-        "full_hash": "984a1828300257f3d6a77067fb452b66947bf54037527afd01e5f738f3605c5b",
-        "d1_hash": "79383a9a1be527972f0f2100645084a89ad79c84dc6c7acd4803ad48bffb6a83",
+        # Rebaselined 2026-10-03 after reviewed KV-failure logout handling:
+        # a failed compatibility write now continues to the D1 session cutoff
+        # before returning 503, preserving account-wide revocation.
+        "full_hash": "79b567206d22fbb92096c000d614af062fcfe75ed0c0424738535b21a02238b0",
+        "d1_hash": "708d9382dbc50dab8ab26d2fff2e8c5200084583c2dba514e9d1f7267990a43a",
     },
     "refresh-route": {
         "bridge_blocks": ("legacy-read", "refresh-kv"),

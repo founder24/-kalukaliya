@@ -40,6 +40,9 @@ jobs:
       - name: Test critical CI trigger contract checker
         run: python3 scripts/test-edge-workflow-triggers.py
 
+      - name: Test refresh-token bridge release guard
+        run: python3 scripts/test-refresh-token-bridge-guard.py
+
       - name: Run D1 round-trip tests
         # Intentionally secrets-free and safe for fork PRs: the test forces
         # getPlatformProxy() to use only local Miniflare bindings
