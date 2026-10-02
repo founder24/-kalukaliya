@@ -147,6 +147,151 @@ adminContentRouter.post('/logout', async c => {
   return response;
 });
 
+adminContentRouter.get('/dashboard', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+
+  c.header('Cache-Control', 'private, no-store');
+  const nowSeconds = now();
+  const todayStart = Math.floor(nowSeconds / 86_400) * 86_400;
+  const dayAgo = nowSeconds - 86_400;
+
+  const [userStats, chatStats, subjectStats, feedbackStats] = await Promise.all([
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS total_users,
+             SUM(CASE WHEN updated_at >= ? THEN 1 ELSE 0 END) AS active_today,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS signups_today,
+             SUM(CASE WHEN subscription_tier = 'pro' THEN 1 ELSE 0 END) AS pro_users,
+             SUM(CASE WHEN subscription_tier = 'free' THEN 1 ELSE 0 END) AS free_users,
+             SUM(CASE WHEN subscription_tier = 'starter' THEN 1 ELSE 0 END) AS starter_users,
+             SUM(CASE WHEN subscription_tier = 'premium' THEN 1 ELSE 0 END) AS premium_users
+      FROM users
+      WHERE deleted_at IS NULL
+    `).bind(todayStart, todayStart).first<{
+      total_users: number | string | null;
+      active_today: number | string | null;
+      signups_today: number | string | null;
+      pro_users: number | string | null;
+      free_users: number | string | null;
+      starter_users: number | string | null;
+      premium_users: number | string | null;
+    }>(),
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS total_messages,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS messages_today,
+             COUNT(DISTINCT session_id) AS total_conversations,
+             COUNT(DISTINCT session_id) AS conversations_with_messages,
+             COUNT(DISTINCT user_id) AS unique_chatters
+      FROM chats
+      WHERE expires_at IS NULL OR expires_at > ?
+    `).bind(todayStart, nowSeconds).first<{
+      total_messages: number | string | null;
+      messages_today: number | string | null;
+      total_conversations: number | string | null;
+      conversations_with_messages: number | string | null;
+      unique_chatters: number | string | null;
+    }>(),
+    c.env.DB.prepare('SELECT COUNT(*) AS total_subjects FROM subjects')
+      .first<{ total_subjects: number | string | null }>(),
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS positive
+      FROM chat_feedback
+      WHERE expires_at IS NULL OR expires_at > ?
+    `).bind(nowSeconds).first<{
+      total: number | string | null;
+      positive: number | string | null;
+    }>(),
+  ]);
+
+  let tokenSpend: {
+    source: string;
+    window_hours?: number;
+    providers?: Array<{
+      provider: string;
+      calls: number;
+      input_tokens: number;
+      output_tokens: number;
+    }>;
+  } = { source: 'unavailable' };
+  try {
+    const usage = await c.env.DB.prepare(`
+      SELECT provider,
+             COUNT(*) AS calls,
+             COALESCE(SUM(input_tokens), 0) AS input_tokens,
+             COALESCE(SUM(output_tokens), 0) AS output_tokens
+      FROM ai_usage_logs
+      WHERE created_at >= ?
+        AND (expires_at IS NULL OR expires_at > ?)
+      GROUP BY provider
+      ORDER BY provider
+    `).bind(dayAgo, nowSeconds).all<{
+      provider: string | null;
+      calls: number | string;
+      input_tokens: number | string | null;
+      output_tokens: number | string | null;
+    }>();
+    const providers = usage.results ?? [];
+    if (providers.length) {
+      const asCount = (value: number | string | null | undefined): number => {
+        const parsed = Number(value ?? 0);
+        return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+      };
+      tokenSpend = {
+        source: 'ai_usage_logs',
+        window_hours: 24,
+        providers: providers.map(row => ({
+          provider: row.provider ?? 'unknown',
+          calls: asCount(row.calls),
+          input_tokens: asCount(row.input_tokens),
+          output_tokens: asCount(row.output_tokens),
+        })),
+      };
+    }
+  } catch {
+    // The overview remains available if the optional usage ledger is absent.
+  }
+
+  const asCount = (value: number | string | null | undefined): number => {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+  };
+  const feedbackTotal = asCount(feedbackStats?.total);
+  const positiveFeedback = asCount(feedbackStats?.positive);
+
+  return c.json({
+    total_users: asCount(userStats?.total_users),
+    active_today: asCount(userStats?.active_today),
+    total_messages: asCount(chatStats?.total_messages),
+    messages_today: asCount(chatStats?.messages_today),
+    total_conversations: asCount(chatStats?.total_conversations),
+    conversations_with_messages: asCount(chatStats?.conversations_with_messages),
+    unique_chatters: asCount(chatStats?.unique_chatters),
+    total_subjects: asCount(subjectStats?.total_subjects),
+    pro_users: asCount(userStats?.pro_users),
+    free_users: asCount(userStats?.free_users),
+    plan_distribution: {
+      free: asCount(userStats?.free_users),
+      starter: asCount(userStats?.starter_users),
+      pro: asCount(userStats?.pro_users) + asCount(userStats?.premium_users),
+    },
+    signups_today: asCount(userStats?.signups_today),
+    system_health: 'ok',
+    revenue_total: 0,
+    revenue_total_source: 'unavailable',
+    revenue_month: 0,
+    feedback: {
+      total: feedbackTotal,
+      positive: positiveFeedback,
+      positive_rate: feedbackTotal ? Math.round((positiveFeedback / feedbackTotal) * 1000) / 1000 : 0,
+    },
+    vector_stats: { source: 'unavailable' },
+    token_spend: tokenSpend,
+    top_queries: { source: 'unavailable' },
+    chat_fallbacks: { source: 'unavailable' },
+  });
+});
+
 adminContentRouter.post('/content/boards', async c => {
   const actor = await requireAdmin(c); if (actor instanceof Response) return actor;
   const body = await safeBody(c);

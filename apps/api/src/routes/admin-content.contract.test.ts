@@ -211,6 +211,106 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
   });
 
+  it('returns the D1-backed admin overview only to authenticated admins', async () => {
+    const denied = await workerFetch(new Request('http://worker/api/v1/admin/dashboard'));
+    expect(denied.status).toBe(401);
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const todayStart = Math.floor(nowSeconds / 86_400) * 86_400;
+    const baselineUsers = await env.DB.prepare(`
+      SELECT COUNT(*) AS total_users,
+             SUM(CASE WHEN updated_at >= ? THEN 1 ELSE 0 END) AS active_today,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS signups_today,
+             SUM(CASE WHEN subscription_tier = 'pro' THEN 1 ELSE 0 END) AS pro_users,
+             SUM(CASE WHEN subscription_tier = 'free' THEN 1 ELSE 0 END) AS free_users
+      FROM users WHERE deleted_at IS NULL
+    `).bind(todayStart, todayStart).first<Record<string, number | null>>();
+    const baselineChats = await env.DB.prepare(`
+      SELECT COUNT(*) AS total_messages,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS messages_today,
+             COUNT(DISTINCT session_id) AS total_conversations,
+             COUNT(DISTINCT user_id) AS unique_chatters
+      FROM chats
+      WHERE expires_at IS NULL OR expires_at > ?
+    `).bind(todayStart, nowSeconds).first<Record<string, number | null>>();
+    const baselineFeedback = await env.DB.prepare(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS positive
+      FROM chat_feedback
+      WHERE expires_at IS NULL OR expires_at > ?
+    `).bind(nowSeconds).first<Record<string, number | null>>();
+    const baselineSubjects = await env.DB.prepare('SELECT COUNT(*) AS total FROM subjects')
+      .first<{ total: number }>();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO users (id, email, role, subscription_tier, created_at, updated_at)
+        VALUES ('dashboard-student-today', 'dashboard-today@example.test', 'student', 'pro', ?, ?)
+      `).bind(todayStart + 10, todayStart + 20),
+      env.DB.prepare(`
+        INSERT INTO users (id, email, role, subscription_tier, created_at, updated_at)
+        VALUES ('dashboard-student-old', 'dashboard-old@example.test', 'student', 'free', ?, ?)
+      `).bind(todayStart - 86_400, todayStart - 86_400),
+      env.DB.prepare(`
+        INSERT INTO chats (id, user_id, session_id, role, content, created_at)
+        VALUES
+          ('dashboard-chat-user', 'dashboard-student-today', 'dashboard-session-today', 'user', 'Question', ?),
+          ('dashboard-chat-assistant', 'dashboard-student-today', 'dashboard-session-today', 'assistant', 'Answer', ?),
+          ('dashboard-chat-old', 'dashboard-student-old', 'dashboard-session-old', 'user', 'Older question', ?)
+      `).bind(todayStart + 30, todayStart + 31, todayStart - 60),
+      env.DB.prepare(`
+        INSERT INTO chats (id, user_id, session_id, role, content, created_at, expires_at)
+        VALUES ('dashboard-chat-expired', 'dashboard-student-old', 'dashboard-session-expired', 'user', 'Expired', ?, ?)
+      `).bind(todayStart + 40, nowSeconds - 1),
+      env.DB.prepare(`
+        INSERT INTO chat_feedback (id, chat_id, user_id, rating, created_at)
+        VALUES
+          ('dashboard-feedback-positive', 'dashboard-chat-user', 'dashboard-student-today', 5, ?),
+          ('dashboard-feedback-negative', 'dashboard-chat-old', 'dashboard-student-old', 2, ?)
+      `).bind(nowSeconds - 50, nowSeconds - 40),
+      env.DB.prepare(`
+        INSERT INTO ai_usage_logs (id, user_id, provider, model, input_tokens, output_tokens, created_at)
+        VALUES ('dashboard-ai-usage', 'dashboard-student-today', 'contract-test', 'test-model', 7, 11, ?)
+      `).bind(nowSeconds - 30),
+    ]);
+
+    const response = await workerFetch(adminRequest('/api/v1/admin/dashboard'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    const payload = await response.json() as Record<string, any>;
+
+    expect(payload).toMatchObject({
+      total_users: Number(baselineUsers?.total_users ?? 0) + 2,
+      active_today: Number(baselineUsers?.active_today ?? 0) + 1,
+      signups_today: Number(baselineUsers?.signups_today ?? 0) + 1,
+      pro_users: Number(baselineUsers?.pro_users ?? 0) + 1,
+      free_users: Number(baselineUsers?.free_users ?? 0) + 1,
+      total_messages: Number(baselineChats?.total_messages ?? 0) + 3,
+      messages_today: Number(baselineChats?.messages_today ?? 0) + 2,
+      total_conversations: Number(baselineChats?.total_conversations ?? 0) + 2,
+      conversations_with_messages: Number(baselineChats?.total_conversations ?? 0) + 2,
+      unique_chatters: Number(baselineChats?.unique_chatters ?? 0) + 2,
+      total_subjects: baselineSubjects?.total ?? 0,
+      system_health: 'ok',
+    });
+    expect(payload.plan_distribution).toMatchObject({ free: expect.any(Number), starter: expect.any(Number), pro: expect.any(Number) });
+    expect(payload.feedback).toEqual({
+      total: Number(baselineFeedback?.total ?? 0) + 2,
+      positive: Number(baselineFeedback?.positive ?? 0) + 1,
+      positive_rate: expect.any(Number),
+    });
+    for (const key of ['vector_stats', 'token_spend', 'top_queries', 'chat_fallbacks']) {
+      expect(payload[key]).toBeTruthy();
+      expect(typeof payload[key]).toBe('object');
+    }
+    expect(payload.token_spend.providers).toContainEqual({
+      provider: 'contract-test',
+      calls: 1,
+      input_tokens: 7,
+      output_tokens: 11,
+    });
+  });
+
   it('rejects anonymous, student, and refresh credentials at admin and staff boundaries without writes', async () => {
     const anonymousAdmin = await workerFetch(new Request('http://worker/api/v1/admin/content/chapters'));
     const anonymousStaff = await workerFetch(new Request('http://worker/api/v1/staff/content/boards'));
