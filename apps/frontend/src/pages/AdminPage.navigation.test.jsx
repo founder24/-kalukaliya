@@ -131,7 +131,7 @@ describe('AdminPage.handleNavigate integration', () => {
       expect(tab).toBeTruthy();
       expect(tab.className).toMatch(/violet/);
     });
-  }, 15_000);
+  });
 
   it('AdminConversations honours navContext.tab="feedback" on initial render', async () => {
     // Direct unit-style assertion that the navContext wiring works:
