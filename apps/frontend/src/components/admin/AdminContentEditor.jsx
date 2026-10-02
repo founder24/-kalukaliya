@@ -9,6 +9,7 @@ import { buildStaffChapterPatchPayload } from '@/utils/staffChapterPayload';
 import ContentViewerPopup from './content-editor/ContentViewerPopup';
 import InlineCreator from './content-editor/InlineCreator';
 import ChapterEditForm from './content-editor/ChapterEditForm';
+import StaffManualChapterForm from './content-editor/StaffManualChapterForm';
 import HierarchyTree from './content-editor/HierarchyTree';
 import ChapterList from './content-editor/ChapterList';
 import ThumbnailStudio from './content-editor/ThumbnailStudio';
@@ -19,7 +20,7 @@ import RagJobsPanel from './content-editor/RagJobsPanel';
 import PublishJobsPanel from './content-editor/PublishJobTracker';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
-export default function AdminContentEditor({ adminToken, onNavigate, hubContext, onHubContext, onHierarchyChange }) {
+export default function AdminContentEditor({ adminToken, onNavigate, hubContext, onHubContext, onHierarchyChange, staffMode = false }) {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [boards, setBoards] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -36,7 +37,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
   const [viewerItem, setViewerItem] = useState(null);
 
   const [editView, setEditView] = useState(null);
-  const [contentForm, setContentForm] = useState({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 });
+  const [contentForm, setContentForm] = useState({ title: '', title_as: '', slug: '', slug_as: '', description: '', meta_description: '', meta_description_as: '', keywords: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 });
   const [editTarget, setEditTarget] = useState(null);
   const [saving, setSaving] = useState(false);
   const [chapterStats, setChapterStats] = useState(null);
@@ -105,7 +106,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     : null;
 
   const loadChapterCards = useCallback(async (subjectId) => {
-    if (!subjectId) return;
+    if (!subjectId || staffMode) return;
     try {
       const res = await axios.get(`${API}/admin/content/subject/${subjectId}/chapter-cards`, authHeaders(adminToken));
       const cardsMap = {};
@@ -126,11 +127,12 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       }
       setChapterAssets(cardsMap);
     } catch { /* fallback: individual stats calls via loadChapterStats */ }
-  }, [adminToken]);
+  }, [adminToken, staffMode]);
 
-  useEffect(() => { if (selSubject) loadChapterCards(selSubject); }, [selSubject, loadChapterCards]);
+  useEffect(() => { if (selSubject && !staffMode) loadChapterCards(selSubject); }, [selSubject, loadChapterCards, staffMode]);
 
   const loadChapterStats = useCallback(async (chapterId) => {
+    if (staffMode) return;
     try {
       const res = await axios.get(`${API}/admin/content/chapters/${chapterId}/stats`, authHeaders(adminToken));
       setChapterStats(res.data);
@@ -150,7 +152,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
         }}));
       }
     } catch { setChapterStats(null); }
-  }, [adminToken]);
+  }, [adminToken, staffMode]);
 
   const handleFileAttach = useCallback(async (chapterId) => {
     const file = fileInputRef.current?.files?.[0];
@@ -209,9 +211,11 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     axios.get(`${API}/staff/content/chapters/${encodeURIComponent(subjectId)}`, authHeaders(adminToken))
       .then(r => {
         setChapters(r.data?.chapters || r.data || []);
-        axios.get(`${API}/admin/content/subject/${subjectId}/coverage`, authHeaders(adminToken))
-          .then(covRes => { const covMap = {}; (covRes.data?.chapters || []).forEach(c => { covMap[c.chapter_id] = c.coverage_score; }); setChapters(prev => prev.map(ch => ({ ...ch, coverage_score: covMap[ch.id] ?? ch.coverage_score ?? null }))); })
-          .catch(() => {});
+        if (!staffMode) {
+          axios.get(`${API}/admin/content/subject/${subjectId}/coverage`, authHeaders(adminToken))
+            .then(covRes => { const covMap = {}; (covRes.data?.chapters || []).forEach(c => { covMap[c.chapter_id] = c.coverage_score; }); setChapters(prev => prev.map(ch => ({ ...ch, coverage_score: covMap[ch.id] ?? ch.coverage_score ?? null }))); })
+            .catch(() => {});
+        }
       })
       .catch(() => toast.error('Could not reload chapter list'))
       .finally(() => setChaptersLoading(false));
@@ -222,7 +226,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
       setChapters([]);
       refreshChapters(selSubject);
     }
-  }, [selSubject]);
+  }, [selSubject, staffMode, adminToken]);
 
   const handleCreateBoard = async (name, desc, status = 'published') => { await axios.post(`${API}/admin/content/boards`, { name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Board created'); };
   const handleCreateClass = async (name, desc, status = 'published') => { if (!selBoard) return toast.error('Select a board first'); await axios.post(`${API}/admin/content/classes`, { board_id: selBoard, name, description: desc, status }, authHeaders(adminToken)); await reloadAll(); toast.success('Class created'); };
@@ -268,10 +272,10 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
       const topics = (contentForm.topics || []).filter(Boolean);
-      const createPayload = { subject_id: selSubject, title: contentForm.title, slug, description: contentForm.description, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as, content_type: contentForm.content_type, chapter_number: contentForm.order, status: 'draft', topics };
+      const createPayload = { subject_id: selSubject, title: contentForm.title, title_as: contentForm.title_as, slug, slug_as: contentForm.slug_as, meta_description: contentForm.meta_description || contentForm.description, meta_description_as: contentForm.meta_description_as, keywords: contentForm.keywords, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.notes_as || contentForm.content_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, content_type: contentForm.content_type, chapter_number: Number(contentForm.order) || undefined, status: 'draft', published_topics: topics.map(title => ({ title })) };
       await axios.post(`${API}/staff/content/chapters`, createPayload, authHeaders(adminToken));
-      toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
-    } catch { toast.error('Failed to create chapter'); }
+      toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', title_as: '', slug: '', slug_as: '', description: '', meta_description: '', meta_description_as: '', keywords: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
+    } catch (error) { toast.error(error?.response?.data?.detail || 'Failed to create chapter'); }
     finally { setSaving(false); }
   };
 
@@ -281,18 +285,17 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
       const topics = (contentForm.topics || []).filter(Boolean);
-      // Send every editable reader/RAG/QA field, including empty strings.  Empty
-      // values are intentional clears, not accidental omissions from a card view.
-      const updatePayload = buildStaffChapterPatchPayload({ title: contentForm.title, slug, description: contentForm.description, content_type: contentForm.content_type, chapter_number: contentForm.order, topics,
-        notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content: contentForm.content,
-        content_as: contentForm.content_as, rag_text_en: contentForm.rag_text_en, rag_text_as: contentForm.rag_text_as,
+      // Only send fields staff can edit; RAG data remains outside this form.
+      const updatePayload = buildStaffChapterPatchPayload({ title: contentForm.title, title_as: contentForm.title_as || '', slug, slug_as: contentForm.slug_as || '', meta_description: contentForm.meta_description ?? contentForm.description ?? '', meta_description_as: contentForm.meta_description_as || '', keywords: contentForm.keywords || '', content_type: contentForm.content_type, chapter_number: Number(contentForm.order) || undefined,
+        content_en: contentForm.notes_en, content_as: contentForm.notes_as,
+        notes_en: contentForm.notes_en, notes_as: contentForm.notes_as,
         qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as,
-        qa_rag_text_en: contentForm.qa_rag_text_en, qa_rag_text_as: contentForm.qa_rag_text_as });
+        published_topics: topics.map(title => ({ title })) });
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/staff/content/chapter/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);
       setContentForm(f => ({ ...f, version: newVersion }));
-      toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 }); setChapterStats(null); refreshChapters(selSubject);
+      toast.success('Chapter updated successfully'); setEditView(null); setEditTarget(null); setContentForm({ title: '', title_as: '', slug: '', slug_as: '', description: '', meta_description: '', meta_description_as: '', keywords: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '', version: 0 }); setChapterStats(null); refreshChapters(selSubject);
     } catch (e) {
       const detail = e?.response?.data?.detail;
       if (e?.response?.status === 409 && detail?.code === 'version_conflict') {
@@ -694,11 +697,13 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-medium text-gray-900 truncate">{s.icon} {s.name}</p>
-                      <StatusQuickToggle
-                        status={s.status}
-                        onChange={(next) => handleSubjectStatusChange(s.id, next)}
-                        testIdPrefix={`search-status-toggle-${s.id}`}
-                      />
+                      {!staffMode && (
+                        <StatusQuickToggle
+                          status={s.status}
+                          onChange={(next) => handleSubjectStatusChange(s.id, next)}
+                          testIdPrefix={`search-status-toggle-${s.id}`}
+                        />
+                      )}
                     </div>
                     <p className="text-xs text-gray-400 truncate mt-1">{s.description}</p>
                   </div>
@@ -708,28 +713,44 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
             </div>
           ) : editView === 'new-chapter' || editView === 'edit-chapter' ? (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex-shrink-0 mx-6 mt-3 mb-1 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50/80 flex items-center gap-4 flex-wrap text-[10px] text-gray-400">
-                <Info size={11} className="text-gray-400 flex-shrink-0" />
-                <span><span className="font-semibold text-gray-600">MongoDB</span> — live content store</span>
-                <span className="text-gray-300">|</span>
-                <span><span className="font-semibold text-teal-600">Vectorize</span> — RAG retrieval store (updated on reindex)</span>
-                <span className="text-gray-300">|</span>
-                <span><span className="font-semibold text-blue-600">CDN / GCS / Pages</span> — publish-time artifacts</span>
-              </div>
-              <ChapterEditForm
-                editView={editView} editTarget={editTarget} contentForm={contentForm} setContentForm={setContentForm}
-                subjectData={subjectData} saving={saving} chapterStats={chapterStats}
-                onSave={editView === 'edit-chapter' ? handleUpdateChapter : handleCreateChapter}
-                onCancel={() => { setEditView(null); setEditTarget(null); setChapterStats(null); }}
-                onFileAttach={handleFileAttach} uploading={uploading}
-                onLoadChapterStats={loadChapterStats}
-                editorRef={editorRef} editorKey={editorKey} setEditorKey={setEditorKey}
-                showPreview={showPreview} setShowPreview={setShowPreview}
-                fileInputRef={fileInputRef}
-                adminToken={adminToken} boardId={selBoard} classId={selClass} streamId={selStream}
-                onRagSave={editView === 'edit-chapter' ? handleRagSave : undefined}
-                ragSaving={ragSaving}
-              />
+              {!staffMode && (
+                <div className="flex-shrink-0 mx-6 mt-3 mb-1 px-3 py-2 rounded-lg border border-gray-200 bg-gray-50/80 flex items-center gap-4 flex-wrap text-[10px] text-gray-400">
+                  <Info size={11} className="text-gray-400 flex-shrink-0" />
+                  <span><span className="font-semibold text-gray-600">MongoDB</span> — live content store</span>
+                  <span className="text-gray-300">|</span>
+                  <span><span className="font-semibold text-teal-600">Vectorize</span> — RAG retrieval store (updated on reindex)</span>
+                  <span className="text-gray-300">|</span>
+                  <span><span className="font-semibold text-blue-600">CDN / GCS / Pages</span> — publish-time artifacts</span>
+                </div>
+              )}
+              {staffMode ? (
+                <StaffManualChapterForm
+                  editView={editView}
+                  editTarget={editTarget}
+                  contentForm={contentForm}
+                  setContentForm={setContentForm}
+                  subjectData={subjectData}
+                  saving={saving}
+                  onSave={editView === 'edit-chapter' ? handleUpdateChapter : handleCreateChapter}
+                  onCancel={() => { setEditView(null); setEditTarget(null); setChapterStats(null); }}
+                  adminToken={adminToken}
+                />
+              ) : (
+                <ChapterEditForm
+                  editView={editView} editTarget={editTarget} contentForm={contentForm} setContentForm={setContentForm}
+                  subjectData={subjectData} saving={saving} chapterStats={chapterStats}
+                  onSave={editView === 'edit-chapter' ? handleUpdateChapter : handleCreateChapter}
+                  onCancel={() => { setEditView(null); setEditTarget(null); setChapterStats(null); }}
+                  onFileAttach={handleFileAttach} uploading={uploading}
+                  onLoadChapterStats={loadChapterStats}
+                  editorRef={editorRef} editorKey={editorKey} setEditorKey={setEditorKey}
+                  showPreview={showPreview} setShowPreview={setShowPreview}
+                  fileInputRef={fileInputRef}
+                  adminToken={adminToken} boardId={selBoard} classId={selClass} streamId={selStream}
+                  onRagSave={editView === 'edit-chapter' ? handleRagSave : undefined}
+                  ragSaving={ragSaving}
+                />
+              )}
             </div>
           ) : (
             <div className="flex-1 flex overflow-hidden">
@@ -739,8 +760,12 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                 selStream={selStream} setSelStream={setSelStream} setSelSubject={setSelSubject} setEditView={setEditView}
                 streamNodeLabel={streamNodeLabel} streamPlaceholder={streamPlaceholder}
                 classNodeLabel={classNodeLabel} classPlaceholder={classPlaceholder}
-                onDelete={handleDelete} onCreateBoard={handleCreateBoard} onCreateClass={handleCreateClass} onCreateStream={handleCreateStream}
-                onUpdateStatus={handleUpdateHierarchyStatus}
+                onDelete={staffMode ? undefined : handleDelete}
+                onCreateBoard={staffMode ? undefined : handleCreateBoard}
+                onCreateClass={staffMode ? undefined : handleCreateClass}
+                onCreateStream={staffMode ? undefined : handleCreateStream}
+                onUpdateStatus={staffMode ? undefined : handleUpdateHierarchyStatus}
+                manualOnly={staffMode}
               />
               <div className="flex-1 overflow-y-auto">
                 {!selStream && !selSubject ? (
@@ -754,7 +779,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                   </div>
                 ) : selStream && !selSubject ? (
                   <div className="p-6 max-w-4xl mx-auto space-y-4">
-                    {renderBulkBar('subjects')}
+                    {!staffMode && renderBulkBar('subjects')}
                     <div className="mb-2">
                       <h3 className="text-xl font-bold text-gray-900">{streamData?.icon} {streamData?.name}</h3>
                       <p className="text-sm text-gray-400">{streamData?.description}</p>
@@ -803,26 +828,30 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                         <div key={s.id} data-testid={`subject-card-${s.id}`} className={`p-4 rounded-xl border bg-white text-left transition-colors group cursor-pointer shadow-sm ${selectedSubjectIds.has(s.id) ? 'border-violet-400 ring-2 ring-violet-200' : 'border-gray-200 hover:border-violet-300'}`} onClick={() => setSelSubject(s.id)}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 min-w-0">
-                              <input
-                                type="checkbox"
-                                checked={selectedSubjectIds.has(s.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => { e.stopPropagation(); toggleSubjectSelect(s.id); }}
-                                className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-400 cursor-pointer flex-shrink-0"
-                                title="Select subject for bulk actions"
-                                data-testid={`subject-select-${s.id}`}
-                              />
+                              {!staffMode && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSubjectIds.has(s.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => { e.stopPropagation(); toggleSubjectSelect(s.id); }}
+                                  className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-400 cursor-pointer flex-shrink-0"
+                                  title="Select subject for bulk actions"
+                                  data-testid={`subject-select-${s.id}`}
+                                />
+                              )}
                               <p className="text-sm font-medium text-gray-900 truncate">{s.icon || '📚'} {s.name}</p>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <StatusQuickToggle
-                                status={s.status}
-                                onChange={(next) => handleSubjectStatusChange(s.id, next)}
-                                testIdPrefix={`subject-status-toggle-${s.id}`}
-                              />
-                              <button data-testid={`edit-subject-${s.id}`} onClick={(e) => { e.stopPropagation(); setEditingSubject(s.id); setSubjectEditForm({ name: s.name || '', description: s.description || '' }); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-violet-600"><Edit2 size={12} /></button>
-                              <button data-testid={`delete-subject-${s.id}`} onClick={(e) => { e.stopPropagation(); handleDelete('subject', s.id); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={12} /></button>
-                            </div>
+                            {!staffMode && (
+                              <div className="flex items-center gap-1">
+                                <StatusQuickToggle
+                                  status={s.status}
+                                  onChange={(next) => handleSubjectStatusChange(s.id, next)}
+                                  testIdPrefix={`subject-status-toggle-${s.id}`}
+                                />
+                                <button data-testid={`edit-subject-${s.id}`} onClick={(e) => { e.stopPropagation(); setEditingSubject(s.id); setSubjectEditForm({ name: s.name || '', description: s.description || '' }); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-violet-600"><Edit2 size={12} /></button>
+                                <button data-testid={`delete-subject-${s.id}`} onClick={(e) => { e.stopPropagation(); handleDelete('subject', s.id); }} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500"><Trash2 size={12} /></button>
+                              </div>
+                            )}
                           </div>
                           {editingSubject === s.id ? (
                             <div className="mt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
@@ -846,7 +875,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                         </div>
                       ))}
                     </div>
-                    <InlineCreator placeholder="Subject" onCreate={handleCreateSubject} icon={Layers} color="violet" />
+                    {!staffMode && <InlineCreator placeholder="Subject" onCreate={handleCreateSubject} icon={Layers} color="violet" />}
                   </div>
                 ) : selSubject && !dataLoaded ? (
                   <div className="flex items-center justify-center h-full gap-3">
@@ -855,7 +884,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                   </div>
                 ) : selSubject ? (
                   <div className="p-6 max-w-5xl mx-auto space-y-5">
-                    {renderBulkBar('chapters')}
+                    {!staffMode && renderBulkBar('chapters')}
                     <div className="flex items-start justify-between">
                       {editingSubject === selSubject ? (
                         <div className="flex-1 max-w-md space-y-2">
@@ -872,12 +901,12 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className="text-xl font-bold text-gray-900">{subjectData?.icon} {subjectData?.name}</h3>
-                            <button onClick={() => { setEditingSubject(selSubject); setSubjectEditForm({ name: subjectData?.name || '', description: subjectData?.description || '' }); }} className="p-1 rounded text-gray-300 hover:text-violet-600"><Edit2 size={14} /></button>
+                            {!staffMode && <button onClick={() => { setEditingSubject(selSubject); setSubjectEditForm({ name: subjectData?.name || '', description: subjectData?.description || '' }); }} className="p-1 rounded text-gray-300 hover:text-violet-600"><Edit2 size={14} /></button>}
                           </div>
                           <p className="text-sm text-gray-400">{subjectData?.description}</p>
                         </div>
                       )}
-                      {chapters.length > 0 && (
+                      {!staffMode && chapters.length > 0 && (
                         <button
                           onClick={handleBulkFormatNotes}
                           disabled={bulkGenerating || generatingNotes.size > 0}
@@ -888,7 +917,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                         </button>
                       )}
                     </div>
-                    <ThumbnailStudio adminToken={adminToken} selSubject={selSubject} subjectData={subjectData} onReload={() => reloadAll()} />
+                    {!staffMode && <ThumbnailStudio adminToken={adminToken} selSubject={selSubject} subjectData={subjectData} onReload={() => reloadAll()} />}
                     {chaptersLoading ? (
                       <div className="flex items-center justify-center py-16 gap-3">
                         <Loader2 size={20} className="animate-spin text-violet-400" />
@@ -899,26 +928,27 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                       chapters={filteredChapters} totalChapters={chapters.length}
                       statusFilter={chapterStatusFilter} setStatusFilter={setChapterStatusFilter}
                       sortByStatus={chapterSortByStatus} setSortByStatus={setChapterSortByStatus}
-                      chapterAssets={chapterAssets}
+                      chapterAssets={staffMode ? {} : chapterAssets}
                       generatingNotes={generatingNotes}
-                      onGenerateNotes={handleGenerateNotes} onDeleteChapter={handleDeleteChapter}
+                      onGenerateNotes={staffMode ? undefined : handleGenerateNotes} onDeleteChapter={handleDeleteChapter}
                       onChangeChapterStatus={handleChapterStatusChange}
-                      selectedIds={selectedChapterIds}
-                      onToggleSelect={toggleChapterSelect}
-                      onToggleSelectAll={toggleChapterSelectAll}
+                      selectedIds={staffMode ? undefined : selectedChapterIds}
+                      onToggleSelect={staffMode ? undefined : toggleChapterSelect}
+                      onToggleSelectAll={staffMode ? undefined : toggleChapterSelectAll}
+                      manualOnly={staffMode}
                       onViewChapter={(ch) => setViewerItem(ch)}
-                      onEditChapter={async (ch) => { let full = ch; try { const response = await axios.get(`${API}/admin/content/chapter/${ch.id}`, authHeaders(adminToken)); full = response.data || ch; } catch { toast.error('Could not load full chapter; opening available draft'); } setEditTarget(full); setContentForm({ title: full.title, slug: full.slug || '', description: full.description || '',
+                      onEditChapter={async (ch) => { let full = ch; try { const response = await axios.get(`${API}/staff/content/chapter/${ch.id}`, authHeaders(adminToken)); full = response.data || ch; } catch { toast.error('Could not load full chapter; opening available draft'); } setEditTarget(full); setContentForm({ title: full.title, title_as: full.title_as || '', slug: full.slug || '', slug_as: full.slug_as || '', description: full.description || full.meta_description || '', meta_description: full.meta_description || '', meta_description_as: full.meta_description_as || '', keywords: full.keywords || '',
                         // notes_en/as are the primary fields written by ingestion; fall back to content/content_as
                         // so legacy chapters (pre-notes pipeline) still show their content in the editor.
                         notes_en: full.notes_en ?? full.content_en ?? full.content ?? '',
                         notes_as: full.notes_as ?? full.content_as ?? '',
                         // Keep legacy fields in state so the backend can read them if notes_en is absent.
                         content: full.content ?? full.content_en ?? '',
-                        content_type: full.content_type || 'notes', order: full.order ?? full.chapter_number ?? 1, topics: full.topics ?? full.published_topics ?? [], content_as: full.content_as ?? '', rag_text_en: full.rag_text_en ?? '', rag_text_as: full.rag_text_as ?? '', qa_text_en: full.qa_text_en ?? '', qa_text_as: full.qa_text_as ?? '', qa_rag_text_en: full.qa_rag_text_en ?? '', qa_rag_text_as: full.qa_rag_text_as ?? '', pyq_pdf_url: full.pyq_pdf_url ?? '', version: full.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
-                      onPublishChapter={handlePublishChapter}
+                        content_type: full.content_type || 'notes', order: full.order ?? full.chapter_number ?? 1, topics: (Array.isArray(full.published_topics) ? full.published_topics : (Array.isArray(full.topics) ? full.topics : [])).map(topic => typeof topic === 'string' ? topic : topic?.title || '').filter(Boolean), content_as: full.content_as ?? '', rag_text_en: full.rag_text_en ?? '', rag_text_as: full.rag_text_as ?? '', qa_text_en: full.qa_text_en ?? '', qa_text_as: full.qa_text_as ?? '', qa_rag_text_en: full.qa_rag_text_en ?? '', qa_rag_text_as: full.qa_rag_text_as ?? '', pyq_pdf_url: full.pyq_pdf_url ?? '', version: full.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
+                      onPublishChapter={staffMode ? undefined : handlePublishChapter}
                       publishingChapters={publishingChapters}
                       selSubject={selSubject} subjectData={subjectData}
-                      onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', slug: '', description: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); }}
+                      onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', title_as: '', slug: '', slug_as: '', description: '', meta_description: '', meta_description_as: '', keywords: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); }}
                     />
                     )}
                   </div>
@@ -954,16 +984,20 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
         />
       </div>
 
-      <RagJobsPanel
-        trackedJobIds={trackedJobIds}
-        adminToken={adminToken}
-        onJobComplete={handleJobComplete}
-      />
-      <PublishJobsPanel
-        publishJobIds={publishJobIds}
-        adminToken={adminToken}
-        onJobComplete={() => { if (selSubject) refreshChapters(selSubject); }}
-      />
+      {!staffMode && (
+        <RagJobsPanel
+          trackedJobIds={trackedJobIds}
+          adminToken={adminToken}
+          onJobComplete={handleJobComplete}
+        />
+      )}
+      {!staffMode && (
+        <PublishJobsPanel
+          publishJobIds={publishJobIds}
+          adminToken={adminToken}
+          onJobComplete={() => { if (selSubject) refreshChapters(selSubject); }}
+        />
+      )}
     </SectionErrorBoundary>
   );
 }

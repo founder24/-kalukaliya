@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from app.api.v1.auth import get_current_user
 from app.config import settings
-from app.models.content import Board, Chapter, Class, Stream, Subject
+from app.models.content import Board, Chapter, Class, Stream, Subject, Topic
 from app.models.user import User
 
 import logging
@@ -302,27 +302,69 @@ async def staff_create_chapter(
         raise HTTPException(status_code=422, detail="subject_id is required")
 
     try:
-        subject_oid = PydanticObjectId(subject_id_str)
+        subject_ref: object = PydanticObjectId(subject_id_str)
     except Exception:
-        raise HTTPException(status_code=422, detail="Invalid subject_id")
+        # Chapter.subject_id is a FlexId: existing subjects can use UUID or
+        # short string IDs rather than Mongo ObjectIds.
+        subject_ref = subject_id_str
 
     # Auto-assign chapter_number if not provided
     chapter_number = body.get("chapter_number")
     if not chapter_number:
-        existing = await Chapter.find({"subject_id": subject_oid}).to_list(length=500)
+        existing = await Chapter.find({"subject_id": subject_ref}).to_list(length=500)
         chapter_number = (max((ch.chapter_number for ch in existing), default=0) + 1) if existing else 1
 
-    slug = re.sub(r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title.lower())).strip("-")
+    slug = (body.get("slug") or "").strip() or re.sub(
+        r"[\s_-]+", "-", re.sub(r"[^\w\s-]", "", title.lower())
+    ).strip("-")
+    raw_topics = body.get("published_topics", body.get("topics", []))
+    published_topics = []
+    if isinstance(raw_topics, list):
+        for raw_topic in raw_topics:
+            if isinstance(raw_topic, str):
+                raw_topic = {"title": raw_topic}
+            if not isinstance(raw_topic, dict):
+                continue
+            topic_title = (raw_topic.get("title") or "").strip()
+            if not topic_title:
+                continue
+            topic_slug = (raw_topic.get("topic_slug") or "").strip() or re.sub(
+                r"[^a-z0-9]+", "-", topic_title.lower()
+            ).strip("-")
+            published_topics.append(Topic(
+                id=raw_topic.get("id") or str(uuid.uuid4()),
+                title=topic_title,
+                topic_slug=topic_slug,
+                definition=raw_topic.get("definition"),
+                definition_status=raw_topic.get("definition_status", "pending"),
+            ))
+
+    now = datetime.now(timezone.utc)
+    content_en = body.get("notes_en") or body.get("content_en") or body.get("content") or None
+    content_as = body.get("notes_as") or body.get("content_as") or None
 
     chapter = Chapter(
         title=title,
-        subject_id=subject_oid,
+        title_as=(body.get("title_as") or "").strip() or None,
+        subject_id=subject_ref,
         slug=slug,
+        slug_as=(body.get("slug_as") or "").strip() or None,
         chapter_number=int(chapter_number),
         content_type=body.get("content_type", "notes"),
         status=body.get("status", "draft"),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        meta_description=(body.get("meta_description") or "").strip() or None,
+        meta_description_as=(body.get("meta_description_as") or "").strip() or None,
+        keywords=(body.get("keywords") or "").strip() or None,
+        content_en=content_en,
+        content_as=content_as,
+        notes_en=body.get("notes_en") or body.get("content_en") or body.get("content") or None,
+        notes_as=body.get("notes_as") or body.get("content_as") or None,
+        qa_text_en=body.get("qa_text_en") or None,
+        qa_text_as=body.get("qa_text_as") or None,
+        published_topics=published_topics,
+        content_saved_at=now if any((content_en, content_as, body.get("qa_text_en"), body.get("qa_text_as"))) else None,
+        created_at=now,
+        updated_at=now,
     )
     await chapter.insert()
     asyncio.create_task(_purge_library_bundle_cache())
@@ -330,15 +372,20 @@ async def staff_create_chapter(
     return {
         "id":               str(chapter.id),
         "title":            chapter.title,
-        "title_as":         None,
+        "title_as":         chapter.title_as,
+        "slug":             chapter.slug,
+        "slug_as":          chapter.slug_as,
         "status":           chapter.status,
         "content_type":     chapter.content_type,
         "chapter_number":   chapter.chapter_number,
-        "has_content_en":       False,
-        "has_content_as":       False,
-        "has_notes_en":         False,
-        "has_qa_en":            False,
-        "has_qa_as":            False,
+        "meta_description": chapter.meta_description,
+        "meta_description_as": chapter.meta_description_as,
+        "keywords": chapter.keywords,
+        "has_content_en":       bool(chapter.content_en),
+        "has_content_as":       bool(chapter.content_as),
+        "has_notes_en":         bool(chapter.notes_en),
+        "has_qa_en":            bool(chapter.qa_text_en),
+        "has_qa_as":            bool(chapter.qa_text_as),
         "has_rag_en":           False,
         "has_rag_as":           False,
         "has_rag_sections":     False,
@@ -347,7 +394,7 @@ async def staff_create_chapter(
         "has_pyq_papers":       False,
         "pyq_papers_count":     0,
         "word_count":           None,
-        "content_saved_at":     None,
+        "content_saved_at":     chapter.content_saved_at.isoformat() if chapter.content_saved_at else None,
         "rag_updated_at":       None,
         "rag_indexed_at":       None,
         "published_at":         None,
@@ -386,6 +433,7 @@ async def staff_get_chapter(
         "title":           chapter.title,
         "title_as":        chapter.title_as,
         "slug":            chapter.slug or "",
+        "slug_as":         chapter.slug_as or "",
         "status":          chapter.status,
         "content_type":    chapter.content_type,
         "chapter_number":  chapter.chapter_number,
@@ -438,6 +486,7 @@ class ChapterEditBody(BaseModel):
     title:            Optional[str] = None
     title_as:         Optional[str] = None
     slug:             Optional[str] = None
+    slug_as:          Optional[str] = None
     chapter_number:   Optional[int] = None
     status:           Optional[str] = None
     content_type:     Optional[str] = None
@@ -504,7 +553,7 @@ async def staff_update_chapter(
     changed = content_changed = rag_changed = False
 
     scalar_fields = (
-        "title", "title_as", "slug", "chapter_number",
+        "title", "title_as", "slug", "slug_as", "chapter_number",
         "status", "content_type", "meta_description", "meta_description_as", "keywords",
         "content_en", "content_as", "notes_en", "notes_as",
         "qa_text_en", "qa_text_as",
@@ -516,18 +565,24 @@ async def staff_update_chapter(
 
     # Fields where the user can legitimately clear the value (set to "").
     _CLEARABLE_FIELDS = frozenset({
-        "title", "title_as", "slug", "meta_description", "meta_description_as", "keywords",
+        "title", "title_as", "slug", "slug_as", "meta_description", "meta_description_as", "keywords",
     })
 
     for field in scalar_fields:
         val = getattr(body, field, None)
         # For content/RAG text fields, treat "" as "not changed" — the full GET
         # response serialises null DB values as "" (via `or ""`), so a round-trip
-        # save must not blank fields the user never touched.
+        # save must not blank fields the user never sent.
         if val is None:
             continue
-        if val == "" and field not in _CLEARABLE_FIELDS:
+        if field == "slug_as" and val == "":
+            # The compound unique index only excludes null values, not empty strings.
+            setattr(chapter, field, None)
+            changed = True
             continue
+        if val == "" and field not in _CLEARABLE_FIELDS:
+            if field not in _CONTENT_FIELDS or field not in body.model_fields_set:
+                continue
         setattr(chapter, field, val)
         changed = True
         if field in _CONTENT_FIELDS:
