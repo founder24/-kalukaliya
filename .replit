@@ -36,6 +36,7 @@ outputType = "console"
 [[ports]]
 localPort = 4173
 externalPort = 3001
+exposeLocalhost = true
 
 [[ports]]
 localPort = 5000

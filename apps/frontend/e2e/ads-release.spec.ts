@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
 
 const FIXTURE_ROUTE = '/ahsec/class-12/physics/release-ad-fixture';
 const PRODUCTION_ROUTE = process.env.E2E_ADS_PRODUCTION_PATH
@@ -215,6 +215,7 @@ test.describe('deterministic AdSense release fixture', () => {
   });
 });
 
+
 function attachProductionDiagnostics(page: Page) {
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
@@ -263,6 +264,45 @@ async function checkHashedAssetReferences(
   }));
 }
 
+function positiveIntegerEnv(name: string, fallback: number, maximum: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw new Error(`${name} must be between 1 and ${maximum}`);
+  }
+  return value;
+}
+
+async function pollUntilHealthy<T extends { passed: boolean }>(
+  deadlineMs: number,
+  pollIntervalMs: number,
+  runAttempt: (attempt: number, deadlineAt: number) => Promise<T>,
+  now: () => number = Date.now,
+  sleep: (durationMs: number) => Promise<void> = (durationMs) =>
+    new Promise((resolve) => setTimeout(resolve, durationMs)),
+) {
+  const deadlineAt = now() + deadlineMs;
+  const attempts: T[] = [];
+  let latePassDiscarded = false;
+  while (attempts.length === 0 || now() < deadlineAt) {
+    const report = await runAttempt(attempts.length + 1, deadlineAt);
+    attempts.push(report);
+    if (report.passed && now() <= deadlineAt) {
+      return { passed: true, attempts, latePassDiscarded: false };
+    }
+    if (report.passed) latePassDiscarded = true;
+
+    const remainingMs = deadlineAt - now();
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(pollIntervalMs, remainingMs));
+  }
+  return { passed: false, attempts, latePassDiscarded };
+}
+
 test('finds and checks every distinct root-relative hashed asset in the document', async () => {
   const documentUrl = 'https://syrabit.ai/ahsec/physics/laws-of-motion';
   const html = [
@@ -290,70 +330,219 @@ test('finds and checks every distinct root-relative hashed asset in the document
   ]);
 });
 
-test.describe('live production AdSense smoke', () => {
-  test.use({ serviceWorkers: 'block' });
+test('retries stale asset observations and retains them when a later document is healthy', async () => {
+  let now = 0;
+  const result = await pollUntilHealthy(
+    100,
+    15,
+    async (attempt) => {
+      now += 10;
+      return attempt === 1
+        ? { passed: false, staleAssets: ['404 https://syrabit.ai/assets/old-hash.js'] }
+        : { passed: true, staleAssets: [] };
+    },
+    () => now,
+    async (durationMs) => { now += durationMs; },
+  );
 
+  expect(result.passed).toBe(true);
+  expect(result.attempts).toHaveLength(2);
+  expect(result.attempts[0].staleAssets).toEqual([
+    '404 https://syrabit.ai/assets/old-hash.js',
+  ]);
+});
+
+test('stops at the deadline and keeps the latest missing-asset diagnostic', async () => {
+  let now = 0;
+  const result = await pollUntilHealthy(
+    60,
+    10,
+    async (attempt) => {
+      now += 25;
+      return {
+        attempt,
+        passed: false,
+        missingHashedAssets: [{ assetUrl: 'https://syrabit.ai/assets/old-hash.js', status: 404 }],
+      };
+    },
+    () => now,
+    async (durationMs) => { now += durationMs; },
+  );
+
+  expect(result.passed).toBe(false);
+  expect(result.attempts).toHaveLength(2);
+  expect(result.attempts.at(-1)?.missingHashedAssets).toEqual([
+    { assetUrl: 'https://syrabit.ai/assets/old-hash.js', status: 404 },
+  ]);
+});
+
+test('does not accept a healthy document check completed after the deadline', async () => {
+  let now = 0;
+  const result = await pollUntilHealthy(
+    60,
+    10,
+    async () => {
+      now = 61;
+      return { passed: true };
+    },
+    () => now,
+    async (durationMs) => { now += durationMs; },
+  );
+
+  expect(result.passed).toBe(false);
+  expect(result.latePassDiscarded).toBe(true);
+});
+
+test.describe('live production AdSense smoke', () => {
   test.skip(
     process.env.E2E_ADS_PRODUCTION !== '1',
     'Run with E2E_ADS_PRODUCTION=1 and BASE_URL=https://syrabit.ai.',
   );
 
-  test('reports the exact route, request hosts, slot metadata, and stale assets', async ({ page }) => {
-    const attempt = Number(process.env.E2E_ADS_ASSET_SMOKE_ATTEMPT || '1');
-    if (!Number.isSafeInteger(attempt) || attempt < 1) {
-      throw new Error('E2E_ADS_ASSET_SMOKE_ATTEMPT must be a positive integer');
-    }
-    const routeUrl = new URL(PRODUCTION_ROUTE, process.env.BASE_URL || 'https://syrabit.ai');
-    routeUrl.searchParams.set('__pages_asset_smoke', `${attempt}-${Date.now()}`);
-    const diagnostics = attachProductionDiagnostics(page);
-    const response = await page.goto(routeUrl.toString(), { waitUntil: 'domcontentloaded' });
-    const html = response ? await response.text() : '';
-    const hashedAssetUrls = extractHashedAssetReferences(html, response?.url() || routeUrl.toString());
-    const hashedAssetChecks = await checkHashedAssetReferences(
-      hashedAssetUrls,
-      async (assetUrl) => {
-        const cacheBustedAssetUrl = new URL(assetUrl);
-        cacheBustedAssetUrl.searchParams.set('__pages_asset_smoke', `${attempt}-${Date.now()}`);
-        const assetResponse = await page.context().request.get(cacheBustedAssetUrl.toString(), {
-          timeout: 20_000,
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-        });
-        return assetResponse.status();
+  test('polls a fresh production document and its hashed assets until the deadline', async ({ browser }) => {
+    const deadlineMs = positiveIntegerEnv(
+      'E2E_ADS_ASSET_SMOKE_DEADLINE_MS',
+      240_000,
+      300_000,
+    );
+    const pollIntervalMs = positiveIntegerEnv(
+      'E2E_ADS_ASSET_SMOKE_POLL_MS',
+      15_000,
+      60_000,
+    );
+    test.setTimeout(deadlineMs + 60_000);
+
+    const baseRouteUrl = new URL(PRODUCTION_ROUTE, process.env.BASE_URL || 'https://syrabit.ai');
+    const result = await pollUntilHealthy(
+      deadlineMs,
+      pollIntervalMs,
+      async (attempt, deadlineAt) => {
+        const routeUrl = new URL(baseRouteUrl.toString());
+        routeUrl.searchParams.set('__pages_asset_smoke', `${attempt}-${Date.now()}`);
+
+        let context: BrowserContext | undefined;
+        let diagnostics: ReturnType<typeof attachProductionDiagnostics> | undefined;
+        const attemptReport = {
+          attempt,
+          freshContext: true,
+          serviceWorkers: 'block',
+          route: routeUrl.toString(),
+          finalRoute: null as string | null,
+          routeStatus: null as number | null,
+          requestHosts: [] as string[],
+          hashedAssetUrls: [] as string[],
+          hashedAssetChecks: [] as Awaited<ReturnType<typeof checkHashedAssetReferences>>,
+          missingHashedAssets: [] as Awaited<ReturnType<typeof checkHashedAssetReferences>>,
+          slots: [] as Awaited<ReturnType<typeof readSlots>>,
+          pageErrors: [] as string[],
+          requestFailures: [] as string[],
+          consoleErrors: [] as string[],
+          staleAssets: [] as string[],
+          attemptError: null as string | null,
+          contextCloseError: null as string | null,
+          passed: false,
+        };
+
+        try {
+          context = await browser.newContext({
+            serviceWorkers: 'block',
+            extraHTTPHeaders: {
+              'Cache-Control': 'no-cache',
+              Pragma: 'no-cache',
+            },
+          });
+          const page = await context.newPage();
+          diagnostics = attachProductionDiagnostics(page);
+          const response = await page.goto(routeUrl.toString(), {
+            waitUntil: 'domcontentloaded',
+            timeout: Math.max(1, Math.min(20_000, deadlineAt - Date.now())),
+          });
+          attemptReport.routeStatus = response?.status() ?? null;
+          attemptReport.finalRoute = response?.url() ?? page.url();
+          const html = response ? await response.text() : '';
+          attemptReport.hashedAssetUrls = extractHashedAssetReferences(
+            html,
+            attemptReport.finalRoute || routeUrl.toString(),
+          );
+          attemptReport.hashedAssetChecks = await checkHashedAssetReferences(
+            attemptReport.hashedAssetUrls,
+            async (assetUrl) => {
+              const cacheBustedAssetUrl = new URL(assetUrl);
+              cacheBustedAssetUrl.searchParams.set(
+                '__pages_asset_smoke',
+                `${attempt}-${Date.now()}`,
+              );
+              const assetResponse = await context!.request.get(cacheBustedAssetUrl.toString(), {
+                timeout: Math.max(1, Math.min(15_000, deadlineAt - Date.now())),
+                headers: {
+                  'Cache-Control': 'no-cache',
+                  Pragma: 'no-cache',
+                },
+              });
+              return assetResponse.status();
+            },
+          );
+          attemptReport.missingHashedAssets = attemptReport.hashedAssetChecks.filter(
+            ({ status, error }) => Boolean(error) || (status ?? 0) >= 400,
+          );
+          const candidateAssetsHealthy = attemptReport.routeStatus !== null
+            && attemptReport.routeStatus < 400
+            && attemptReport.hashedAssetUrls.length > 0
+            && attemptReport.missingHashedAssets.length === 0;
+          const settleMs = candidateAssetsHealthy ? 3500 : 750;
+          await page.waitForTimeout(Math.max(0, Math.min(settleMs, deadlineAt - Date.now())));
+          attemptReport.slots = await readSlots(page);
+        } catch (error) {
+          attemptReport.attemptError = error instanceof Error ? error.message : String(error);
+        } finally {
+          if (context) {
+            try {
+              await context.close();
+            } catch (error) {
+              attemptReport.contextCloseError = error instanceof Error
+                ? error.message
+                : String(error);
+              attemptReport.passed = false;
+            }
+          }
+          if (diagnostics) {
+            attemptReport.requestHosts = [...diagnostics.requestHosts];
+            attemptReport.pageErrors = [...diagnostics.pageErrors];
+            attemptReport.requestFailures = [...diagnostics.requestFailures];
+            attemptReport.consoleErrors = [...diagnostics.consoleErrors];
+            attemptReport.staleAssets = [...diagnostics.staleAssets];
+          }
+        }
+
+        const validSlots = attemptReport.slots.length > 0
+          && attemptReport.slots.every(
+            (slot) => typeof slot.slot === 'string' && /^\d{5,20}$/.test(slot.slot),
+          );
+        attemptReport.passed = attemptReport.attemptError === null
+          && attemptReport.contextCloseError === null
+          && diagnostics !== undefined
+          && attemptReport.routeStatus !== null
+          && attemptReport.routeStatus < 400
+          && attemptReport.hashedAssetUrls.length > 0
+          && attemptReport.missingHashedAssets.length === 0
+          && attemptReport.staleAssets.length === 0
+          && attemptReport.pageErrors.length === 0
+          && validSlots;
+        console.log(`[live-ad-smoke] attempt ${attempt}: ${JSON.stringify(attemptReport)}`);
+        return attemptReport;
       },
     );
-    const missingHashedAssets = hashedAssetChecks.filter(
-      ({ status, error }) => Boolean(error) || (status ?? 0) >= 400,
-    );
-    await page.waitForTimeout(3500);
 
-    const slots = await readSlots(page);
     const report = JSON.stringify({
-      attempt,
-      route: routeUrl.toString(),
-      finalRoute: page.url(),
-      routeStatus: response?.status() ?? null,
-      requestHosts: [...diagnostics.requestHosts],
-      hashedAssetUrls,
-      hashedAssetChecks,
-      missingHashedAssets,
-      slots,
-      pageErrors: diagnostics.pageErrors,
-      requestFailures: diagnostics.requestFailures,
-      consoleErrors: diagnostics.consoleErrors,
-      staleAssets: diagnostics.staleAssets,
+      route: baseRouteUrl.toString(),
+      deadline_ms: deadlineMs,
+      poll_interval_ms: pollIntervalMs,
+      passed: result.passed,
+      late_pass_discarded: result.latePassDiscarded,
+      attempts: result.attempts,
+      latest_attempt: result.attempts.at(-1) ?? null,
     }, null, 2);
-
-    expect(response?.status(), report).toBeLessThan(400);
-    expect(hashedAssetUrls.length, report).toBeGreaterThan(0);
-    expect(missingHashedAssets, report).toEqual([]);
-    expect(diagnostics.staleAssets, report).toEqual([]);
-    expect(diagnostics.pageErrors, report).toEqual([]);
-    expect(slots.length, report).toBeGreaterThan(0);
-    for (const slot of slots) {
-      expect(slot.slot, report).toMatch(/^\d{5,20}$/);
-    }
+    console.log(`[live-ad-smoke] polling summary: ${report}`);
+    expect(result.passed, report).toBe(true);
   });
 });

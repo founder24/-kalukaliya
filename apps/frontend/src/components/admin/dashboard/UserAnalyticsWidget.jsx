@@ -21,7 +21,7 @@ import {
   seoHealthDeepScan, adminSeoDeepScanHistory, adminGetAlertCooldowns, API_BASE,
 } from '@/utils/api';
 import {
-  Users, MessageSquare, BookOpen, Zap, Loader2, Activity,
+  Users, MessageSquare, Zap, Loader2, Activity,
   ArrowRight, PenTool, Settings, Eye, TrendingUp, RefreshCw,
   UserPlus, Globe, Search, Bot, BarChart2, Server, Clock,
   CheckCircle, AlertCircle, AlertTriangle, Wifi, Database, DollarSign, Crown,
@@ -53,10 +53,11 @@ export default function UserAnalyticsWidget(props) {
   const latencyDaily = Array.isArray(latency?.daily) ? latency.daily : [];
   const topQueryRows = Array.isArray(topQueries?.top_queries) ? topQueries.top_queries : [];
   const tokenSpendDaily = Array.isArray(tokenSpend?.daily) ? tokenSpend.daily : [];
-  const coverageSubjects = Array.isArray(coverage?.subjects) ? coverage.subjects : [];
+  const coverageTotal = Number(coverage?.total) || 0;
   return (
     <>
 
+      {anonQuotaWall?.source === 'd1' && (
       <SectionErrorBoundary name="Anonymous Quota Wall">
       <GlassCard className="p-5" data-testid="anon-quota-wall-card">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -381,6 +382,7 @@ export default function UserAnalyticsWidget(props) {
         </p>
       </GlassCard>
       </SectionErrorBoundary>
+      )}
 
       <SectionErrorBoundary name="Latency & Top Queries">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -391,7 +393,11 @@ export default function UserAnalyticsWidget(props) {
               <h3 className="text-gray-600 font-semibold text-sm">Query Latency P95</h3>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400">P95: <span className="text-gray-700 font-medium">{latency?.p95_ms ?? 0}ms</span></span>
+              <span className="text-xs text-gray-400">
+                P95: <span className="text-gray-700 font-medium">
+                  {latency?.has_data ? `${latency.p95_ms}ms` : 'No samples'}
+                </span>
+              </span>
               <AlertBadge alert={latencyAlert} />
             </div>
           </div>
@@ -413,7 +419,10 @@ export default function UserAnalyticsWidget(props) {
               <span className="text-xs text-gray-300">Data recorded after first chat</span>
             </div>
           )}
-          <p className="text-xs text-gray-400 mt-1">Target: P95 &lt;2 s · Avg: {latency?.avg_ms ?? 0}ms</p>
+          <p className="text-xs text-gray-400 mt-1">
+            Target: P95 &lt;2 s
+            {latency?.has_data ? ` · Avg: ${latency.avg_ms}ms` : ' · No latency samples in the last 7 days'}
+          </p>
         </GlassCard>
 
         <GlassCard className="p-5">
@@ -457,8 +466,9 @@ export default function UserAnalyticsWidget(props) {
       </div>
       </SectionErrorBoundary>
 
-      <SectionErrorBoundary name="Token Spend">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {(tokenSpend?.source === 'd1' || funnel?.source === 'users.subscription_tier' || coverage?.source === 'd1') && <SectionErrorBoundary name="D1 account metrics">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {tokenSpend?.source === 'd1' && (
         <GlassCard className="p-5">
           <div className="flex items-center gap-2 mb-3">
             <Cpu size={14} className="text-violet-500" />
@@ -494,16 +504,18 @@ export default function UserAnalyticsWidget(props) {
             </div>
           )}
         </GlassCard>
+        )}
 
+        {funnel?.source === 'users.subscription_tier' && (
         <GlassCard className="p-5">
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp size={14} className="text-violet-500" />
-            <h3 className="text-gray-600 font-semibold text-sm">Conversion Funnel</h3>
+            <h3 className="text-gray-600 font-semibold text-sm">Account Plan Records</h3>
           </div>
-          {funnel ? (
+          {funnel?.has_data ? (
             <div className="space-y-2">
               {(funnel.funnel || []).map((step, i) => {
-                const maxCount = funnel.funnel[0]?.count || 1;
+                const maxCount = funnel.total_count || 1;
                 const pct = Math.round((step.count / maxCount) * 100);
                 const colors = ['#64748b', '#8b5cf6', '#f59e0b', '#10b981'];
                 return (
@@ -521,89 +533,58 @@ export default function UserAnalyticsWidget(props) {
                   </div>
                 );
               })}
-              <div className="pt-2 border-t border-gray-100 grid grid-cols-2 gap-2">
-                <div className="text-center">
-                  <p className="text-lg font-bold text-emerald-600">{funnel.free_to_paid_rate}%</p>
-                  <p className="text-xs text-gray-400">Free→Paid</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-amber-600">{funnel.starter_to_pro_rate}%</p>
-                  <p className="text-xs text-gray-400">Starter→Pro</p>
-                </div>
-              </div>
+              <p className="pt-2 border-t border-gray-100 text-[10px] text-gray-400">{funnel.note}</p>
             </div>
           ) : (
-            <div className="flex items-center justify-center h-[130px] text-gray-400 text-xs">
-              Loading funnel…
+            <div className="flex items-center justify-center h-[130px] text-gray-400 text-xs" data-testid="plan-records-empty-state">
+              No student account records
             </div>
           )}
         </GlassCard>
+        )}
 
+        {coverage?.source === 'd1' && (
         <GlassCard className="p-5">
           <div className="flex items-center gap-2 mb-3">
             <FileCheck size={14} className="text-violet-500" />
-            <h3 className="text-gray-600 font-semibold text-sm">Assam Board Coverage</h3>
-            <span className="text-xs text-gray-400">chapter × subject</span>
-            {coverage?.has_data && coverageSubjects.length > 0 && (
-              <span className="ml-auto text-xs text-gray-400">{coverageSubjects.length} subjects</span>
-            )}
+            <h3 className="text-gray-600 font-semibold text-sm">Chapter Notes Coverage</h3>
+            <span className="text-xs text-gray-400">Cloudflare D1</span>
           </div>
-          {coverage?.has_data && coverageSubjects.length > 0 ? (
-            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-              {coverageSubjects.map(sub => (
-                <div key={sub.subject_id}>
+          {coverage?.source !== 'd1' ? (
+            <div className="flex items-center justify-center h-[130px] text-gray-400 text-xs">
+              Chapter coverage unavailable
+            </div>
+          ) : coverageTotal === 0 ? (
+            <div className="flex items-center justify-center h-[130px] text-gray-400 text-xs">
+              No chapters recorded in D1
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {[
+                ['Chapters with English notes', coverage.notes, coverage.english_coverage_pct],
+                ['Chapters with Assamese notes', coverage.assamese, coverage.assamese_coverage_pct],
+              ].map(([label, value, pct]) => (
+                <div key={label}>
                   <div className="flex justify-between mb-1">
-                    <span className="text-xs text-gray-600 truncate flex items-center gap-1.5">
-                      {sub.subject_name}
-                      {(sub.class_name || sub.stream_name) && (
-                        <span className="text-[10px] text-gray-400 font-normal shrink-0">
-                          {[sub.class_name, sub.stream_name].filter(Boolean).join(' · ')}
-                        </span>
-                      )}
-                    </span>
-                    <span
-                      className="text-xs font-mono ml-2 flex-shrink-0"
-                      style={{ color: sub.coverage_pct >= 80 ? '#10b981' : sub.coverage_pct >= 50 ? '#f59e0b' : '#ef4444' }}
-                    >
-                      {sub.coverage_pct}%
+                    <span className="text-xs text-gray-500">{label}</span>
+                    <span className="text-xs font-mono text-gray-700">
+                      {Number(value) || 0} / {coverageTotal} ({Number(pct) || 0}%)
                     </span>
                   </div>
-                  <div className="flex gap-0.5 flex-wrap">
-                    {(sub.chapters || []).map(ch => (
-                      <div
-                        key={ch.chapter_id}
-                        title={`${ch.title}: ${ch.coverage}`}
-                        className="w-3 h-3 rounded-sm"
-                        style={{
-                          background: ch.coverage === 'full' ? '#10b981'
-                            : ch.coverage === 'partial' ? '#f59e0b'
-                            : '#f3f4f6',
-                          border: '1px solid #e5e7eb',
-                        }}
-                      />
-                    ))}
+                  <div className="h-1.5 rounded-full overflow-hidden bg-gray-100">
+                    <div
+                      className="h-full rounded-full bg-violet-500"
+                      style={{ width: `${Math.min(100, Math.max(0, Number(pct) || 0))}%` }}
+                    />
                   </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-[130px] text-gray-400 text-xs gap-1">
-              <BookOpen size={20} className="opacity-30" />
-              <span>No subjects found</span>
-              <span className="text-xs text-gray-300">Add subjects to see coverage</span>
-            </div>
           )}
-          <div className="flex items-center gap-3 mt-2 pt-2 border-t border-gray-100">
-            {[['#10b981', 'Full'], ['#f59e0b', 'Partial'], ['#f3f4f6', 'None']].map(([c, label]) => (
-              <div key={label} className="flex items-center gap-1">
-                <div className="w-2.5 h-2.5 rounded-sm" style={{ background: c, border: '1px solid #e5e7eb' }} />
-                <span className="text-xs text-gray-400">{label}</span>
-              </div>
-            ))}
-          </div>
         </GlassCard>
+        )}
       </div>
-      </SectionErrorBoundary>
+      </SectionErrorBoundary>}
 
       <SectionErrorBoundary name="Plan Distribution">
       {data?.plan_distribution && (

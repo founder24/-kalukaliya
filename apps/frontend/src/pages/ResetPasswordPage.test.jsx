@@ -42,7 +42,11 @@ describe('ResetPasswordPage', () => {
         '/api/v1/auth/reset-password/request',
         { email: 'student@example.com' },
       );
+      expect(toast.success).toHaveBeenCalledWith(
+        'If an account exists, reset instructions will be sent.',
+      );
     });
+    expect(screen.getByText(/if reset instructions arrive/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('Paste your reset token'), {
       target: { value: 'reset-token' },
@@ -81,6 +85,22 @@ describe('ResetPasswordPage', () => {
         },
       );
     });
+  });
+
+  it('lets the user request instructions again without asserting the first email was delivered', async () => {
+    axios.post.mockResolvedValueOnce({ data: {} });
+    render(<ResetPasswordPage />);
+
+    fireEvent.change(screen.getByPlaceholderText('your@email.com'), {
+      target: { value: 'student@example.com' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send Reset Link' }));
+
+    expect(await screen.findByRole('button', { name: 'Request again' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Request again' }));
+
+    expect(screen.getByRole('button', { name: 'Send Reset Link' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('your@email.com')).toHaveValue('student@example.com');
   });
 
   it('keeps the back-to-login path as navigation, without submitting the request form', () => {

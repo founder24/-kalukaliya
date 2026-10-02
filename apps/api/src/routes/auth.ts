@@ -37,7 +37,12 @@ authRouter.post('/signup', async (c) => {
   if (rateLimitResponse) return rateLimitResponse;
 
   const db = createDb(c.env.DB);
-  let body: { email?: string; password?: string; name?: string };
+  let body: {
+    email?: string;
+    password?: string;
+    name?: string;
+    consent_dpdp?: unknown;
+  };
 
   try {
     body = await c.req.json();
@@ -55,6 +60,9 @@ authRouter.post('/signup', async (c) => {
   }
   if (password.length < 8) {
     return c.json({ detail: 'Password must be at least 8 characters' }, 422);
+  }
+  if (body.consent_dpdp !== true) {
+    return c.json({ detail: 'Data processing consent is required' }, 422);
   }
 
   const existing = await db.select({ id: users.id })
@@ -79,6 +87,7 @@ authRouter.post('/signup', async (c) => {
     createdAt: now,
     updatedAt: now,
     name: body.name?.trim() ?? null,
+    consentDpdp: 1,
   });
 
   const accessToken = await signAccessToken(id, 'student', c.env.JWT_SECRET);
@@ -230,6 +239,7 @@ authRouter.post('/logout', async (c) => {
   }
 
   const token = bodyToken ?? bearerToken;
+  let legacyRevocationUnavailable = false;
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
     if (!userId && payload?.sub) userId = payload.sub;
@@ -261,10 +271,10 @@ authRouter.post('/logout', async (c) => {
           );
         } catch (err) {
           console.error('[auth] refresh-token KV revocation unavailable:', err);
-          return c.json({
-            detail: 'Unable to revoke session right now. Please try again.',
-            error_code: 'auth_storage_unavailable',
-          }, 503);
+          // Continue to the account-wide D1 cutoff below. The compatibility
+          // bridge may be unavailable, but that must not leave the presented
+          // access token valid after a logout attempt.
+          legacyRevocationUnavailable = true;
         }
       }
       // REFRESH_TOKEN_ROLLOUT_GUARD: logout-kv:end
@@ -290,6 +300,13 @@ authRouter.post('/logout', async (c) => {
         error_code: 'auth_storage_unavailable',
       }, 503);
     }
+  }
+
+  if (legacyRevocationUnavailable) {
+    return c.json({
+      detail: 'The current session was revoked, but legacy session cleanup could not be confirmed. Please try again.',
+      error_code: 'auth_storage_unavailable',
+    }, 503);
   }
 
   return c.json({ message: 'Logged out successfully' });
@@ -513,7 +530,13 @@ authRouter.post('/reset-password/request', async (c) => {
   const user = await db.select({ id: users.id }).from(users)
     .where(eq(users.email, email)).get();
 
-  if (user && c.env.RESEND_API_KEY) {
+  if (user && !c.env.RESEND_API_KEY) {
+    // Keep the public response identical for known and unknown addresses,
+    // while making provider misconfiguration visible without recording PII.
+    console.error('[auth] password reset email delivery failed', {
+      reason: 'missing_provider_key',
+    });
+  } else if (user && c.env.RESEND_API_KEY) {
     const token = crypto.randomUUID() + '-' + crypto.randomUUID(); // 73-char, unguessable
     const tokenHash = await hashResetToken(token);
     const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60; // 1 hour
@@ -531,22 +554,37 @@ authRouter.post('/reset-password/request', async (c) => {
     if (cutoverNonce) resetUrl.searchParams.set('cutover_nonce', cutoverNonce);
     const resetHref = resetUrl.toString().replace(/&/g, '&amp;');
 
-    await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${c.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'Syrabit <noreply@syrabit.ai>',
-        to: [email],
-        subject: 'Reset your Syrabit password',
-        html: `<p>Click to reset your password: <a href="${resetHref}">Reset Password</a></p><p>This link expires in 1 hour.</p><p>If you did not request this, ignore this email.</p>`,
-      }),
-    }).catch(() => { /* non-blocking */ });
+    try {
+      const delivery = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${c.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'Syrabit <noreply@syrabit.ai>',
+          to: [email],
+          subject: 'Reset your Syrabit password',
+          html: `<p>Click to reset your password: <a href="${resetHref}">Reset Password</a></p><p>This link expires in 1 hour.</p><p>If you did not request this, ignore this email.</p>`,
+        }),
+      });
+      if (!delivery.ok) {
+        console.error('[auth] password reset email delivery failed', {
+          reason: 'provider_rejected',
+          status: delivery.status,
+        });
+      }
+    } catch {
+      // Do not log the provider exception: it could contain request details.
+      console.error('[auth] password reset email delivery failed', {
+        reason: 'provider_request_failed',
+      });
+    }
   }
 
-  return c.json({ message: 'If an account exists, a reset email has been sent' });
+  return c.json({
+    message: 'If an account exists, reset instructions will be sent',
+  });
 });
 
 // ── POST /v1/auth/reset-password/confirm ─────────────────────────────────────

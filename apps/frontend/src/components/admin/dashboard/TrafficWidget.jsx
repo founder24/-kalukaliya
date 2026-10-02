@@ -41,82 +41,29 @@ import {
 } from './shared';
 
 export default function TrafficWidget(props) {
-  const p = props;
-  const { data, metrics, vs: rawVs, cfVisitors24h, cfCrawlControl, botAnalytics } = props;
+  const { vs: rawVs, cfCrawlControl } = props;
   const vs = rawVs && typeof rawVs === 'object' ? rawVs : {};
-  const hasCfVisitorData = [
-    cfVisitors24h?.totals?.visitors,
-    cfVisitors24h?.totals?.requests,
-    cfVisitors24h?.totals?.page_views,
-    cfVisitors24h?.totals?.bytes,
-  ].some(value => value != null)
-    || (Array.isArray(cfVisitors24h?.series)
-      && cfVisitors24h.series.some(bucket => [
-        bucket?.visitors,
-        bucket?.uniques,
-        bucket?.requests,
-        bucket?.page_views,
-        bucket?.bytes,
-      ].some(value => value != null)));
-  const hasSiteTrafficData = [
-    vs.page_views_today,
-    vs.visitors_today,
-    vs.bounce_rate,
-    vs.avg_session_duration,
-  ].some(value => value != null)
-    || hasCfVisitorData;
+  const hasSiteTrafficData = vs.source === 'analytics_events' && vs.has_data === true;
   return (
     <>
 
-      {/* Site-level page-view metrics row — moved here at the user's
-          request so the at-a-glance traffic numbers sit directly
-          under the Cloudflare account-wide traffic card and above
-          the verified-bot Crawl Control card. The block was
-          originally rendered much further down (above the Chat
-          Health card); the move keeps all traffic-shaped cards
-          adjacent so the dashboard tells one continuous story:
-          account traffic → site totals → bot share. */}
-      <div>
-        <p className="text-[10px] text-gray-400 mb-2">{TODAY_BUCKET_CAPTION}</p>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Page Views Today" value={vs.page_views_today ?? 0} icon={Eye}      color="#ec4899" pulse />
-          {/* "Unique Visitors" — always shows the rolling 24-hour unique
-              visitor count fetched from CF's hourly dataset. The sub-line
-              shows the most recent hourly bucket. Falls back to
-              `vs.visitors_today` (daily bucket) before the 24h fetch lands. */}
-          {(() => {
-            const lastHourBucket = cfVisitors24h?.series?.length
-              ? cfVisitors24h.series[cfVisitors24h.series.length - 1]
-              : null;
-            const headline = cfVisitors24h?.totals?.visitors ?? vs?.visitors_today ?? 0;
-            const lastHourValue = lastHourBucket?.visitors ?? lastHourBucket?.uniques ?? 0;
-            return (
-              <StatCard label="Unique Visitors"
-                value={headline}
-                icon={Users} color="#84cc16"
-                subLabel="Last hour"
-                subValue={lastHourValue} />
-            );
-          })()}
-          <StatCard label="Bounce Rate"  value={vs.bounce_rate != null ? `${vs.bounce_rate}%` : '—'} icon={TrendingUp} color="#f59e0b" />
-          <StatCard label="Avg Session"  value={vs.avg_session_duration != null ? `${vs.avg_session_duration}s` : '—'} icon={Clock} color="#a78bfa" />
-        </div>
-        {!hasSiteTrafficData && (
-          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-center text-xs text-gray-500" data-testid="traffic-empty-state">
-            No traffic data yet
+      <div data-testid="d1-site-traffic">
+        <p className="text-[10px] text-gray-400 mb-2">
+          Optional, consent-based page-view events · {TODAY_BUCKET_CAPTION}
+        </p>
+        {hasSiteTrafficData ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard label="Page Views Today" value={vs.page_views_today} icon={Eye} color="#ec4899" />
+            <StatCard label="Sessions Today" value={vs.sessions_today} icon={Users} color="#84cc16" />
+            <StatCard label="Page Views (30d)" value={vs.page_views} icon={TrendingUp} color="#f59e0b" />
+            <StatCard label="Sessions (30d)" value={vs.sessions} icon={Clock} color="#a78bfa" />
+          </div>
+        ) : (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-center text-xs text-gray-500" data-testid="traffic-empty-state">
+            No consented page-view events in the last 30 days
           </div>
         )}
       </div>
-
-      {/* Legacy "Bot Traffic Analytics" card removed — its content
-          (bot vs human totals, top bots, per-bot pages) was sourced
-          from local server logs and duplicated what the
-          authoritative Cloudflare AI Crawl Control card below now
-          shows. The CF card uses verified-bot data straight from
-          Cloudflare's GraphQL feed (the same dataset CF's own
-          dashboard reads), so it's the canonical source of truth.
-          The `botAnalytics` API endpoint is intentionally still
-          fetched in case other components or alerts depend on it. */}
 
       <SectionErrorBoundary name="CF AI Crawl Control">
       {cfCrawlControl && (

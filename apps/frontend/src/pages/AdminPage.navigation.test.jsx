@@ -24,6 +24,9 @@ vi.mock('@/utils/api', () => ({
   conversationsSentiment: vi.fn(() => Promise.resolve({ data: {} })),
   syncConversations: vi.fn(() => Promise.resolve({ data: {} })),
   adminGetFeedback: vi.fn(() => Promise.resolve({ data: [] })),
+  adminGetChatFeedback: vi.fn(() => Promise.resolve({ data: { data: [] } })),
+  adminGetFeedbackStats: vi.fn(() => Promise.resolve({ data: {} })),
+  adminPatchFeedback: vi.fn(() => Promise.resolve({ data: {} })),
   adminGetActivityLog: vi.fn(() => Promise.resolve({ data: [] })),
   adminLogsList: vi.fn(() => Promise.resolve({ data: { logs: [], total: 0 } })),
   adminLogsStatus: vi.fn(() => Promise.resolve({ data: {} })),
@@ -66,7 +69,8 @@ vi.mock('@/components/admin/syra/SyraContext', () => ({
 }));
 vi.mock('@/components/admin/BreakGlassBanner', () => ({ default: () => null }));
 
-import AdminPage from './AdminPage';
+import AdminPage, { resolveSectionRedirect } from './AdminPage';
+import AdminConversations from '@/components/admin/AdminConversations';
 import { adminVerify } from '@/utils/api';
 
 function renderAdmin() {
@@ -115,8 +119,6 @@ describe('AdminPage.handleNavigate integration', () => {
     // id through resolveSectionRedirect and mount AdminConversations
     // with the resulting navContext — the Feedback tab must end up
     // active (violet styling) on first render.
-    const { resolveSectionRedirect } = await import('./AdminPage');
-    const AdminConversations = (await import('@/components/admin/AdminConversations')).default;
     const resolved = resolveSectionRedirect('feedback');
     expect(resolved.section).toBe('conversations');
     expect(resolved.navContext).toEqual({ tab: 'feedback' });
@@ -135,7 +137,6 @@ describe('AdminPage.handleNavigate integration', () => {
     // Direct unit-style assertion that the navContext wiring works:
     // mount AdminConversations with navContext={tab:'feedback'} and
     // verify the Feedback tab is the active one (not Conversations).
-    const AdminConversations = (await import('@/components/admin/AdminConversations')).default;
     const { container } = render(
       <AdminConversations adminToken="t" navContext={{ tab: 'feedback' }} />,
     );

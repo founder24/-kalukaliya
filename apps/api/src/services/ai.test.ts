@@ -211,10 +211,11 @@ describe('drainStream', () => {
     expect(cancelled).toBe(true);
   });
 
-  it('yields nothing for an empty stream', async () => {
+  it('rejects an empty stream that closes without [DONE]', async () => {
     const stream = makeStream([]);
-    const chunks = await collect(drainStream(stream));
-    expect(chunks).toEqual([]);
+    await expect(collect(drainStream(stream))).rejects.toThrow(
+      'Workers AI stream ended without [DONE] sentinel',
+    );
   });
 
   it('skips non-data lines (event:, id:, comments)', async () => {
@@ -241,14 +242,15 @@ describe('drainStream', () => {
     expect(chunks).toEqual(['Workers AI response']);
   });
 
-  it('handles a stream with no [DONE] sentinel', async () => {
+  it('rejects a truncated stream after yielding partial content without [DONE]', async () => {
     const lines = [
       'data: ' + JSON.stringify({ response: 'No sentinel' }),
     ].join('\n') + '\n';
 
     const stream = makeStream([encode(lines)]);
-    const chunks = await collect(drainStream(stream));
-    expect(chunks).toEqual(['No sentinel']);
+    await expect(collect(drainStream(stream))).rejects.toThrow(
+      'Workers AI stream ended without [DONE] sentinel',
+    );
   });
 
   it('skips malformed JSON lines without throwing', async () => {
@@ -297,7 +299,7 @@ describe('streamGenerate fallback behavior', () => {
       run: async (model: string) => {
         calls.push(model);
         if (model === AI_MODEL_PRIMARY) return makeStream([]);
-        return makeStream([encode('data: {"response":"Fallback answer"}\n')]);
+        return makeStream([encode('data: {"response":"Fallback answer"}\ndata: [DONE]\n')]);
       },
     } as unknown as Ai;
 
@@ -369,7 +371,7 @@ describe('Workers AI cancellation', () => {
         calls.push(model);
         if (options?.signal) bindingSignals.push(options.signal);
         if (model === AI_MODEL_PRIMARY) return hanging();
-        return makeStream([encode('data: {"response":"Recovered answer"}\n')]);
+        return makeStream([encode('data: {"response":"Recovered answer"}\ndata: [DONE]\n')]);
       },
     } as unknown as Ai;
 

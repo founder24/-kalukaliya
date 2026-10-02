@@ -51,3 +51,17 @@ recording loses important production safeguards.
 **How to apply:** Keep API-only changes isolated from unrelated workspace
 commits; use the aggregate workflow whenever edge, frontend, secrets, or D1
 schema changes are part of the release.
+
+## Live Worker tail target
+
+For a named production environment, tail the deployed script name without also
+passing `--env production`; Wrangler appends the environment suffix when both
+are supplied. `--sampling-rate` must be a fraction strictly below `1`, such as
+`0.99`.
+
+**Why:** Passing both the deployed name and `--env production` targeted a
+nonexistent `-production` script, and this Wrangler version rejected a sampling
+rate of exactly `1`.
+
+**How to apply:** From `apps/api`, use
+`wrangler tail syrabit-api-prod --sampling-rate 0.99` for production monitoring.

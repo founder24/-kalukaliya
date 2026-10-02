@@ -66,10 +66,11 @@ describe('student chat curriculum scope', () => {
     expect(isReliableAssameseAnswer(
       'Newton First Law অনুসৰি কোনো বস্তুৰ ওপৰত বাহ্যিক বল নাথাকিলে বস্তুটোৱে নিজৰ অৱস্থা বজাই ৰাখে।',
     )).toBe(true);
-    expect(isUsableAssameseAnswer('এটি বাংলা বাক্য হলেও শিক্ষার্থী উত্তরটি পড়তে পারবে।')).toBe(true);
+    expect(isUsableAssameseAnswer('এটি বাংলা বাক্য হলেও শিক্ষার্থী উত্তরটি পড়তে পারবে।')).toBe(false);
+    expect(isUsableAssameseAnswer('এটি বিষয়টো ভালকৈ বুজাই দিয়া।')).toBe(true);
     expect(isUsableAssameseAnswer('This answer is only in English.')).toBe(false);
     expect(isUsableAssameseAnswer('यह उत्तर हिंदी में है।')).toBe(false);
-    expect(isDeliverableAssameseAnswer('এটি বাংলা বাক্য হলেও শিক্ষার্থী উত্তরটি পড়তে পারবে।')).toBe(true);
+    expect(isDeliverableAssameseAnswer('এটি বাংলা বাক্য হলেও শিক্ষার্থী উত্তরটি পড়তে পারবে।')).toBe(false);
     expect(isDeliverableAssameseAnswer('This answer is only in English.')).toBe(false);
     expect(isDeliverableAssameseAnswer('यह उत्तर हिंदी में है।')).toBe(false);
   });

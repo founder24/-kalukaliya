@@ -18,3 +18,26 @@ period-scoped KV count as a floor so existing usage never resets. During refresh
 migration, dual-read and dual-write the legacy KV marker until every deployment
 has used D1 claims for at least one full refresh-token TTL; only then may the KV
 bridges be removed.
+
+For failed chat streams, release the D1 quota reservation before emitting the
+terminal SSE error, and refresh the client’s displayed quota after structured
+SSE failures and transport failures.
+
+**Why:** A client refresh triggered by the terminal error can race a later
+reservation release and leave the visible allowance at zero after a refunded
+request.
+
+**How to apply:** Await the idempotent release before writing terminal failure
+events; refetch quota on failed or cancelled chat turns.
+
+Claim-scoped quota release is safe to retry only when every D1-backed reservation
+has a claim ID. Generate an internal claim ID for legacy requests without a
+client request key, retry at most once, and log final failures with only a fixed
+failure stage, attempt count, and sanitized error class.
+
+**Why:** A retry against an unclaimed reservation can decrement another request's
+quota, while silent cleanup failures leave monthly reservations counted until
+claim expiry.
+
+**How to apply:** Keep the decrement and claim deletion conditional and atomic;
+never log raw errors, request/user IDs, prompts, headers, or credentials.

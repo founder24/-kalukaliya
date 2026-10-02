@@ -4,6 +4,7 @@ import React from 'react';
 
 const mockSearchParams = vi.fn(() => [new URLSearchParams(), vi.fn()]);
 const mockLocationState = vi.fn(() => null);
+const mockCreditsGet = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
@@ -75,7 +76,7 @@ vi.mock('@/utils/api', () => ({
   getChapters: vi.fn(() => new Promise(() => {})),
   API_BASE: 'https://api.example/api/v1',
   apiClient: () => ({
-    get: vi.fn(() => new Promise(() => {})),
+    get: mockCreditsGet,
     post: vi.fn(() => new Promise(() => {})),
   }),
   getAnonId: vi.fn(() => 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
@@ -174,6 +175,8 @@ function chunkedStream(chunks, { close = true } = {}) {
 describe('ChatPage transport recovery', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    mockCreditsGet.mockClear();
+    mockCreditsGet.mockImplementation(() => new Promise(() => {}));
     HTMLElement.prototype.scrollIntoView = vi.fn();
     mockSearchParams.mockReturnValue([new URLSearchParams(), vi.fn()]);
     mockLocationState.mockReturnValue(null);
@@ -275,6 +278,8 @@ describe('ChatPage transport recovery', () => {
 
     expect(await screen.findByTestId('ai-unavailable-card')).toBeInTheDocument();
     expect(screen.getByTestId('assistant-content')).toHaveTextContent('Useful partial answer.');
+    expect(screen.queryByTestId('connection-interrupted-card')).not.toBeInTheDocument();
+    await waitFor(() => expect(mockCreditsGet).toHaveBeenCalledTimes(2));
   });
 
   it('sends server cancellation with the same logical request ID before stopping locally', async () => {
@@ -360,16 +365,18 @@ describe('ChatPage transport recovery', () => {
     expect(await screen.findByText('অসমীয়া')).toBeInTheDocument();
   });
 
-  it('stops reading after the SSE done marker', async () => {
+  it('treats syrabit_done as terminal without waiting for [DONE] or EOF', async () => {
     const body =
       `data: ${JSON.stringify({ content: 'Complete answer' })}\n\n` +
-      `data: ${JSON.stringify({ event: 'syrabit_done', done: true })}\n\n` +
-      'data: [DONE]\n\n';
+      `data: ${JSON.stringify({ event: 'syrabit_done', done: true })}\n\n`;
     vi.stubGlobal('fetch', vi.fn(async () => chunkedStream([body], { close: false })));
     render(<ChatPage />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Send test message' }));
 
     expect(await screen.findByText('Complete answer')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send test message' })).toBeInTheDocument();
+    });
   });
 });

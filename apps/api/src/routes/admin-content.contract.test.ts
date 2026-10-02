@@ -211,6 +211,346 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
   });
 
+  it('returns the D1-backed admin overview only to authenticated admins', async () => {
+    const denied = await workerFetch(new Request('http://worker/api/v1/admin/dashboard'));
+    expect(denied.status).toBe(401);
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const todayStart = Math.floor(nowSeconds / 86_400) * 86_400;
+    const baselineUsers = await env.DB.prepare(`
+      SELECT COUNT(*) AS total_users,
+             SUM(CASE WHEN updated_at >= ? THEN 1 ELSE 0 END) AS active_today,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS signups_today,
+             SUM(CASE WHEN subscription_tier = 'pro' THEN 1 ELSE 0 END) AS pro_users,
+             SUM(CASE WHEN subscription_tier = 'free' THEN 1 ELSE 0 END) AS free_users
+      FROM users WHERE deleted_at IS NULL
+    `).bind(todayStart, todayStart).first<Record<string, number | null>>();
+    const baselineChats = await env.DB.prepare(`
+      SELECT COUNT(*) AS total_messages,
+             SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS messages_today,
+             COUNT(DISTINCT session_id) AS total_conversations,
+             COUNT(DISTINCT user_id) AS unique_chatters
+      FROM chats
+      WHERE expires_at IS NULL OR expires_at > ?
+    `).bind(todayStart, nowSeconds).first<Record<string, number | null>>();
+    const baselineFeedback = await env.DB.prepare(`
+      SELECT COUNT(*) AS total,
+             SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS positive
+      FROM chat_feedback
+      WHERE expires_at IS NULL OR expires_at > ?
+    `).bind(nowSeconds).first<Record<string, number | null>>();
+    const baselineSubjects = await env.DB.prepare('SELECT COUNT(*) AS total FROM subjects')
+      .first<{ total: number }>();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO users (id, email, role, subscription_tier, created_at, updated_at)
+        VALUES ('dashboard-student-today', 'dashboard-today@example.test', 'student', 'pro', ?, ?)
+      `).bind(todayStart + 10, todayStart + 20),
+      env.DB.prepare(`
+        INSERT INTO users (id, email, role, subscription_tier, created_at, updated_at)
+        VALUES ('dashboard-student-old', 'dashboard-old@example.test', 'student', 'free', ?, ?)
+      `).bind(todayStart - 86_400, todayStart - 86_400),
+      env.DB.prepare(`
+        INSERT INTO chats (id, user_id, session_id, role, content, created_at)
+        VALUES
+          ('dashboard-chat-user', 'dashboard-student-today', 'dashboard-session-today', 'user', 'Question', ?),
+          ('dashboard-chat-assistant', 'dashboard-student-today', 'dashboard-session-today', 'assistant', 'Answer', ?),
+          ('dashboard-chat-old', 'dashboard-student-old', 'dashboard-session-old', 'user', 'Older question', ?)
+      `).bind(todayStart + 30, todayStart + 31, todayStart - 60),
+      env.DB.prepare(`
+        INSERT INTO chats (id, user_id, session_id, role, content, created_at, expires_at)
+        VALUES ('dashboard-chat-expired', 'dashboard-student-old', 'dashboard-session-expired', 'user', 'Expired', ?, ?)
+      `).bind(todayStart + 40, nowSeconds - 1),
+      env.DB.prepare(`
+        INSERT INTO chat_feedback (id, chat_id, user_id, rating, created_at)
+        VALUES
+          ('dashboard-feedback-positive', 'dashboard-chat-user', 'dashboard-student-today', 5, ?),
+          ('dashboard-feedback-negative', 'dashboard-chat-old', 'dashboard-student-old', 2, ?)
+      `).bind(nowSeconds - 50, nowSeconds - 40),
+      env.DB.prepare(`
+        INSERT INTO ai_usage_logs (id, user_id, provider, model, input_tokens, output_tokens, created_at)
+        VALUES ('dashboard-ai-usage', 'dashboard-student-today', 'contract-test', 'test-model', 7, 11, ?)
+      `).bind(nowSeconds - 30),
+    ]);
+
+    const response = await workerFetch(adminRequest('/api/v1/admin/dashboard'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    const payload = await response.json() as Record<string, any>;
+
+    expect(payload).toMatchObject({
+      total_users: Number(baselineUsers?.total_users ?? 0) + 2,
+      active_today: Number(baselineUsers?.active_today ?? 0) + 1,
+      signups_today: Number(baselineUsers?.signups_today ?? 0) + 1,
+      pro_users: Number(baselineUsers?.pro_users ?? 0) + 1,
+      free_users: Number(baselineUsers?.free_users ?? 0) + 1,
+      total_messages: Number(baselineChats?.total_messages ?? 0) + 3,
+      messages_today: Number(baselineChats?.messages_today ?? 0) + 2,
+      total_conversations: Number(baselineChats?.total_conversations ?? 0) + 2,
+      conversations_with_messages: Number(baselineChats?.total_conversations ?? 0) + 2,
+      unique_chatters: Number(baselineChats?.unique_chatters ?? 0) + 2,
+      total_subjects: baselineSubjects?.total ?? 0,
+      system_health: 'ok',
+    });
+    expect(payload.plan_distribution).toMatchObject({ free: expect.any(Number), starter: expect.any(Number), pro: expect.any(Number) });
+    expect(payload.feedback).toEqual({
+      total: Number(baselineFeedback?.total ?? 0) + 2,
+      positive: Number(baselineFeedback?.positive ?? 0) + 1,
+      positive_rate: expect.any(Number),
+    });
+    for (const unsupported of [
+      'vector_stats', 'token_spend', 'top_queries', 'chat_fallbacks',
+      'revenue_total', 'revenue_month',
+    ]) {
+      expect(payload).not.toHaveProperty(unsupported);
+    }
+  });
+
+  it('serves authenticated dashboard metrics from D1, including honest empty states and populated telemetry', async () => {
+    const cleanupDashboardMetricFixture = async () => env.DB.batch([
+      env.DB.prepare(`DELETE FROM chat_feedback WHERE id IN (
+        'dashboard-metric-feedback-positive', 'dashboard-metric-feedback-negative'
+      )`),
+      env.DB.prepare(`DELETE FROM chats WHERE id IN (
+        'dashboard-metric-query-1', 'dashboard-metric-query-2'
+      )`),
+      env.DB.prepare(`DELETE FROM chunks WHERE id = 'dashboard-metric-chunk'`),
+      env.DB.prepare(`DELETE FROM chapters WHERE id = 'dashboard-metric-chapter'`),
+      env.DB.prepare(`DELETE FROM analytics_events WHERE id IN (
+        'dashboard-metric-page-1', 'dashboard-metric-page-2',
+        'dashboard-metric-latency-1', 'dashboard-metric-latency-2'
+      )`),
+      env.DB.prepare(`DELETE FROM users WHERE id = 'dashboard-metric-student'`),
+      env.DB.prepare(`DELETE FROM admin_config WHERE key IN ('notification-prefs', 'alert-settings')`),
+    ]);
+    await cleanupDashboardMetricFixture();
+
+    const paths = [
+      '/api/v1/admin/dashboard/metrics',
+      '/api/v1/admin/rag/accuracy',
+      '/api/v1/admin/vector/stats',
+      '/api/v1/admin/perf/latency',
+      '/api/v1/admin/analytics/queries',
+      '/api/v1/admin/monetization/funnel',
+      '/api/v1/admin/seo/pipeline-status',
+      '/api/v1/admin/content/coverage',
+      '/api/v1/admin/notification-prefs',
+      '/api/v1/admin/alert-settings',
+    ];
+    for (const pathname of paths) {
+      expect((await workerFetch(new Request(`http://worker${pathname}`))).status).toBe(401);
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const since30d = nowSeconds - 30 * 86_400;
+    const since7d = nowSeconds - 7 * 86_400;
+    const [trafficBefore, latencyBefore, feedbackBefore, chunksBefore, studentsBefore, chapterCoverageBefore] = await Promise.all([
+      env.DB.prepare(`
+        SELECT COUNT(*) AS page_views,
+          COUNT(DISTINCT json_extract(payload, '$.session_id')) AS sessions
+        FROM analytics_events
+        WHERE event_subtype = 'page_view' AND classification = 'optional_analytics'
+          AND created_at >= ?
+      `).bind(since30d).first<Record<string, number | string>>(),
+      env.DB.prepare(`
+        SELECT COUNT(*) AS sample_count
+        FROM analytics_events
+        WHERE event_subtype = 'chat_completion' AND classification = 'essential_operational'
+          AND created_at >= ?
+          AND CAST(json_extract(payload, '$.latency_ms') AS REAL) > 0
+      `).bind(since7d).first<{ sample_count: number | string }>(),
+      env.DB.prepare(`
+        SELECT COUNT(*) AS count,
+          SUM(CASE WHEN rating >= 4 THEN 1 ELSE 0 END) AS positive
+        FROM chat_feedback
+        WHERE created_at >= ? AND (expires_at IS NULL OR expires_at > ?)
+      `).bind(since30d, nowSeconds).first<Record<string, number | string | null>>(),
+      env.DB.prepare('SELECT COUNT(*) AS count FROM chunks').first<{ count: number | string }>(),
+      env.DB.prepare(`
+        SELECT COUNT(*) AS count
+        FROM users
+        WHERE deleted_at IS NULL AND role NOT IN ('admin', 'staff')
+      `).first<{ count: number | string }>(),
+      env.DB.prepare(`
+        SELECT COUNT(*) AS total,
+          SUM(CASE WHEN notes_en IS NOT NULL AND TRIM(notes_en) != '' THEN 1 ELSE 0 END) AS notes,
+          SUM(CASE WHEN notes_as IS NOT NULL AND TRIM(notes_as) != '' THEN 1 ELSE 0 END) AS assamese
+        FROM chapters
+      `).first<Record<string, number | string | null>>(),
+    ]);
+
+    const [metricsBefore, vectorsBefore, latencyPayloadBefore, funnelBefore] = await Promise.all([
+      workerFetch(adminRequest('/api/v1/admin/dashboard/metrics')).then(response => response.json() as Promise<Record<string, any>>),
+      workerFetch(adminRequest('/api/v1/admin/vector/stats')).then(response => response.json() as Promise<Record<string, any>>),
+      workerFetch(adminRequest('/api/v1/admin/perf/latency')).then(response => response.json() as Promise<Record<string, any>>),
+      workerFetch(adminRequest('/api/v1/admin/monetization/funnel')).then(response => response.json() as Promise<Record<string, any>>),
+    ]);
+    expect(metricsBefore.visitor_stats.has_data).toBe(Number(trafficBefore?.page_views ?? 0) > 0);
+    expect(vectorsBefore.has_data).toBe(Number(chunksBefore?.count ?? 0) > 0);
+    expect(latencyPayloadBefore.has_data).toBe(Number(latencyBefore?.sample_count ?? 0) > 0);
+    expect(funnelBefore.has_data).toBe(Number(studentsBefore?.count ?? 0) > 0);
+
+    const queryText = 'unique D1 dashboard contract query';
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO users (id, email, role, subscription_tier, created_at, updated_at)
+        VALUES ('dashboard-metric-student', 'dashboard-metric@example.test', 'student', 'pro', ?, ?)
+      `).bind(nowSeconds - 20, nowSeconds - 10),
+      env.DB.prepare(`
+        INSERT INTO chapters (id, subject_id, title, slug, status, notes_en, notes_as)
+        VALUES ('dashboard-metric-chapter', 'subject', 'Dashboard metric chapter',
+          'dashboard-metric-chapter', 'published', 'English notes', 'Assamese notes')
+      `),
+      env.DB.prepare(`
+        INSERT INTO chunks (id, chapter_id, subject_id, source_type, medium, chunk_type, content, vector_id)
+        VALUES ('dashboard-metric-chunk', 'dashboard-metric-chapter', 'subject',
+          'chapter', 'english', 'notes', 'Indexable notes', 'dashboard-vector-id')
+      `),
+      env.DB.prepare(`
+        INSERT INTO chats (id, user_id, session_id, role, content, created_at)
+        VALUES
+          ('dashboard-metric-query-1', 'dashboard-metric-student', 'dashboard-metric-chat', 'user', ?, ?),
+          ('dashboard-metric-query-2', 'dashboard-metric-student', 'dashboard-metric-chat', 'user', ?, ?)
+      `).bind(queryText, nowSeconds - 8, queryText, nowSeconds - 6),
+      env.DB.prepare(`
+        INSERT INTO chat_feedback (id, chat_id, user_id, rating, created_at)
+        VALUES
+          ('dashboard-metric-feedback-positive', 'dashboard-metric-query-1', 'dashboard-metric-student', 5, ?),
+          ('dashboard-metric-feedback-negative', 'dashboard-metric-query-2', 'dashboard-metric-student', 2, ?)
+      `).bind(nowSeconds - 5, nowSeconds - 4),
+      env.DB.prepare(`
+        INSERT INTO analytics_events
+          (id, event_name, event_subtype, classification, payload, route_path, created_at)
+        VALUES
+          ('dashboard-metric-page-1', 'page_view', 'page_view', 'optional_analytics',
+            '{"session_id":"dashboard-metric-session"}', '/library', ?),
+          ('dashboard-metric-page-2', 'page_view', 'page_view', 'optional_analytics',
+            '{"session_id":"dashboard-metric-session"}', '/library', ?),
+          ('dashboard-metric-latency-1', 'chat_completion', 'chat_completion', 'essential_operational',
+            '{"latency_ms":100,"provider":"contract-test"}', '/v1/chat/stream', ?),
+          ('dashboard-metric-latency-2', 'chat_completion', 'chat_completion', 'essential_operational',
+            '{"latency_ms":300,"provider":"contract-test"}', '/v1/chat/stream', ?)
+      `).bind(nowSeconds - 3, nowSeconds - 2, nowSeconds - 1, nowSeconds),
+    ]);
+
+    const dashboard = await workerFetch(adminRequest('/api/v1/admin/dashboard/metrics'));
+    expect(dashboard.status).toBe(200);
+    expect(dashboard.headers.get('Cache-Control')).toContain('no-store');
+    const metrics = await dashboard.json() as Record<string, any>;
+    expect(metrics).toMatchObject({
+      source: 'd1',
+      users: { pro: expect.any(Number) },
+      visitor_stats: {
+        source: 'analytics_events',
+        has_data: true,
+        page_views: Number(trafficBefore?.page_views ?? 0) + 2,
+        sessions: Number(trafficBefore?.sessions ?? 0) + 1,
+      },
+    });
+    expect(metrics.users.pro).toBeGreaterThan(0);
+    expect(metrics.visitor_stats.daily).toEqual(expect.arrayContaining([
+      expect.objectContaining({ page_views: expect.any(Number), sessions: expect.any(Number) }),
+    ]));
+
+    const [feedbackResponse, vectorResponse, latencyResponse, queriesResponse, funnelResponse, pipelineResponse] = await Promise.all([
+      workerFetch(adminRequest('/api/v1/admin/rag/accuracy')),
+      workerFetch(adminRequest('/api/v1/admin/vector/stats')),
+      workerFetch(adminRequest('/api/v1/admin/perf/latency')),
+      workerFetch(adminRequest('/api/v1/admin/analytics/queries')),
+      workerFetch(adminRequest('/api/v1/admin/monetization/funnel')),
+      workerFetch(adminRequest('/api/v1/admin/seo/pipeline-status')),
+    ]);
+    expect(feedbackResponse.status).toBe(200);
+    const feedback = await feedbackResponse.json() as Record<string, any>;
+    expect(feedback).toMatchObject({
+      source: 'chat_feedback',
+      has_data: true,
+      feedback_count: Number(feedbackBefore?.count ?? 0) + 2,
+      positive_count: Number(feedbackBefore?.positive ?? 0) + 1,
+    });
+
+    expect(vectorResponse.status).toBe(200);
+    const vectors = await vectorResponse.json() as Record<string, any>;
+    expect(vectors).toMatchObject({
+      source: 'chunks',
+      has_data: true,
+      total: Number(chunksBefore?.count ?? 0) + 1,
+      embedded: expect.any(Number),
+    });
+    expect(vectors.embedded).toBeGreaterThan(0);
+
+    expect(latencyResponse.status).toBe(200);
+    const latency = await latencyResponse.json() as Record<string, any>;
+    expect(latency).toMatchObject({
+      source: 'analytics_events',
+      has_data: true,
+      sample_count: Number(latencyBefore?.sample_count ?? 0) + 2,
+    });
+    expect(latency.p95_ms).toBeGreaterThanOrEqual(300);
+
+    expect(queriesResponse.status).toBe(200);
+    const queries = await queriesResponse.json() as Record<string, any>;
+    expect(queries.source).toBe('chats');
+    expect(queries.top_queries).toContainEqual({ query: queryText, count: 2 });
+
+    expect(funnelResponse.status).toBe(200);
+    const funnel = await funnelResponse.json() as Record<string, any>;
+    expect(funnel).toMatchObject({
+      source: 'users.subscription_tier',
+      note: expect.stringContaining('not billing or conversion data'),
+      has_data: true,
+      total_count: Number(studentsBefore?.count ?? 0) + 1,
+    });
+    expect(funnel.funnel).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ conversion_rate: expect.anything() }),
+    ]));
+
+    expect(pipelineResponse.status).toBe(200);
+    const pipeline = await pipelineResponse.json() as Record<string, any>;
+    expect(pipeline).toMatchObject({
+      source: 'chapters',
+      published: expect.any(Number),
+      with_assamese_notes: expect.any(Number),
+    });
+    expect(pipeline.published).toBeGreaterThan(0);
+    expect(pipeline.with_assamese_notes).toBeGreaterThan(0);
+
+    const chapterCoverageResponse = await workerFetch(adminRequest('/api/v1/admin/content/coverage'));
+    expect(chapterCoverageResponse.status).toBe(200);
+    expect(await chapterCoverageResponse.json()).toMatchObject({
+      source: 'd1',
+      has_data: true,
+      total: Number(chapterCoverageBefore?.total ?? 0) + 1,
+      notes: Number(chapterCoverageBefore?.notes ?? 0) + 1,
+      assamese: Number(chapterCoverageBefore?.assamese ?? 0) + 1,
+    });
+
+    const initialPrefs = await workerFetch(adminRequest('/api/v1/admin/notification-prefs'));
+    expect(initialPrefs.status).toBe(200);
+    expect(await initialPrefs.json()).toMatchObject({ sound_enabled: true });
+    const savedPrefs = await workerFetch(adminRequest(
+      '/api/v1/admin/notification-prefs', 'PUT', { sound_enabled: false },
+    ));
+    expect(savedPrefs.status).toBe(200);
+    expect(await savedPrefs.json()).toMatchObject({ sound_enabled: false });
+
+    const savedAlertSettings = await workerFetch(adminRequest(
+      '/api/v1/admin/alert-settings',
+      'PUT',
+      { thresholds: { error_rate_pct: 5 }, expiration: { enabled: true, days: 14 } },
+    ));
+    expect(savedAlertSettings.status).toBe(200);
+    const alertSettings = await workerFetch(adminRequest('/api/v1/admin/alert-settings'));
+    expect(alertSettings.status).toBe(200);
+    expect(await alertSettings.json()).toMatchObject({
+      source: 'd1',
+      thresholds: { error_rate_pct: 5 },
+      expiration: { enabled: true, days: 14 },
+    });
+    await cleanupDashboardMetricFixture();
+  });
+
   it('rejects anonymous, student, and refresh credentials at admin and staff boundaries without writes', async () => {
     const anonymousAdmin = await workerFetch(new Request('http://worker/api/v1/admin/content/chapters'));
     const anonymousStaff = await workerFetch(new Request('http://worker/api/v1/staff/content/boards'));

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
 import { revokedRtKey, signAccessToken, signRefreshToken } from '../middleware/auth';
@@ -64,6 +64,67 @@ async function createFreeUser(): Promise<string> {
      VALUES (?, ?, 'student', 'free', 0)`,
   ).bind(userId, `${userId}@example.test`).run();
   return userId;
+}
+
+function databaseWithBatchFailures(failureCount: number, failAuthoritativeRead = false) {
+  let batchCalls = 0;
+  const database = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === 'batch') {
+        return async (statements: Parameters<Env['DB']['batch']>[0]) => {
+          batchCalls += 1;
+          if (batchCalls <= failureCount) {
+            throw new Error('Synthetic D1 failure with PRIVATE_TEST_MARKER');
+          }
+          return target.batch(statements);
+        };
+      }
+      if (property === 'prepare' && failAuthoritativeRead) {
+        return (query: Parameters<Env['DB']['prepare']>[0]) => {
+          if (query.includes('FROM chapters')) {
+            throw new Error('Synthetic D1 lookup failure with PRIVATE_LOOKUP_MARKER');
+          }
+          return target.prepare(query);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as Env['DB'];
+  return {
+    database,
+    get batchCalls() {
+      return batchCalls;
+    },
+  };
+}
+
+async function postAuthenticatedChat(
+  database: Env['DB'],
+  input: {
+    userId: string;
+    message: string;
+    requestId?: string;
+    subjectId?: string;
+  },
+): Promise<Response> {
+  const accessToken = await signAccessToken(input.userId, 'student', JWT_SECRET);
+  return chatRouter.fetch(
+    new Request('https://api.example/stream', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: input.message,
+        lang: 'en',
+        ...(input.requestId && { client_request_id: input.requestId }),
+        ...(input.subjectId && { subject_id: input.subjectId }),
+      }),
+    }),
+    { ...env, DB: database },
+  );
 }
 
 function previousMonthPeriod(period: string): string {
@@ -311,6 +372,76 @@ describe('atomic quota controls', () => {
     expect(claim).toEqual({ status: 'completed', monthly_period: claimPeriod });
   });
 
+  it('does not persist a response when cancellation wins the claim transition', async () => {
+    const userId = await createFreeUser();
+    const requestId = `cancel_persist_${crypto.randomUUID().replace(/-/g, '')}`;
+    const minutePeriod = currentQuotaMinutePeriod();
+    const monthlyPeriod = currentQuotaMonthPeriod();
+    const expiresAt = Math.floor(Date.now() / 1000) + 3600;
+    await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO quota_usage (user_id, period, count) VALUES (?, ?, 1)',
+      ).bind(userId, minutePeriod),
+      env.DB.prepare(`
+        INSERT INTO chat_request_claims
+          (request_id, user_id, period, is_anon, quota_reserved,
+           monthly_quota_reserved, monthly_period, status, created_at, expires_at)
+        VALUES (?, ?, ?, 0, 1, 1, ?, 'reserved', ?, ?)
+      `).bind(
+        requestId,
+        userId,
+        minutePeriod,
+        monthlyPeriod,
+        Math.floor(Date.now() / 1000),
+        expiresAt,
+      ),
+    ]);
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const cancelled = await chatRouter.fetch(
+      new Request('https://api.example/cancel', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ client_request_id: requestId }),
+      }),
+      env,
+    );
+    expect(cancelled.status).toBe(202);
+
+    await expect(persistCompletedChat(env.DB, {
+      userId,
+      sessionId: `cancelled_${crypto.randomUUID()}`,
+      userMessage: 'Remember this cancelled question',
+      assistantResponse: 'This answer must not be stored in history or memory.',
+      lang: 'en',
+      modelUsed: 'test-model',
+      isAnon: false,
+      requestId,
+      responseMetadata: {},
+      confidenceTier: 'high',
+    })).resolves.toBe(false);
+
+    const chatRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const memoryRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM memory_brain WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const minuteQuota = await env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, minutePeriod).first<{ count: number }>();
+    const monthQuota = await env.DB.prepare(
+      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    ).bind(userId, monthlyPeriod).first<{ count: number }>();
+
+    expect(chatRows?.count).toBe(0);
+    expect(memoryRows?.count).toBe(0);
+    expect(minuteQuota?.count).toBe(0);
+    expect(monthQuota).toBeNull();
+  });
+
   it('allows exactly the anonymous limit under parallel reservations', async () => {
     const anonId = 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const results = await Promise.all(
@@ -499,6 +630,421 @@ describe('atomic quota controls', () => {
       'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
     ).bind(anonId).first<{ count: number }>();
     expect(row?.count).toBe(0);
+  });
+
+  it('emits syrabit_done only after the claim, history, and memory commit', async () => {
+    const userId = await createFreeUser();
+    const requestId = `complete_before_done_${crypto.randomUUID().replace(/-/g, '')}`;
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const answer = 'Gravity is the force that attracts objects with mass toward one another.';
+    const encoder = new TextEncoder();
+    const completeEnv = {
+      ...env,
+      AI: {
+        run: async (model: string) => {
+          if (model === '@cf/baai/bge-m3') {
+            return { data: [{ values: [0.1, 0.2, 0.3] }] };
+          }
+          return new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ response: answer })}\n`,
+              ));
+              controller.enqueue(encoder.encode('data: [DONE]\n'));
+              controller.close();
+            },
+          });
+        },
+      } as unknown as Ai,
+      VECTORIZE: {
+        query: async () => ({ matches: [] }),
+      } as unknown as VectorizeIndex,
+    };
+    const background: Promise<unknown>[] = [];
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+    } as unknown as ExecutionContext;
+
+    const response = await chatRouter.fetch(
+      new Request('https://api.example/stream', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: 'Explain gravity',
+          lang: 'en',
+          client_request_id: requestId,
+        }),
+      }),
+      completeEnv,
+      context,
+    );
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let streamText = '';
+    while (!streamText.includes('"event":"syrabit_done"')) {
+      const read = await reader.read();
+      if (read.done) throw new Error('chat stream closed before syrabit_done');
+      streamText += decoder.decode(read.value, { stream: true });
+    }
+
+    const claim = await env.DB.prepare(
+      'SELECT status FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string }>();
+    const history = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const memories = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM memory_brain WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    expect(claim?.status).toBe('completed');
+    expect(history?.count).toBe(2);
+    expect(memories?.count).toBe(1);
+
+    while (true) {
+      const read = await reader.read();
+      if (read.done) break;
+      streamText += decoder.decode(read.value, { stream: true });
+    }
+    await Promise.all(background);
+  });
+
+  it('aborts a stalled provider when cancellation is recorded only as a tombstone', async () => {
+    const userId = await createFreeUser();
+    const requestId = `cancel_monitor_${crypto.randomUUID().replace(/-/g, '')}`;
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    let providerSignal: AbortSignal | undefined;
+    let providerStreamCancelled = false;
+    const encoder = new TextEncoder();
+    const monitorEnv = {
+      ...env,
+      AI: {
+        run: async (
+          model: string,
+          _input: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (model === '@cf/baai/bge-m3') {
+            return { data: [{ values: [0.1, 0.2, 0.3] }] };
+          }
+          providerSignal = options?.signal;
+          return new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode('data: {"response":"Partial answer before stall"}\n'));
+            },
+            cancel() {
+              providerStreamCancelled = true;
+            },
+          });
+        },
+      } as unknown as Ai,
+      VECTORIZE: {
+        query: async () => ({ matches: [] }),
+      } as unknown as VectorizeIndex,
+    };
+    const background: Promise<unknown>[] = [];
+    const context = {
+      waitUntil(promise: Promise<unknown>) {
+        background.push(promise);
+      },
+      passThroughOnException() {},
+    } as unknown as ExecutionContext;
+
+    const response = await chatRouter.fetch(
+      new Request('https://api.example/stream', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: 'Explain gravity briefly',
+          lang: 'en',
+          client_request_id: requestId,
+        }),
+      }),
+      monitorEnv,
+      context,
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let streamText = '';
+    let initialReadTimer: ReturnType<typeof setTimeout> | undefined;
+    const initialReadTimeout = new Promise<never>((_, reject) => {
+      initialReadTimer = setTimeout(
+        () => reject(new Error('provider did not emit the initial chunk')),
+        5_000,
+      );
+    });
+    try {
+      while (!streamText.includes('Partial answer before stall')) {
+        const read = await Promise.race([reader.read(), initialReadTimeout]);
+        if (read.done) throw new Error('chat stream closed before the provider chunk');
+        streamText += decoder.decode(read.value, { stream: true });
+      }
+    } finally {
+      if (initialReadTimer !== undefined) clearTimeout(initialReadTimer);
+    }
+
+    const cancelled = await chatRouter.fetch(
+      new Request('https://api.example/cancel', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ client_request_id: requestId }),
+      }),
+      monitorEnv,
+      context,
+    );
+    expect(cancelled.status).toBe(202);
+
+    while (true) {
+      const read = await reader.read();
+      if (read.done) break;
+      streamText += decoder.decode(read.value, { stream: true });
+    }
+    await Promise.all(background);
+
+    expect(providerSignal?.aborted).toBe(true);
+    expect((providerSignal?.reason as Error | undefined)?.name).toBe('AbortError');
+    expect((providerSignal?.reason as Error | undefined)?.message).toBe('Chat request cancelled');
+    expect(providerStreamCancelled).toBe(true);
+    expect(streamText).not.toContain('"event":"syrabit_done"');
+    expect(streamText).not.toContain('"done":true');
+
+    const claim = await env.DB.prepare(
+      'SELECT status FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string }>();
+    const chatRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const memoryRows = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM memory_brain WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const minuteQuota = await env.DB.prepare(
+      'SELECT count FROM quota_usage WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+    const monthQuota = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM monthly_quota_usage WHERE user_id = ?',
+    ).bind(userId).first<{ count: number }>();
+
+    expect(claim?.status).toBe('cancelled');
+    expect(chatRows?.count).toBe(0);
+    expect(memoryRows?.count).toBe(0);
+    expect(minuteQuota?.count ?? 0).toBe(0);
+    expect(monthQuota?.count).toBe(0);
+  });
+
+  it('retries and releases a monthly reservation after curriculum-scope rejection', async () => {
+    const userId = await createFreeUser();
+    const requestId = `scope_release_${crypto.randomUUID().replace(/-/g, '')}`;
+    const message = 'Explain forces in Class 99 Physics PRIVATE_PROMPT_MARKER';
+    const flakyDb = databaseWithBatchFailures(1);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const response = await postAuthenticatedChat(flakyDb.database, {
+        userId,
+        message,
+        requestId,
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'curriculum_scope_ambiguous',
+        failure_stage: 'curriculum_scope',
+      });
+      expect(flakyDb.batchCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('[chat] quota release retry', {
+        failure_stage: 'curriculum_scope',
+        attempt: 1,
+        error_class: 'Error',
+      });
+
+      const minuteUsage = await env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(userId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      const claim = await env.DB.prepare(
+        'SELECT status FROM chat_request_claims WHERE request_id = ?',
+      ).bind(requestId).first<{ status: string }>();
+      expect(minuteUsage?.count ?? 0).toBe(0);
+      expect(await getAuthMonthlyQuotaUsage(env.DB, userId)).toBe(0);
+      expect(claim).toBeNull();
+
+      const warningData = JSON.stringify(warnSpy.mock.calls);
+      expect(warningData).not.toContain(message);
+      expect(warningData).not.toContain(userId);
+      expect(warningData).not.toContain(requestId);
+      expect(warningData).not.toContain('PRIVATE_TEST_MARKER');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('retries idempotent cleanup on empty authoritative retrieval for a legacy request', async () => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+       VALUES (?, ?, 'student', 'premium', 0)`,
+    ).bind(userId, `${userId}@example.test`).run();
+    const subjectId = `quota-cleanup-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Quota cleanup test', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
+    const message = 'Show me the syllabus PRIVATE_AUTHORITATIVE_MARKER';
+    const flakyDb = databaseWithBatchFailures(1);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      // Omit client_request_id to exercise the server-generated cleanup claim.
+      const response = await postAuthenticatedChat(flakyDb.database, {
+        userId,
+        message,
+        subjectId,
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'authoritative_context_empty',
+        failure_stage: 'authoritative_retrieval',
+      });
+      expect(flakyDb.batchCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('[chat] quota release retry', {
+        failure_stage: 'authoritative_retrieval',
+        attempt: 1,
+        error_class: 'Error',
+      });
+
+      const minuteUsage = await env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(userId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      const reservedClaims = await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM chat_request_claims
+         WHERE user_id = ? AND status = 'reserved'`,
+      ).bind(userId).first<{ count: number }>();
+      expect(minuteUsage?.count ?? 0).toBe(0);
+      expect(reservedClaims?.count ?? 0).toBe(0);
+
+      const warningData = JSON.stringify(warnSpy.mock.calls);
+      expect(warningData).not.toContain(message);
+      expect(warningData).not.toContain(userId);
+      expect(warningData).not.toContain('PRIVATE_TEST_MARKER');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('retries quota cleanup when authoritative retrieval throws before returning', async () => {
+    const userId = await createFreeUser();
+    const requestId = `authoritative_read_${crypto.randomUUID().replace(/-/g, '')}`;
+    const subjectId = `quota-read-${crypto.randomUUID()}`;
+    await env.DB.prepare(
+      `INSERT INTO subjects (id, stream_id, name, slug, is_published)
+       VALUES (?, NULL, 'Quota read failure test', ?, 1)`,
+    ).bind(subjectId, subjectId).run();
+    const message = 'Show me the syllabus PRIVATE_READ_PROMPT_MARKER';
+    const flakyDb = databaseWithBatchFailures(1, true);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const response = await postAuthenticatedChat(flakyDb.database, {
+        userId,
+        message,
+        requestId,
+        subjectId,
+      });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'authoritative_context_unavailable',
+        failure_stage: 'authoritative_retrieval',
+      });
+      expect(flakyDb.batchCalls).toBe(2);
+      expect(warnSpy).toHaveBeenCalledWith('[chat] quota release retry', {
+        failure_stage: 'authoritative_retrieval',
+        attempt: 1,
+        error_class: 'Error',
+      });
+
+      const minuteUsage = await env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(userId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      const claim = await env.DB.prepare(
+        'SELECT status FROM chat_request_claims WHERE request_id = ?',
+      ).bind(requestId).first<{ status: string }>();
+      expect(minuteUsage?.count ?? 0).toBe(0);
+      expect(await getAuthMonthlyQuotaUsage(env.DB, userId)).toBe(0);
+      expect(claim).toBeNull();
+
+      const loggedData = JSON.stringify([
+        ...warnSpy.mock.calls,
+        ...errorSpy.mock.calls,
+      ]);
+      expect(loggedData).not.toContain(message);
+      expect(loggedData).not.toContain(userId);
+      expect(loggedData).not.toContain(requestId);
+      expect(loggedData).not.toContain('PRIVATE_TEST_MARKER');
+      expect(loggedData).not.toContain('PRIVATE_LOOKUP_MARKER');
+      expect(loggedData).not.toContain('PRIVATE_READ_PROMPT_MARKER');
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('logs a final early-return cleanup failure without student data', async () => {
+    const userId = await createFreeUser();
+    const requestId = `scope_cleanup_failure_${crypto.randomUUID().replace(/-/g, '')}`;
+    const message = 'Explain forces in Class 99 Physics PRIVATE_FINAL_MARKER';
+    const failedDb = databaseWithBatchFailures(2);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const response = await postAuthenticatedChat(failedDb.database, {
+        userId,
+        message,
+        requestId,
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'curriculum_scope_ambiguous',
+        failure_stage: 'curriculum_scope',
+      });
+      expect(failedDb.batchCalls).toBe(2);
+      expect(errorSpy).toHaveBeenCalledWith('[chat] quota release failed', {
+        failure_stage: 'curriculum_scope',
+        attempts: 2,
+        error_class: 'Error',
+      });
+
+      const claim = await env.DB.prepare(
+        'SELECT status FROM chat_request_claims WHERE request_id = ?',
+      ).bind(requestId).first<{ status: string }>();
+      expect(claim?.status).toBe('reserved');
+      expect(await getAuthMonthlyQuotaUsage(env.DB, userId)).toBe(1);
+
+      const loggedData = JSON.stringify([
+        ...warnSpy.mock.calls,
+        ...errorSpy.mock.calls,
+      ]);
+      expect(loggedData).not.toContain(message);
+      expect(loggedData).not.toContain(userId);
+      expect(loggedData).not.toContain(requestId);
+      expect(loggedData).not.toContain('PRIVATE_TEST_MARKER');
+      expect(loggedData).not.toContain('PRIVATE_FINAL_MARKER');
+      expect(loggedData).not.toContain('Synthetic D1 failure');
+    } finally {
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 
   it('keeps authenticated chat identity and releases its quota on provider failure', async () => {
@@ -827,6 +1373,51 @@ describe('atomic refresh-token rotation', () => {
     // fires first; the jti is still consumed so the token can never mint a
     // new session either way.
     await expect(replay.json()).resolves.toMatchObject({
+      detail: 'Session expired after password change. Sign in again.',
+    });
+  });
+
+  it('invalidates access sessions before reporting a failed legacy revocation bridge', async () => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO users (id, email, role, subscription_tier, session_valid_after)
+       VALUES (?, ?, 'student', 'free', 0)`,
+    ).bind(userId, `${userId}@example.test`).run();
+
+    const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
+    const { token: refreshToken } = await signRefreshToken(userId, 'student', JWT_SECRET);
+    const unavailableKv = {
+      put: async () => { throw new Error('KV unavailable'); },
+    } as unknown as KVNamespace;
+    const response = await authRouter.fetch(
+      new Request('https://api.example/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      }),
+      { ...env, RATE_LIMIT_KV: unavailableKv },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error_code: 'auth_storage_unavailable',
+    });
+    const user = await env.DB.prepare(
+      'SELECT session_valid_after FROM users WHERE id = ?',
+    ).bind(userId).first<{ session_valid_after: number }>();
+    expect(user?.session_valid_after).toBeGreaterThan(0);
+
+    const accessCheck = await authRouter.fetch(
+      new Request('https://api.example/me', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }),
+      env,
+    );
+    expect(accessCheck.status).toBe(401);
+    await expect(accessCheck.json()).resolves.toMatchObject({
       detail: 'Session expired after password change. Sign in again.',
     });
   });

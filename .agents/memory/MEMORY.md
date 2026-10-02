@@ -4,7 +4,7 @@
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
 - [Worker chat retrieval speed](worker-chat-retrieval-speed.md) — known chapters use direct D1 context; stale IDs fall back to subject-scoped semantic RAG
-- [Anonymous quota identity](anonymous-quota-identity.md) — browser ID first, signed cookie second, trusted IP last; chat uses an atomic fixed 6 RPM bucket
+- [Anonymous quota identity](anonymous-quota-identity.md) — edge-minted signed cookie owns anonymous history/quota; caller IDs are not ownership credentials, and chat uses a fixed 6 RPM bucket
 - [Syrabit Cloud Run deploy fixes](syrabit-cloudrun-fixes.md) — motor missing, pymongo compat, JWT RS256 degraded mode, Atlas index conflicts
 - [Syrabit Cloud Run secrets strategy](syrabit-cloudrun-envvars.md) — gcloud run deploy DROPS all Secret Manager refs every deploy; must pass --update-secrets explicitly in cloudbuild.yaml every time
 - [Syrabit content model FlexId](syrabit-flexid.md) — DB uses legacy string IDs (e.g. 's13', UUID) not ObjectIds; all reference fields must use FlexId
@@ -28,13 +28,13 @@
 - [Gunicorn SIGABRT on Cloud Run](gunicorn-sigabrt.md) — Gunicorn timeout=30s caused SIGABRT on long AI requests; set timeout=120 for async AI workloads; graceful_timeout can stay at 30
 - [Syrabit RAG v2 pipeline](syrabit-rag-v2.md) — Vectorize+MongoDB dual-write pipeline; CF metadata uses camelCase (subjectId/chapterId/topicId/medium/sourceType/chunkType); medium='english'/'assamese' not 'en'/'as'
 - [Syrabit admin auth pattern](syrabit-admin-auth.md) — All admin routers use router-level Depends; cron routes (Bearer token) live in admin_cron.py; AiUsageLog model tracks per-request token spend
-- [Syrabit confidence-aware chat pipeline](syrabit-confidence-chat.md) — 2-phase embed+gate retrieval; SourceCard SSE emitted before LLM; source card enhances existing MessageBubble card (not a new panel)
 - [Syrabit god-level upgrade progress](syrabit-upgrade-progress.md) — Admin hardening phases 1-6 complete: PublishJob tracking, unpublished-edit badge, conversations pagination, admin actions analytics
 - [Syrabit admin publish job pattern](syrabit-publish-job.md) — PublishJob (publish_jobs collection) tracks 7-step pipeline; POST publish returns job_id immediately; asyncio.create_task runs pipeline; GET + retry endpoints exist
 - [Sarvam enable_thinking mode strategy](sarvam-enable-thinking.md) — Non-streaming: always False (True leaks planning into content field); streaming EN: True, AS: False
 - [Syrabit user route aliases](syrabit-user-route-aliases.md) — Frontend uses /user/profile, /user/account, /user/memories; backend must expose these as aliases to /users/me
 - [Admin panel audit findings](admin-panel-audit.md) — AWS-Native section removed (no backend); URL routing via useSearchParams; AdminShellDebug overlay (Ctrl+Shift+D)
 - [Admin panel silent-failure fixes](admin-panel-silent-failures.md) — 4 silent-blank bugs fixed: dashboard skeleton on first load, conversations error banner, logs table loading row, chapters loading spinner
+- [Admin dashboard D1 load contracts](admin-dashboard-d1-load-contracts.md) — Distinguish initial D1-backed fetches from optional manual checks; test manual actions through UI
 - [Staff E2E audit](staff-e2e-audit.md) — notes_en→public API pipeline fix; ChapterPage JSX rebase bug; AdminContentEditor subjects unwrap; syrabit_prod DB name; bcrypt .digest() vs .hexdigest()
 - [Syrabit chat 10/10 fixes](syrabit-chat-10-10.md) — source_ctx key mismatch, load_last_source_ctx, PRIOR CONTEXT preamble, subject name lookup, syllabus embed gate
 - [Syrabit /library LCP fix](syrabit-library-lcp-fix.md) — PSI 82→89; VirtualGrid renders 0 SSR cards (split-render fix); __SSR_QUERIES__ seed; hydration-stable ranking; remaining 89→95+ gap

@@ -5,7 +5,6 @@ import AdminQuickLinks from '../AdminQuickLinks';
 import AdminDraftServedSubjects from '../AdminDraftServedSubjects';
 import AlertReasonsRow from '../AlertReasonsRow';
 import BotCachePanel from '../BotCachePanel';
-import CacheHitRatioPanel from '../CacheHitRatioPanel';
 import R2ColdStoragePanel from '../R2ColdStoragePanel';
 import AudioTrimPreview from '../AudioTrimPreview';
 import CloudflareAnalyticsBanner from '../analytics/CloudflareAnalyticsBanner';
@@ -258,8 +257,8 @@ export default function SeoWidget(props) {
         )}
 
         {!seoLive && !seoLiveError && (
-          <div className="flex items-center gap-2 text-xs text-gray-400 py-3">
-            <Loader2 size={14} className="animate-spin" /> Loading sitemap probes…
+          <div className="flex items-center gap-2 text-xs text-gray-400 py-3" data-testid="seo-live-empty-state">
+            No sitemap probe results yet. Run a probe to check the sitemaps.
           </div>
         )}
 
@@ -1061,6 +1060,86 @@ export default function SeoWidget(props) {
       )}
 
       <SectionErrorBoundary name="Alert History">
+      {!alertHistory && notifPrefs && (
+        <SectionErrorBoundary name="Notification Preferences">
+          <GlassCard className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Bell size={14} className="text-violet-500" />
+                <h3 className="text-gray-600 font-semibold text-sm">Notification Preferences</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {onNavigate && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('botsecurity', { panel: 'alert-settings' })}
+                    className="text-[10px] px-2.5 py-1 rounded-md bg-white text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors font-medium"
+                  >
+                    Alert settings
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setNotifPrefsOpen(open => !open)}
+                  className="text-[10px] px-2.5 py-1 rounded-md bg-gray-50 text-gray-600 border border-gray-200 hover:bg-violet-50 hover:text-violet-600 transition-colors font-medium"
+                  data-testid="notif-prefs-toggle"
+                >
+                  {notifPrefsOpen ? 'Close preferences' : 'Preferences'}
+                </button>
+              </div>
+            </div>
+            {notifPrefsOpen && (
+              <div className="space-y-3" data-testid="notification-preferences-panel">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-gray-700">Alert sounds</p>
+                    <p className="text-[10px] text-gray-400">Play a sound for new alerts</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-label="Alert sounds"
+                    aria-checked={!!alertSoundEnabled}
+                    disabled={notifPrefsSaving}
+                    onClick={toggleAlertSound}
+                    className="text-[10px] px-2.5 py-1 rounded-md border border-gray-200 disabled:opacity-50"
+                  >
+                    {alertSoundEnabled ? 'On' : 'Off'}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-gray-700">Browser push</p>
+                    <p className="text-[10px] text-gray-400">
+                      {pushNotif?.isSupported ? 'Receive critical alerts in this browser' : 'Not supported in this browser'}
+                    </p>
+                  </div>
+                  {pushNotif?.isSupported && (
+                    <button
+                      type="button"
+                      disabled={notifPrefsSaving || pushNotif.loading}
+                      onClick={async () => {
+                        if (notifPrefs?.push_enabled && pushNotif?.subscribed) {
+                          await pushNotif.unsubscribe();
+                          await saveNotifPrefs({ push_enabled: false });
+                          return;
+                        }
+                        const subscribed = await pushNotif.subscribe();
+                        if (subscribed !== false) await saveNotifPrefs({ push_enabled: true });
+                      }}
+                      className="text-[10px] px-2.5 py-1 rounded-md border border-gray-200 disabled:opacity-50"
+                    >
+                      {notifPrefs?.push_enabled && pushNotif?.subscribed ? 'Disable' : 'Enable'}
+                    </button>
+                  )}
+                </div>
+                {notifPrefsSaving && <p className="text-[10px] text-violet-500">Saving preferences…</p>}
+              </div>
+            )}
+          </GlassCard>
+        </SectionErrorBoundary>
+      )}
+
       {alertHistory && (
         <GlassCard className="p-5">
           <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -1525,7 +1604,7 @@ export default function SeoWidget(props) {
                   with a colored pill (green=success, red=failure,
                   amber=in progress) and the run age so the on-call
                   admin sees red CI without leaving the app. */}
-              <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-ci-status">
+              {ciStatus && <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-ci-status">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[10px] text-gray-500 font-medium">
                     CI build status (latest on {ciStatus?.branch || 'main'})
@@ -1628,13 +1707,13 @@ export default function SeoWidget(props) {
                     )}
                   </ul>
                 )}
-              </div>
+              </div>}
 
               {/* Task #689 — Cached Gemini health probe state. Surfaces
                   the periodic probe (Task #677) result without grepping
                   logs and without spending a Vertex API call on every
                   dashboard refresh. */}
-              <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-vertex-probe">
+              {vertexProbe && <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-vertex-probe">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[10px] text-gray-500 font-medium">
                     Gemini upstream — periodic health probe
@@ -1715,9 +1794,9 @@ export default function SeoWidget(props) {
                     </div>
                   );
                 })()}
-              </div>
+              </div>}
 
-              <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-kv-health">
+              {kvHealth?.source === 'd1' && <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-kv-health">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[10px] text-gray-500 font-medium">
                     Cloudflare Workers KV — daily usage (UTC)
@@ -1856,27 +1935,19 @@ export default function SeoWidget(props) {
                     })}
                   </ul>
                 )}
-              </div>
+              </div>}
 
               {/* Task #897 — bot HTML cache rolling-hour hit rate.
                   Extracted to <BotCachePanel> so the panel logic +
                   sparkline geometry can be unit-tested without
                   rendering the whole admin dashboard. */}
-              <BotCachePanel kvHealth={kvHealth} />
-
-              {/* Task #571 — AI-input + per-layer cache hit-ratio
-                  panel. Polls /api/health/cache every 60s and shows
-                  per-content-type ratios + miss-reason ranking + L1
-                  saturation. Renders red when any content-type
-                  drops below the same floor the
-                  `cache-ai-hitratio-low` CloudWatch alarm uses. */}
-              <CacheHitRatioPanel adminToken={adminToken} />
+              {kvHealth?.source === 'd1' && <BotCachePanel kvHealth={kvHealth} />}
 
               {/* Task #315 — R2 cold-storage / Logpush watchdog snapshot
                   (Task #314 watchdog persists state to KV; this surfaces
                   it so an operator can confirm the rules are working
                   between monthly cron ticks). */}
-              <R2ColdStoragePanel
+              {r2Health?.source === 'd1' && <R2ColdStoragePanel
                 r2Health={r2Health}
                 reevaluating={r2Reevaluating}
                 resettingWatchdog={r2ResettingWatchdog}
@@ -1968,10 +2039,10 @@ export default function SeoWidget(props) {
                     setR2Reevaluating(false);
                   }
                 }}
-              />
+              />}
 
               {/* Task #474 — recent SEO summary dispatch history. */}
-              <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-seo-summary-history">
+              {seoSummaryDispatches !== null && <div className="mb-3 pb-3 border-b border-gray-200" data-testid="notif-prefs-seo-summary-history">
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-[10px] text-gray-500 font-medium">
                       Recent SEO summary email dispatches
@@ -2054,7 +2125,7 @@ export default function SeoWidget(props) {
                     })}
                   </ul>
                 )}
-              </div>
+              </div>}
 
               {/* Task #473: per-admin UTC quiet-hours window (consumed by
                   _quiet_hours_active in seo_engine.py). Either bound left

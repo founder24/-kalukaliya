@@ -13,7 +13,6 @@ import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 import { computeHeavyFreshness } from '@/utils/metricsFreshness';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { pushChannelTone } from '@/utils/pushChannelTone';
-import { TODAY_BUCKET_CAPTION, UTC_MIDNIGHT_IN_IST } from '@/utils/time';
 import axios from 'axios';
 import {
   adminGetDashboard, adminGetCfOverview, seoPipelineStatus,
@@ -52,6 +51,7 @@ export default function ActivityWidget(props) {
   } = props;
   const vs = rawVs && typeof rawVs === 'object' ? rawVs : {};
   const recentEvents = Array.isArray(rawRecentEvents) ? rawRecentEvents : [];
+  const dailyTraffic = Array.isArray(vs.daily) ? vs.daily : [];
   const quickActions = Array.isArray(rawQuickActions) ? rawQuickActions : [];
   return (
     <>
@@ -80,17 +80,17 @@ export default function ActivityWidget(props) {
       </div>
 
       <SectionErrorBoundary name="Daily Visitors">
-      {vs.daily_visitors?.length > 0 && (
+      {vs.source === 'analytics_events' && dailyTraffic.length > 0 && (
         <GlassCard className="p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-gray-500 text-sm font-semibold">Visitor Trend — Last 7 Days</h3>
-            <span className="text-xs text-gray-400">Unique visitors per day</span>
+            <h3 className="text-gray-500 text-sm font-semibold">Consented Session Trend — Last 30 Days</h3>
+            <span className="text-xs text-gray-400">Optional analytics events</span>
           </div>
           <div className="flex items-end gap-2 h-20">
-            {vs.daily_visitors.map((d, i) => {
-              const maxV = Math.max(...vs.daily_visitors.map(x => x.visitors), 1);
-              const pct = Math.max(4, (d.visitors / maxV) * 100);
-              const isToday = i === vs.daily_visitors.length - 1;
+            {dailyTraffic.map((d, i) => {
+              const maxV = Math.max(...dailyTraffic.map(x => x.sessions), 1);
+              const pct = Math.max(4, (d.sessions / maxV) * 100);
+              const isToday = i === dailyTraffic.length - 1;
               return (
                 <div key={d.date} className="flex-1 flex flex-col items-center gap-1">
                   <div
@@ -102,7 +102,7 @@ export default function ActivityWidget(props) {
                         : '#e5e7eb',
                       minHeight: 4,
                     }}
-                    title={`${d.date}: ${d.visitors} visitors, ${d.page_views} views`}
+                    title={`${d.date}: ${d.sessions} sessions, ${d.page_views} page views`}
                   />
                   <span className="text-[10px] text-gray-400 whitespace-nowrap">
                     {d.date.slice(5)}
@@ -112,9 +112,9 @@ export default function ActivityWidget(props) {
             })}
           </div>
           <div className="flex gap-4 mt-3">
-            {vs.daily_visitors.slice(-1).map(d => (
-              <div key="today-summary" className="flex gap-4 text-xs text-gray-400" title={TODAY_BUCKET_CAPTION}>
-                <span>Today (UTC, {UTC_MIDNIGHT_IN_IST}–now): <span className="text-violet-600 font-medium">{d.visitors} visitors</span></span>
+            {dailyTraffic.slice(-1).map(d => (
+              <div key="latest-summary" className="flex gap-4 text-xs text-gray-400">
+                <span>Latest day (UTC): <span className="text-violet-600 font-medium">{d.sessions} sessions</span></span>
                 <span>·</span>
                 <span><span className="text-gray-600 font-medium">{d.page_views}</span> page views</span>
               </div>
@@ -125,6 +125,7 @@ export default function ActivityWidget(props) {
       </SectionErrorBoundary>
 
       <SectionErrorBoundary name="Recent Activity">
+      {Array.isArray(data?.recent_events) && (
       <GlassCard className="p-5" data-testid="recent-activity">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -156,6 +157,7 @@ export default function ActivityWidget(props) {
           </div>
         )}
       </GlassCard>
+      )}
       </SectionErrorBoundary>
 
       <SectionErrorBoundary name="Draft-Served Subjects">

@@ -12,8 +12,8 @@
  *   4. Build system prompt (curriculum context + memory + history)
  *   5. Emit source_card SSE event before LLM tokens
  *   6. Stream via Workers AI (primary: low-latency Llama 8B, fallback: Qwen 30B)
- *   7. Emit syrabit_done event (latency, model, route_trace, credits)
- *   8. waitUntil: persist user+assistant messages to D1 and update stats
+ *   7. Persist the completed answer and claim, then emit syrabit_done
+ *   8. Keep the stream task alive through final analytics and writer closure
  */
 
 import { Hono } from 'hono';
@@ -60,6 +60,7 @@ const CHAT_REQUESTS_PER_MINUTE = CHAT_RPM_LIMIT;
 // The active request signal handles immediate Stop. Keep durable tombstone
 // polling as a bounded fallback instead of awaiting D1 once per streamed delta.
 const CHAT_CANCEL_TOMBSTONE_POLL_MS = 500;
+const CHAT_CANCEL_TOMBSTONE_MAX_POLLS = 24;
 
 // Keep prompts small enough for fast prefill while retaining a useful slice of
 // curriculum content. Chapter-scoped turns bypass semantic retrieval below, so
@@ -187,6 +188,8 @@ interface CurriculumScope {
   boardName?: string;
   explicit: boolean;
   unresolved: boolean;
+  unsupportedClass?: boolean;
+  pageConflict?: boolean;
 }
 
 interface CurriculumScopeRow {
@@ -204,19 +207,38 @@ function normalizedScopeText(value: string): string {
   return ` ${value.toLowerCase().normalize('NFKC').replace(/[^a-z0-9\u0980-\u09ff]+/gu, ' ').trim()} `;
 }
 
+type DetectedCurriculumClass =
+  | '11'
+  | '12'
+  | 'semester-1'
+  | 'semester-3'
+  | 'semester-5'
+  | 'unsupported'
+  | null;
+
 /** Extract only explicit class references; never infer a class from the topic. */
-export function detectCurriculumClass(message: string): '11' | '12' | 'semester-1' | 'semester-3' | 'semester-5' | null {
+export function detectCurriculumClass(message: string): DetectedCurriculumClass {
   const text = normalizedScopeText(message);
   if (/\b(?:class\s*11|class\s*xi|hs\s*1(?:st)?\s*year|higher\s*secondary\s*1(?:st)?\s*year)\b/.test(text)) return '11';
   if (/\b(?:class\s*12|class\s*xii|hs\s*2(?:nd)?\s*year|higher\s*secondary\s*2(?:nd)?\s*year)\b/.test(text)) return '12';
   if (/\b(?:1st|first)\s*semester\b/.test(text)) return 'semester-1';
   if (/\b(?:3rd|third)\s*semester\b/.test(text)) return 'semester-3';
   if (/\b(?:5th|fifth)\s*semester\b/.test(text)) return 'semester-5';
+  const schoolClass = /\b(?:class|grade|standard|std)\s*(\d{1,2}|[ivxlcdm]+)\b/.exec(text)?.[1];
+  if (schoolClass) {
+    const normalizedClass = ({ xi: '11', xii: '12' } as Record<string, string>)[schoolClass]
+      ?? schoolClass;
+    if (normalizedClass === '11' || normalizedClass === '12') {
+      return normalizedClass;
+    }
+    return 'unsupported';
+  }
   return null;
 }
 
-function classMatches(row: CurriculumScopeRow, detected: ReturnType<typeof detectCurriculumClass>): boolean {
+function classMatches(row: CurriculumScopeRow, detected: DetectedCurriculumClass): boolean {
   if (!detected) return true;
+  if (detected === 'unsupported') return false;
   const text = normalizedScopeText([row.class_name, row.class_level, row.class_slug].filter(Boolean).join(' '));
   if (detected === '11') return /\b(?:11|xi|hs\s*1|1st\s*year)\b/.test(text);
   if (detected === '12') return /\b(?:12|xii|hs\s*2|2nd\s*year)\b/.test(text);
@@ -229,21 +251,34 @@ function phraseAppears(text: string, phrase: string): boolean {
   return normalizedPhrase.length >= 3 && text.includes(` ${normalizedPhrase} `);
 }
 
+function curriculumSubjectText(message: string): string {
+  return message
+    .replace(/\b(?:assam\s+)?higher\s+secondary\s+education\s+council\b/gi, ' ')
+    .replace(
+      /\b(?:in|answer in|reply in|respond in|write in|use)\s+(?:english|assamese)\b/gi,
+      ' ',
+    );
+}
+
 function hasExplicitSubjectWording(message: string): boolean {
-  return /\b(?:physics|chemistry|biology|mathematics|maths?|english|assamese|economics|accountancy|education|history|geography|sociology|psychology|philosophy|computer\s+science|political\s+science|business\s+studies)\b/i.test(message);
+  const curriculumText = curriculumSubjectText(message);
+  return /\b(?:physics|chemistry|biology|mathematics|maths?|english|assamese|economics|accountancy|education|history|geography|sociology|psychology|philosophy|computer\s+science|political\s+science|business\s+studies)\b/i.test(curriculumText);
 }
 
 /**
  * Resolve explicit curriculum wording against D1. An ambiguous or conflicting
  * request fails closed instead of broadening semantic search across catalogues.
  */
-async function resolveCurriculumScope(
+export async function resolveCurriculumScope(
   d1: D1Database,
   message: string,
   bodySubjectId?: string,
 ): Promise<CurriculumScope> {
-  const messageText = normalizedScopeText(message);
+  const messageText = normalizedScopeText(curriculumSubjectText(message));
   const detectedClass = detectCurriculumClass(message);
+  if (detectedClass === 'unsupported') {
+    return { explicit: true, unresolved: true, unsupportedClass: true };
+  }
   const rowsResult = await d1.prepare(`
     SELECT subjects.id AS subject_id, subjects.name AS subject_name,
            subjects.slug AS subject_slug, classes.name AS class_name,
@@ -264,19 +299,32 @@ async function resolveCurriculumScope(
     || phraseAppears(messageText, row.subject_slug.replace(/-/g, ' ')),
   );
   const explicitSubject = named.length > 0;
+  const explicitSubjectWording = hasExplicitSubjectWording(message);
   let candidates = explicitSubject ? named : rows;
   if (detectedClass) candidates = candidates.filter(row => classMatches(row, detectedClass));
 
   // A page-provided subject remains useful when the question does not name a
-  // different subject, but explicit wording always wins.
-  if (!explicitSubject && bodySubjectId) {
+  // different subject. If the named subject matches that page, use it to
+  // disambiguate same-named subjects across classes; otherwise explicit
+  // wording wins over page context.
+  if (explicitSubject && bodySubjectId && !named.some(row => row.subject_id === bodySubjectId)) {
+    return { explicit: true, unresolved: true, pageConflict: true };
+  }
+  if (explicitSubject && bodySubjectId && named.some(row => row.subject_id === bodySubjectId)) {
+    candidates = candidates.filter(row => row.subject_id === bodySubjectId);
+  } else if (!explicitSubject && explicitSubjectWording && bodySubjectId) {
+    return { explicit: true, unresolved: true, pageConflict: true };
+  } else if (!explicitSubject && bodySubjectId) {
     candidates = candidates.filter(row => row.subject_id === bodySubjectId);
   }
 
-  const explicit = Boolean(detectedClass || explicitSubject);
+  const explicit = Boolean(detectedClass || explicitSubjectWording || explicitSubject);
   const unique = [...new Map(candidates.map(row => [row.subject_id, row])).values()];
   if (unique.length !== 1) {
-    return { explicit, unresolved: explicit };
+    const classScopeMustResolve = detectedClass !== null;
+    const pageSubjectMustResolve = Boolean(bodySubjectId && explicitSubject);
+    const unresolved = classScopeMustResolve || pageSubjectMustResolve;
+    return { explicit: unresolved, unresolved };
   }
   const row = unique[0]!;
   return {
@@ -466,14 +514,17 @@ export function hasAssameseProseLeakage(text: string): boolean {
     || /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|কিন্তু|তবে|তাই|কারণ|যদি|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/u.test(text);
 }
 
+function countBengaliDialectMarkers(text: string): number {
+  return (text.match(
+    /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|তবে|তাই|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/gu,
+  ) ?? []).length;
+}
+
 export function isReliableAssameseAnswer(text: string): boolean {
   // U+0964/U+0965 danda punctuation is also standard in Assamese; reject
   // Devanagari letters/marks, not punctuation or digits.
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
-  const bengaliMarkers = text.match(
-    /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|তবে|তাই|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/gu,
-  ) ?? [];
-  if (bengaliMarkers.length >= 2) return false;
+  if (countBengaliDialectMarkers(text) >= 2) return false;
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (/^(?:হয়|নাই|ভাল|ঠিক আছে|অৱশ্যই|নহয়)[।.!]?$/u.test(normalized)) return true;
   // Assamese and Bengali share most of the Unicode block. Require affirmative
@@ -497,6 +548,7 @@ export function isReliableAssameseAnswer(text: string): boolean {
  */
 export function isUsableAssameseAnswer(text: string): boolean {
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
+  if (countBengaliDialectMarkers(text) >= 2) return false;
   const scriptChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
   const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
   const letterCount = scriptChars + latinChars;
@@ -782,9 +834,9 @@ async function completeChatRequestClaim(
   sessionId: string,
   responseContent: string,
   responseMetadata: unknown,
-): Promise<void> {
-  if (!requestId) return;
-  await d1.prepare(`
+): Promise<boolean> {
+  if (!requestId) return true;
+  const result = await d1.prepare(`
     UPDATE chat_request_claims
     SET status = 'completed',
         session_id = ?,
@@ -798,6 +850,7 @@ async function completeChatRequestClaim(
     requestId,
     userId,
   ).run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 async function deleteChatRequestClaim(
@@ -1271,8 +1324,9 @@ export async function fetchChapterContent(
 export function shouldResolveCurriculumScopeForChat(
   directChapterId: string | undefined,
   authoritativeIntent: AuthoritativeIntent,
+  explicitScope = false,
 ): boolean {
-  return !directChapterId || authoritativeIntent !== null;
+  return explicitScope || !directChapterId || authoritativeIntent !== null;
 }
 
 export function shouldStartWebSearchForChat(
@@ -1408,6 +1462,18 @@ export async function fetchMatchedChunkContext(
     remaining -= content.length;
   }
   return result;
+}
+
+/** Try ranked chapters in order until one has validated published evidence. */
+export async function firstUsableContext<TCandidate, TContext>(
+  candidates: readonly TCandidate[],
+  loadContext: (candidate: TCandidate) => Promise<TContext[]>,
+): Promise<{ candidate: TCandidate; context: TContext[] } | null> {
+  for (const candidate of candidates) {
+    const context = await loadContext(candidate);
+    if (context.length > 0) return { candidate, context };
+  }
+  return null;
 }
 
 /**
@@ -1806,7 +1872,7 @@ export async function persistCompletedChat(
     chapterId?: string | undefined;
     subjectId?: string | undefined;
   },
-): Promise<void> {
+): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + 90 * 24 * 3600; // 90-day TTL (cleaned by cron)
 
@@ -1909,7 +1975,9 @@ export async function persistCompletedChat(
       uid,
     ));
   }
-  await d1.batch(statements);
+  const results = await d1.batch(statements);
+  if (!opts.requestId) return true;
+  return (results[results.length - 1]?.meta.changes ?? 0) > 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2115,7 +2183,7 @@ chatRouter.post('/stream', async (c) => {
   // Free authenticated requests need a claim even when older clients omit the
   // stable request key. This gives cancellation and failure cleanup a period-
   // bound reservation record without changing retry semantics for those clients.
-  const claimRequestId = clientRequestId
+  let claimRequestId = clientRequestId
     ?? (monthlyReservation ? `monthly-${crypto.randomUUID()}` : null);
   try {
     const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
@@ -2167,6 +2235,12 @@ chatRouter.post('/stream', async (c) => {
           await reserveAnonQuota(c.env.DB, c.env.RATE_LIMIT_KV, userId, reservationPeriod));
       }
       ownsQuotaReservation = quotaAllowed && userRole !== 'admin' && userRole !== 'staff';
+    }
+
+    // D1-backed reservations need a claim key even for legacy clients without
+    // client_request_id. The claim makes cleanup retries idempotent.
+    if (quotaAllowed && ownsQuotaReservation && !claimRequestId) {
+      claimRequestId = `quota-${crypto.randomUUID()}`;
     }
 
     if (quotaAllowed && claimRequestId) {
@@ -2288,12 +2362,30 @@ chatRouter.post('/stream', async (c) => {
   }
   timings.quota_ms = Date.now() - quotaStart;
 
-  // Helper to release a reserved quota slot on failure paths.
-  const releaseQuota = async (): Promise<void> => {
+  // Claim-scoped cleanup is idempotent, so one bounded retry is safe even if
+  // D1 committed the batch but the caller observed a transient failure.
+  let quotaReleaseAttempts = 0;
+  const releaseQuota = async (failureStage = 'chat_failure'): Promise<void> => {
     if (ownsQuotaReservation || ownsMonthlyQuotaReservation) {
-      await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon);
-      ownsQuotaReservation = false;
-      ownsMonthlyQuotaReservation = false;
+      const maxAttempts = claimRequestId ? 2 : 1;
+      quotaReleaseAttempts = 0;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        quotaReleaseAttempts = attempt;
+        try {
+          await releaseClaimQuotaReservation(c.env.DB, claimRequestId, userId, isAnon);
+          ownsQuotaReservation = false;
+          ownsMonthlyQuotaReservation = false;
+          return;
+        } catch (error) {
+          if (attempt === maxAttempts) throw error;
+          console.warn('[chat] quota release retry', {
+            failure_stage: failureStage,
+            attempt,
+            error_class: sanitizedChatErrorClass(error),
+          });
+          await new Promise<void>((resolve) => setTimeout(resolve, 50 * attempt));
+        }
+      }
     }
   };
 
@@ -2319,6 +2411,9 @@ chatRouter.post('/stream', async (c) => {
   // available. Semantic retrieval remains the fallback for stale/missing IDs.
   const directChapterId = body.chapter_id?.trim() || undefined;
   const authoritativeIntent = detectAuthoritativeIntent(message);
+  const explicitScopeInMessage = Boolean(
+    detectCurriculumClass(message) || hasExplicitSubjectWording(message),
+  );
   const requestedWebIntent = shouldUseWebSearch({
     question: message,
     chapterId: directChapterId,
@@ -2338,7 +2433,11 @@ chatRouter.post('/stream', async (c) => {
     : Promise.resolve(skippedWebSearch());
 
   let curriculumScope: CurriculumScope;
-  if (!shouldResolveCurriculumScopeForChat(directChapterId, authoritativeIntent)) {
+  if (!shouldResolveCurriculumScopeForChat(
+    directChapterId,
+    authoritativeIntent,
+    explicitScopeInMessage,
+  )) {
     // The chapter lookup below verifies this exact published chapter. Reuse
     // page-provided scope metadata instead of scanning the hierarchy first.
     curriculumScope = {
@@ -2358,19 +2457,52 @@ chatRouter.post('/stream', async (c) => {
       });
       curriculumScope = {
         ...(body.subject_id && { subjectId: body.subject_id }),
-        explicit: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
-        unresolved: Boolean(detectCurriculumClass(message) || hasExplicitSubjectWording(message)),
+        explicit: explicitScopeInMessage,
+        unresolved: explicitScopeInMessage,
+        ...(detectCurriculumClass(message) === 'unsupported' && { unsupportedClass: true }),
       };
     }
+  }
+  if (
+    directChapterId
+    && curriculumScope.explicit
+    && !curriculumScope.unresolved
+    && (
+      (
+        curriculumScope.subjectId
+        && body.subject_id
+        && curriculumScope.subjectId !== body.subject_id
+      )
+      || (
+        hasExplicitSubjectWording(message)
+        && !curriculumScope.subjectId
+        && !body.subject_id
+      )
+    )
+  ) {
+    // If the page omits its subject metadata, do not let an unresolved explicit
+    // subject fall through to the chapter's broad content path.
+    curriculumScope = { ...curriculumScope, unresolved: true, pageConflict: true };
   }
   const scopedSubjectId = curriculumScope.unresolved
     ? undefined
     : (curriculumScope.subjectId ?? body.subject_id);
-  if (curriculumScope.unresolved) {
-    await releaseQuota().catch(() => {});
+  if (
+    curriculumScope.unresolved
+    && !(curriculumScope.unsupportedClass && explicitWebIntent && !directChapterId)
+  ) {
+    await releaseQuota('curriculum_scope').catch((error) => console.error('[chat] quota release failed', {
+      failure_stage: 'curriculum_scope',
+      attempts: quotaReleaseAttempts,
+      error_class: sanitizedChatErrorClass(error),
+    }));
     c.header('X-Failure-Stage', 'curriculum_scope');
     return c.json({
-      detail: 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
+      detail: curriculumScope.pageConflict
+        ? 'I could not verify the subject in your question against the selected chapter. Switch to a matching chapter or remove the conflicting subject.'
+        : curriculumScope.unsupportedClass
+          ? 'I could not match that class to a published curriculum. Please check the class or share the relevant chapter text.'
+          : 'I could not identify one matching curriculum. Please include both your class and subject, for example “Class 11 Physics”.',
       error_code: 'curriculum_scope_ambiguous',
       request_id: serverRequestId,
       failure_stage: 'curriculum_scope',
@@ -2405,7 +2537,11 @@ chatRouter.post('/stream', async (c) => {
       // general knowledge. Explicit current-information requests continue
       // through the verified-web path below.
       if (contextChunks.length === 0 && !requestedWebIntent) {
-        await releaseQuota().catch(() => {});
+        await releaseQuota('authoritative_retrieval').catch((error) => console.error('[chat] quota release failed', {
+          failure_stage: 'authoritative_retrieval',
+          attempts: quotaReleaseAttempts,
+          error_class: sanitizedChatErrorClass(error),
+        }));
         c.header('X-Failure-Stage', 'authoritative_retrieval');
         const detail = authoritativeIntent === 'pyq'
           ? lang === 'as'
@@ -2424,7 +2560,11 @@ chatRouter.post('/stream', async (c) => {
     } catch (error) {
       // This occurs before SSE headers/body are committed, so keep it a typed
       // HTTP error clients can safely retry instead of a misleading stream.
-      await releaseQuota().catch(() => {});
+      await releaseQuota('authoritative_retrieval').catch((releaseError) => console.error('[chat] quota release failed', {
+        failure_stage: 'authoritative_retrieval',
+        attempts: quotaReleaseAttempts,
+        error_class: sanitizedChatErrorClass(releaseError),
+      }));
       c.header('X-Failure-Stage', 'authoritative_retrieval');
       return c.json({
         detail: 'Authoritative curriculum records are temporarily unavailable. Please try again.',
@@ -2545,15 +2685,7 @@ chatRouter.post('/stream', async (c) => {
         matches = await queryVectorize(c.env.VECTORIZE, embedding, 'en', extraFilters);
       }
 
-      // noUncheckedIndexedAccess: array[0] is T | undefined; guard before access
-      const firstMatch = matches[0];
-      if (firstMatch !== undefined && matches.length > 0) {
-        topScore = firstMatch.score;
-
-        // Confidence tier assignment
-        if (topScore >= CONFIDENCE_HIGH)     confidenceTier = 'high';
-        else if (topScore >= CONFIDENCE_LOW) confidenceTier = 'low';
-
+      if (matches.length > 0) {
         // Group by chapterId and pick the chapter with the highest max score
         const byChapter = new Map<string, { score: number; meta: ChunkMeta }>();
         for (const m of matches) {
@@ -2567,31 +2699,33 @@ chatRouter.post('/stream', async (c) => {
         }
 
         const sorted = [...byChapter.entries()].sort((a, b) => b[1].score - a[1].score);
-        // noUncheckedIndexedAccess: sorted[0] is [...] | undefined; guard with at()
-        const topEntry = sorted.at(0);
-        if (topEntry !== undefined) {
-          const [bestId, best] = topEntry;
-          topChapterId = bestId;
-          topSubjectId = best.meta.subjectId;
-
-          const matchedChunks = await fetchMatchedChunkContext(
+        const usable = await firstUsableContext(
+          sorted,
+          ([candidateId]) => fetchMatchedChunkContext(
             c.env.DB,
             matches,
-            bestId,
+            candidateId,
             lang,
             scopedSubjectId,
             requestedSourceType ?? undefined,
-          );
-          if (matchedChunks.length > 0) {
-            topChapterTitle = matchedChunks[0]?.chapterTitle ?? best.meta.chapterTitle ?? bestId;
-            contextChunks = matchedChunks.map(chunk => ({
-              ...chunk,
-              sourceType: lang === 'as' && retrievalLang === 'en'
-                ? 'rag_chunk_english_fallback'
-                : chunk.sourceType,
-            }));
-            ragPath = 'vectorize_d1';
-          }
+          ),
+        );
+        if (usable) {
+          const [bestId, best] = usable.candidate;
+          const matchedChunks = usable.context;
+          topChapterId = bestId;
+          topScore = best.score;
+          if (topScore >= CONFIDENCE_HIGH) confidenceTier = 'high';
+          else if (topScore >= CONFIDENCE_LOW) confidenceTier = 'low';
+          topSubjectId = matchedChunks[0]?.subjectId ?? best.meta.subjectId;
+          topChapterTitle = matchedChunks[0]?.chapterTitle ?? best.meta.chapterTitle ?? bestId;
+          contextChunks = matchedChunks.map(chunk => ({
+            ...chunk,
+            sourceType: lang === 'as' && retrievalLang === 'en'
+              ? 'rag_chunk_english_fallback'
+              : chunk.sourceType,
+          }));
+          ragPath = 'vectorize_d1';
         }
       }
     } catch (err) {
@@ -2869,6 +3003,68 @@ chatRouter.post('/stream', async (c) => {
         error_class: sanitizedChatErrorClass(error),
       }));
     };
+    let cancellationCheckInFlight: Promise<boolean> | null = null;
+    const pollCancellationTombstone = async (): Promise<boolean> => {
+      // A monitor tick and a just-arrived token can coincide. Share one D1
+      // read rather than issuing concurrent or per-token cancellation queries.
+      if (cancellationCheckInFlight) return cancellationCheckInFlight;
+      const now = Date.now();
+      if (!shouldPollChatCancellation(now, lastStreamCancellationCheckAt)) return false;
+      lastStreamCancellationCheckAt = now;
+      const check = isChatRequestCancelled(c.env.DB, clientRequestId, userId);
+      cancellationCheckInFlight = check;
+      try {
+        return await check;
+      } finally {
+        if (cancellationCheckInFlight === check) cancellationCheckInFlight = null;
+      }
+    };
+    const startCancellationMonitor = (): (() => Promise<void>) => {
+      if (!clientRequestId) return async () => {};
+      const monitorController = new AbortController();
+      let pollCount = 0;
+      let failureLogged = false;
+      const delay = (): Promise<void> => new Promise((resolve) => {
+        let timer: ReturnType<typeof setTimeout>;
+        const finish = () => {
+          clearTimeout(timer);
+          monitorController.signal.removeEventListener('abort', finish);
+          resolve();
+        };
+        timer = setTimeout(finish, CHAT_CANCEL_TOMBSTONE_POLL_MS);
+        monitorController.signal.addEventListener('abort', finish, { once: true });
+      });
+      const task = (async () => {
+        while (
+          !monitorController.signal.aborted
+          && pollCount < CHAT_CANCEL_TOMBSTONE_MAX_POLLS
+        ) {
+          await delay();
+          if (monitorController.signal.aborted) return;
+          pollCount++;
+          try {
+            if (await pollCancellationTombstone()) {
+              abortGeneration(
+                new DOMException('Chat request cancelled', 'AbortError'),
+                'cancellation_tombstone',
+              );
+              return;
+            }
+          } catch (error) {
+            if (!failureLogged) {
+              console.warn('[chat] cancellation tombstone monitor failed', {
+                error_class: sanitizedChatErrorClass(error),
+              });
+              failureLogged = true;
+            }
+          }
+        }
+      })();
+      return async () => {
+        monitorController.abort();
+        await task;
+      };
+    };
 
     try {
       if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
@@ -2883,6 +3079,10 @@ chatRouter.post('/stream', async (c) => {
       if (verifiedWebEvidenceUnavailable) {
         timings.total_ms = Date.now() - startTime;
         streamFailureStage = 'terminal_sse';
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          attempts: quotaReleaseAttempts,
+          error_class: sanitizedChatErrorClass(e),
+        }));
         await write({
           ...terminalChatErrorEvent(
             lang === 'as'
@@ -2896,9 +3096,6 @@ chatRouter.post('/stream', async (c) => {
           error_kind: 'web_evidence_unavailable',
         });
         await recordAnalytics('chat_failure', 'web_evidence');
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-          error_class: sanitizedChatErrorClass(e),
-        }));
         return;
       }
 
@@ -2908,6 +3105,7 @@ chatRouter.post('/stream', async (c) => {
       let streamDone = false;
       let generationStartedAt: number | undefined;
 
+      const stopCancellationMonitor = startCancellationMonitor();
       try {
         streamFailureStage = 'provider_stream';
         generationStartedAt = Date.now();
@@ -2933,13 +3131,12 @@ chatRouter.post('/stream', async (c) => {
             maxTokens: CHAT_MAX_OUTPUT_TOKENS,
             signal: generationAbortController.signal,
           })) {
-            const now = Date.now();
-            if (shouldPollChatCancellation(now, lastStreamCancellationCheckAt)) {
-              lastStreamCancellationCheckAt = now;
-              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
-                reportTombstoneCancellation('provider_stream');
-                return;
-              }
+            if (await pollCancellationTombstone()) {
+              abortGeneration(
+                new DOMException('Chat request cancelled', 'AbortError'),
+                'cancellation_tombstone',
+              );
+              throw generationAbortController.signal.reason;
             }
             // Sentinel chunk carries the resolved model name — do not forward to client
             if (chunk.startsWith('\x00model:')) {
@@ -2964,12 +3161,18 @@ chatRouter.post('/stream', async (c) => {
           timings.generation_ms = Date.now() - generationStartedAt;
         }
         throw streamErr;
+      } finally {
+        await stopCancellationMonitor();
       }
 
       if (!streamDone || !fullResponse) {
         // Provider returned an empty response — release the reserved slot
         timings.total_ms = Date.now() - startTime;
         streamFailureStage = 'terminal_sse';
+        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          attempts: quotaReleaseAttempts,
+          error_class: sanitizedChatErrorClass(e),
+        }));
         await write(terminalChatErrorEvent(
           'Empty response from AI. Please try again.',
           'provider_empty_response',
@@ -2978,9 +3181,6 @@ chatRouter.post('/stream', async (c) => {
           timings,
         ));
         await recordAnalytics('chat_failure', 'provider_stream');
-        await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-          error_class: sanitizedChatErrorClass(e),
-        }));
         return;
       }
 
@@ -3009,6 +3209,11 @@ chatRouter.post('/stream', async (c) => {
               fullResponse = repairedText;
               actualModel = repaired.model;
               assameseProseLeakage = false;
+            } else if (isUsableAssameseAnswer(repairedText)) {
+              // Do not strand the student when dialect detection is uncertain.
+              // The broad fallback still rejects clear Bengali marker clusters.
+              fullResponse = repairedText;
+              actualModel = repaired.model;
             }
           } catch (repairError) {
             if (generationAbortController.signal.aborted) throw repairError;
@@ -3019,6 +3224,10 @@ chatRouter.post('/stream', async (c) => {
           if (!isDeliverableAssameseAnswer(fullResponse)) {
             timings.total_ms = Date.now() - startTime;
             streamFailureStage = 'terminal_sse';
+            await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+              attempts: quotaReleaseAttempts,
+              error_class: sanitizedChatErrorClass(e),
+            }));
             await write({
               ...terminalChatErrorEvent(
                 'অসমীয়া উত্তৰৰ ভাষাৰ মান নিশ্চিত কৰিব পৰা নগ’ল। অনুগ্ৰহ কৰি পুনৰ চেষ্টা কৰক।',
@@ -3030,9 +3239,6 @@ chatRouter.post('/stream', async (c) => {
               error_kind: 'assamese_unavailable',
             });
             await recordAnalytics('chat_failure', 'language_validation');
-            await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-              error_class: sanitizedChatErrorClass(e),
-            }));
             return;
           }
         }
@@ -3081,19 +3287,20 @@ chatRouter.post('/stream', async (c) => {
         request_id: serverRequestId,
         assamese_prose_leakage: lang === 'as' ? assameseProseLeakage : false,
       };
-      await write(doneEvent);
-      await recordAnalytics('chat_completion');
 
-      // ── Fire-and-forget: persist chat + update user stats ────────────────
+      // ── Persist chat + settle the request claim before success ───────────
       // quota_usage was already incremented atomically in reserveAuthQuota /
-      // reserveAnonQuota before streaming — do not increment again here.
+      // reserveAnonQuota before streaming — do not increment again here. The
+      // persistence batch and cancellation endpoint both condition their
+      // transition on status='reserved', so exactly one can win the race.
       streamFailureStage = 'persistence';
+      let claimCompleted = false;
       try {
         if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
           reportTombstoneCancellation('persistence');
           return;
         }
-        await persistCompletedChat(c.env.DB, {
+        claimCompleted = await persistCompletedChat(c.env.DB, {
           userId,
           sessionId:         effectiveSessionId,
           userMessage:       message,
@@ -3116,7 +3323,7 @@ chatRouter.post('/stream', async (c) => {
         // If the transactional history batch failed for a row-specific reason,
         // preserve replay safety with a minimal completion marker. A total D1
         // outage may still reject this, but no partial batch state is committed.
-        await completeChatRequestClaim(
+        claimCompleted = await completeChatRequestClaim(
           c.env.DB,
           clientRequestId,
           userId,
@@ -3127,8 +3334,29 @@ chatRouter.post('/stream', async (c) => {
           console.error('[chat] idempotency completion marker failed', {
             error_class: sanitizedChatErrorClass(completionError),
           });
+          return false;
         });
+        if (!claimCompleted) {
+          if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId).catch(() => false)) {
+            reportTombstoneCancellation('persistence');
+            return;
+          }
+          throw error;
+        }
       }
+      if (!claimCompleted) {
+        if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId).catch(() => false)) {
+          reportTombstoneCancellation('persistence');
+        }
+        return;
+      }
+
+      await recordAnalytics('chat_completion');
+
+      // This Worker event is the client-visible terminal success signal. Emit
+      // it only after persistence and the reserved-claim transition have won.
+      streamFailureStage = 'terminal_sse';
+      await write(doneEvent);
 
     } catch (err) {
       if (generationAbortController.signal.aborted) {
@@ -3138,12 +3366,17 @@ chatRouter.post('/stream', async (c) => {
           streamAbortSource ?? 'response_stream',
         );
         await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+          attempts: quotaReleaseAttempts,
           error_class: sanitizedChatErrorClass(e),
         }));
         return;
       }
       const failedAtStage = streamFailureStage;
       timings.total_ms = Date.now() - startTime;
+      await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
+        attempts: quotaReleaseAttempts,
+        error_class: sanitizedChatErrorClass(e),
+      }));
       try {
         streamFailureStage = 'terminal_sse';
         await write(terminalChatErrorEvent(
@@ -3155,10 +3388,8 @@ chatRouter.post('/stream', async (c) => {
         ));
       } catch { /* writer may already be closed */ }
       reportStreamFailure(err, failedAtStage, null);
-      // Release the reserved slot — provider/config errors must not consume quota
-      await releaseQuota().catch((e) => console.error('[chat] quota release failed', {
-        error_class: sanitizedChatErrorClass(e),
-      }));
+      // Release the reserved slot before notifying the client so its
+      // post-error quota refresh observes the refunded count.
       await recordAnalytics('chat_failure', 'provider_stream');
     }
   })();

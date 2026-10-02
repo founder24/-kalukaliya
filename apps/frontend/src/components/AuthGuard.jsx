@@ -2,7 +2,7 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 
 export const AuthGuard = ({ children }) => {
-  const { user, authChecked } = useAuth();
+  const { user, authChecked, authVerificationError, refreshUser } = useAuth();
 
   if (!authChecked) {
     return (
@@ -27,6 +27,26 @@ export const AuthGuard = ({ children }) => {
             className="w-5 h-5 border-2 rounded-full animate-spin"
             style={{ borderColor: 'hsl(var(--primary))', borderTopColor: 'transparent' }}
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (authVerificationError && !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <div className="max-w-sm text-center" role="alert" aria-live="assertive">
+          <h1 className="text-lg font-semibold text-foreground">Couldn&apos;t verify your session</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Your saved sign-in was kept. Check your connection and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => { void refreshUser(); }}
+            className="mt-5 h-10 rounded-xl px-5 text-sm font-medium text-white bg-violet-600 hover:bg-violet-500"
+          >
+            Try again
+          </button>
         </div>
       </div>
     );
