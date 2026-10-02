@@ -48,10 +48,17 @@ Set at: Pages → syrabit → Settings → Environment Variables → Production
 - `syrabit-backend-sa@blissful-acumen-495019-t6.iam.gserviceaccount.com` — Cloud Run runtime
 - `cloudflare-edge-invoker@blissful-acumen-495019-t6.iam.gserviceaccount.com` — Edge OIDC auth (✅ has roles/run.invoker)
 
-## GitHub Secrets (for future CI/CD — no workflows yet)
+## GitHub Secrets
+- `CF_API_TOKEN` — Cloudflare deployment credential used by the release workflows
+- `CF_WORKERS_AI_TOKEN` — dedicated Workers AI API token; paired with Replit `CLOUDFLARE_WORKERS_AI_API_TOKEN`
+- `CF_ACCOUNT_ID` — Cloudflare account identifier used by workflows
 - `GCP_SA_KEY` — JSON of a SA with `roles/run.developer` for auto-deploy
-- `CLOUDFLARE_API_TOKEN` — Wrangler deploy (now also stored in Replit Secrets)
-- `CLOUDFLARE_ACCOUNT_ID` — stored in Replit env vars as "syrabit" (alias), real ID: `d66e40eac539fff1db270fddf384a5ec`
+
+Replit `CLOUDFLARE_API_TOKEN` remains separate for existing Cloudflare operations. Do not replace it or GitHub `CF_API_TOKEN` with a Workers-AI-only token.
+
+**Why:** The Workers AI token has narrower permissions than deployment and analytics credentials; keeping it separate prevents accidental CI/deployment failures.
+
+**How to apply:** Use `CLOUDFLARE_WORKERS_AI_API_TOKEN` / `CF_WORKERS_AI_TOKEN` only for direct Workers AI API calls, and preserve the existing Cloudflare deployment/analytics tokens.
 
 ## CF Pages deploy process (June 2026)
 - Git-push builds ALWAYS fail (pyproject.toml in repo root triggers `pip install .` which fails on multi-package flat layout)
