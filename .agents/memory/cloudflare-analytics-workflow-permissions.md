@@ -3,6 +3,8 @@ name: Cloudflare analytics workflow permissions
 description: Permission boundaries and diagnosis for Cloudflare analytics and WAF audits.
 ---
 
+**Event metadata:** `firewallEventsAdaptive`'s `metadata { key, value }` can expose `ruleset_version`, `version`, `score_total`, and `score_rules` even when these are not top-level fields. Map the opaque IDs in `score_rules` against the event's managed ruleset version to resolve contributing rule descriptions/actions; this still does not identify the matched request variable or value.
+
 Cloudflare GraphQL access is scoped by dataset and field. The live zone type is lowercase `zone`; `firewallEventsAdaptive` exposes `wafAttackScore`, `wafAttackScoreClass`, and separate attack-class scores, not the older `score_total` / `score_rules` names. `httpRequestsAdaptive` can retrieve an individual request by `rayName` and expose edge response status and security action/source. Signature fields such as `wafRequestSignatureCategories` and `wafRequestSignatureRefs` may appear in schema introspection but still return an authorization error under Zone Analytics Read, and can remain unavailable even with additional WAF read scopes.
 
 In this environment, adding `Account WAF:Read` enabled zone/account ruleset detail and version reads; `Account Rulesets:Read` plus `Zone WAF:Read` alone returned 403. Managed ruleset responses expose IDs, refs, descriptions, and actions, but not expressions or matched variables. The event description `949110: Inbound Anomaly Score Exceeded` identifies the managed blocking threshold, not which underlying signature contributed.
