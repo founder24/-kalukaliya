@@ -68,7 +68,11 @@ vi.mock('./chat/ModelSelector', () => ({
 }));
 
 vi.mock('./chat/MessageBubble', () => ({
-  MessageBubble: ({ msg }) => <div role="article" aria-label={`${msg.role} message`}>{msg.content}</div>,
+  MessageBubble: ({ msg, questionText }) => (
+    <div role="article" aria-label={`${msg.role} message`} data-question-text={questionText || ''}>
+      {msg.content}
+    </div>
+  ),
 }));
 
 const mockGetAnonConversation = vi.fn(() => new Promise(() => {}));
@@ -176,6 +180,8 @@ describe('ChatPage — axe accessibility audit', () => {
       render(<ChatPage />);
     });
     expect(await screen.findByText('Second answer')).toBeInTheDocument();
+    const assistantMessages = await screen.findAllByRole('article', { name: 'assistant message' });
+    expect(assistantMessages[1]).toHaveAttribute('data-question-text', 'Second question');
     await waitFor(() => {
       expect(screen.queryByTestId('chat-sponsored-ad')).not.toBeInTheDocument();
     });

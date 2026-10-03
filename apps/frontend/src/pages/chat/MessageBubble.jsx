@@ -11,7 +11,7 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 
 const MarkdownContent = lazy(() => import('./MarkdownContent').then(m => ({ default: m.MarkdownContent })));
 
-export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegenerate, onRetry, onSwitchToEnglish, isLast, messageIndex, conversationId, responseLang, subject, scopedChapters }) {
+export const MessageBubble = memo(function MessageBubble({ msg, questionText, onCopy, onRegenerate, onRetry, onSwitchToEnglish, isLast, messageIndex, conversationId, responseLang, subject, scopedChapters }) {
   const [copied, setCopied] = useState(false);
   const [reaction, setReaction] = useState(null);
   const [showComment, setShowComment] = useState(false);
@@ -447,16 +447,23 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
 
 
             {!msg.streaming && msg.content && (() => {
-              const subjectLabel = msg.rag_subject_name || msg.ctx_subject_name || null;
-              const boardLabel = msg.rag_board_name || null;
-              const classLabel = msg.rag_class_name || null;
-               const streamLabel = msg.rag_stream_name || null;
-              const topicLabel = msg.rag_topic_name || null;
-              const chapterLabel = msg.rag_chapter_name || null;
-              const chapterSlug = msg.rag_chapter_slug || null;
-              const basePath = (msg.rag_board_slug && msg.rag_class_slug && msg.rag_subject_slug)
-                ? `/${msg.rag_board_slug}/${msg.rag_class_slug}/${msg.rag_subject_slug}` : null;
-              const chapterUrl = (basePath && chapterSlug) ? `${basePath}/${chapterSlug}` : null;
+              const primarySource = (Array.isArray(msg.source_entries) ? msg.source_entries : [])
+                .find((entry) => entry && entry.kind === 'curriculum') || null;
+              const subjectLabel = primarySource?.subject_name || msg.rag_subject_name || msg.ctx_subject_name || null;
+              const boardLabel = primarySource?.board_name || msg.rag_board_name || null;
+              const classLabel = primarySource?.class_name || msg.rag_class_name || null;
+              const courseLabel = primarySource?.course_name || msg.rag_course_name || null;
+              const courseSlug = primarySource?.course_slug || msg.rag_course_slug || msg.rag_stream_slug || null;
+              const topicLabel = primarySource?.topic_name || msg.rag_topic_name || null;
+              const chapterLabel = primarySource?.title || msg.rag_chapter_name || null;
+              const chapterSlug = primarySource?.chapter_slug || msg.rag_chapter_slug || null;
+              const boardSlug = primarySource?.board_slug || msg.rag_board_slug;
+              const classSlug = primarySource?.class_slug || msg.rag_class_slug;
+              const subjectSlug = primarySource?.subject_slug || msg.rag_subject_slug;
+              const languagePrefix = responseLang === 'as' ? '/as' : '';
+              const basePath = (boardSlug && classSlug && subjectSlug)
+                ? `${languagePrefix}/${boardSlug}/${classSlug}${courseSlug ? `/${courseSlug}` : ''}/${subjectSlug}` : null;
+              const chapterUrl = primarySource?.url || ((basePath && chapterSlug) ? `${basePath}/${chapterSlug}` : null);
               const subjectUrl = chapterUrl || basePath || (msg.rag_subject_id ? `/subject/${msg.rag_subject_id}` : null);
               const isDocument = msg.rag_source === 'document';
               const isWeb = msg.rag_source === 'web';
@@ -468,7 +475,7 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               // 'web'``, which meant the most common case (library /
               // cached library answers) showed no clickable badge at all.
               const isLibrary = msg.rag_source && !isDocument && !isWeb && msg.rag_source !== 'none';
-              const hasContext = boardLabel || classLabel || subjectLabel || chapterLabel || topicLabel;
+              const hasContext = boardLabel || classLabel || courseLabel || subjectLabel || chapterLabel || topicLabel;
               // Confidence tier chip styling
               const confidenceTierLabel = msg.confidence_tier === 'high' ? 'High confidence'
                 : msg.confidence_tier === 'mid' ? 'Good match'
@@ -483,8 +490,6 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                 : null;
               const matchPct = (msg.match_score != null && msg.match_score > 0)
                 ? Math.round(msg.match_score * 100) : null;
-               const primarySource = (Array.isArray(msg.source_entries) ? msg.source_entries : [])
-                 .find((entry) => entry && entry.kind === 'curriculum') || null;
                const matchedPassage = (msg.matched_passage || primarySource?.matched_passage || msg.rag_chunk_snippet || primarySource?.snippet || '')
                  .replace(/\s+/g, ' ').trim().slice(0, 360);
                const retrievalMethod = msg.retrieval_method || primarySource?.retrieval_method || msg.rag_path || null;
@@ -493,15 +498,17 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
               const hasAnything = hasContext || isDocument;
               if (!hasAnything) return null;
               const curriculumPath = [
-                { label: 'Topic', value: topicLabel },
-                { label: 'Chapter', value: chapterLabel },
-                { label: 'Subject', value: subjectLabel },
-                { label: 'Class', value: classLabel },
-                 { label: 'Stream', value: streamLabel },
-                { label: 'Board', value: boardLabel },
-              ].filter((item) => item.value);
-               const curriculumTitle = subjectLabel || chapterLabel || topicLabel;
-               const curriculumDetails = curriculumPath.filter((item) => item.label !== 'Subject');
+                { label: 'Topic', value: topicLabel || 'Not mapped', unresolved: !topicLabel },
+                { label: 'Chapter', value: chapterLabel || 'Not mapped', unresolved: !chapterLabel },
+                { label: 'Subject', value: subjectLabel || 'Not mapped', unresolved: !subjectLabel },
+                { label: 'Course', value: courseLabel || 'Not mapped', unresolved: !courseLabel },
+                { label: 'Class', value: classLabel || 'Not mapped', unresolved: !classLabel },
+              ];
+              const curriculumTitle = subjectLabel || chapterLabel || topicLabel;
+              const curriculumDetails = curriculumPath;
+              const questionPreview = typeof questionText === 'string'
+                ? questionText.replace(/\s+/g, ' ').trim().slice(0, 180)
+                : '';
 
               const sourceMeta = isWeb
                 ? { Icon: Globe, kindLabel: 'Web Search' }
@@ -556,12 +563,21 @@ export const MessageBubble = memo(function MessageBubble({ msg, onCopy, onRegene
                             )}
                           </div>
                         </div>
+                        {questionPreview && (
+                          <div className="source-card-question mt-3 rounded-xl px-3 py-2.5" data-testid="curriculum-match-question">
+                            <div className="source-card-question-label text-[9px] font-bold uppercase tracking-[0.12em]">Question</div>
+                            <p className="mt-1 text-[11.5px] leading-relaxed text-foreground/85">“{questionPreview}”</p>
+                          </div>
+                        )}
                         {curriculumDetails.length > 0 && (
-                          <div className="mt-3 flex flex-wrap items-center gap-1.5" data-testid="curriculum-match-path">
-                            {curriculumDetails.map((item) => (
-                              <span key={item.label} className="source-card-badge inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-medium" title={`${item.label}: ${item.value}`}>
-                                <span className="source-card-badge-label">{item.label}</span>
-                                <span className="source-card-badge-value">{item.value}</span>
+                          <div className="mt-3 flex flex-wrap items-center gap-1" data-testid="curriculum-match-path">
+                            {curriculumDetails.map((item, index) => (
+                              <span key={item.label} className="inline-flex max-w-full items-center gap-1">
+                                {index > 0 && <span className="source-card-path-arrow" aria-hidden="true">→</span>}
+                                <span className={`source-card-badge inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-medium${item.unresolved ? ' source-card-badge-unresolved' : ''}`} title={`${item.label}: ${item.value}`}>
+                                  <span className="source-card-badge-label">{item.label}:</span>{' '}
+                                  <span className="source-card-badge-value">{item.value}</span>
+                                </span>
                               </span>
                             ))}
                           </div>

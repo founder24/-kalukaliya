@@ -108,7 +108,7 @@ interface ContextChunk {
   score: number;
   medium?: string | undefined;
   sourceType?: string | undefined;
-  topicName?: string | undefined;
+  topicId?: string | undefined;
 }
 
 /**
@@ -173,10 +173,13 @@ interface SourceEntry {
   subject_slug?: string | undefined;
   class_slug?: string | undefined;
   board_slug?: string | undefined;
+  course_slug?: string | undefined;
+  subject_id?: string | undefined;
   topic_name?: string | undefined;
   subject_name?: string | undefined;
   class_name?: string | undefined;
   board_name?: string | undefined;
+  course_name?: string | undefined;
 }
 
 export type AuthoritativeIntent = 'syllabus' | 'pyq' | null;
@@ -1220,6 +1223,120 @@ async function queryVectorize(
   return (result.matches ?? []).filter((m: VectorizeMatch) => m.score >= CONFIDENCE_LOW);
 }
 
+type PublishedTopic = Record<string, unknown>;
+
+function publishedTopicId(topic: PublishedTopic): string | null {
+  for (const key of ['id', 'topic_id', 'topicId', 'topic_slug', 'slug']) {
+    const value = topic[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function publishedTopicTitle(topic: PublishedTopic, lang: 'en' | 'as'): string | null {
+  const candidates = lang === 'as'
+    ? [topic.title_as, topic.titleAs, topic.title_assamese, topic.assamese_title, topic.title, topic.name]
+    : [topic.title, topic.name, topic.title_en, topic.titleEn];
+  const title = candidates.find((value): value is string =>
+    typeof value === 'string' && value.trim().length > 0,
+  );
+  return title?.trim() ?? null;
+}
+
+/** Resolve a Vectorize topic identifier only against a chapter's published topic list. */
+export function resolvePublishedTopicTitle(
+  publishedTopicsJson: string | null | undefined,
+  topicId: string | undefined,
+  lang: 'en' | 'as' = 'en',
+): string | null {
+  if (!topicId?.trim()) return null;
+  const topics = tryJson<PublishedTopic[]>(publishedTopicsJson, []);
+  const topic = topics.find((candidate) => publishedTopicId(candidate) === topicId.trim());
+  return topic ? publishedTopicTitle(topic, lang) : null;
+}
+
+/** Exact published-title mentions help map direct chapter questions when no topic vector exists. */
+export function findPublishedTopicForQuestion(
+  publishedTopicsJson: string | null | undefined,
+  question: string,
+  lang: 'en' | 'as' = 'en',
+): { topicId: string; title: string } | null {
+  const normalize = (value: string) => value
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  const normalizedQuestion = normalize(question);
+  if (!normalizedQuestion) return null;
+  const questionPhrase = ` ${normalizedQuestion} `;
+  const topics = tryJson<PublishedTopic[]>(publishedTopicsJson, []);
+  const candidates = topics.flatMap((topic) => {
+    const topicId = publishedTopicId(topic);
+    const title = publishedTopicTitle(topic, lang);
+    const normalizedTitle = title ? normalize(title) : '';
+    if (!topicId || !title || normalizedTitle.length < 2) return [];
+    return questionPhrase.includes(` ${normalizedTitle} `) ? [{ topicId, title, length: normalizedTitle.length }] : [];
+  });
+  candidates.sort((left, right) => right.length - left.length);
+  const match = candidates[0];
+  return match ? { topicId: match.topicId, title: match.title } : null;
+}
+
+/** Select a topic match only from the requested published chapter and content section. */
+export function selectTopicIdForChapter(
+  matches: VectorizeMatch[],
+  chapterId: string,
+  requiredSourceType?: string,
+): string | undefined {
+  const selected = matches
+    .filter((match) => {
+      const metadata = match.metadata as ChunkMeta | undefined;
+      return metadata?.chapterId === chapterId
+        && typeof metadata.topicId === 'string'
+        && metadata.topicId.trim().length > 0
+        && (!requiredSourceType || metadata.sourceType === requiredSourceType);
+    })
+    .sort((left, right) => right.score - left.score)[0];
+  const topicId = (selected?.metadata as ChunkMeta | undefined)?.topicId;
+  return topicId?.trim() || undefined;
+}
+
+export async function retrieveDirectQuestionTopicId(
+  ai: Ai,
+  vectorize: VectorizeIndex,
+  question: string,
+  lang: 'en' | 'as',
+  chapterId: string,
+  requiredSourceType?: string,
+): Promise<string | undefined> {
+  const embedding = await embedQuery(ai, buildEmbeddingQuery(question, lang));
+  const filters = {
+    chapterId,
+    ...(requiredSourceType ? { sourceType: requiredSourceType } : {}),
+  };
+
+  if (lang === 'as') {
+    const [assameseMatches, englishMatches] = await Promise.all([
+      queryVectorize(vectorize, embedding, 'as', filters),
+      queryVectorize(vectorize, embedding, 'en', filters),
+    ]);
+    const retrievalLang = chooseAssameseRetrievalLanguage(
+      assameseMatches[0]?.score ?? 0,
+      englishMatches[0]?.score ?? 0,
+      assameseMatches.length > 0,
+    );
+    return selectTopicIdForChapter(
+      retrievalLang === 'as' ? assameseMatches : englishMatches,
+      chapterId,
+      requiredSourceType,
+    );
+  }
+
+  const matches = await queryVectorize(vectorize, embedding, 'en', filters);
+  return selectTopicIdForChapter(matches, chapterId, requiredSourceType);
+}
+
 /**
  * Fetch full chapter text from D1 using the confidence-aware fallback chain:
  *   ragSectionsEn/As → ragText/As → notesEn/As → English fallback for Assamese
@@ -1424,7 +1541,7 @@ export async function fetchMatchedChunkContext(
         score: match.score,
         medium: mirror.medium,
         sourceType: mirror.sourceType,
-        ...(meta.topicId !== undefined && { topicName: meta.topicId }),
+         ...(meta.topicId !== undefined && { topicId: meta.topicId }),
       } satisfies ContextChunk;
     }
 
@@ -1445,7 +1562,7 @@ export async function fetchMatchedChunkContext(
           score: match.score,
           medium: meta.medium ?? (lang === 'as' ? 'assamese' : 'english'),
           sourceType: meta.sourceType ?? 'rag_chunk_metadata',
-          ...(meta.topicId !== undefined && { topicName: meta.topicId }),
+           ...(meta.topicId !== undefined && { topicId: meta.topicId }),
         } satisfies ContextChunk;
       }
     }
@@ -1482,36 +1599,22 @@ export async function firstUsableContext<TCandidate, TContext>(
  * Vectorize hot path) and gracefully leaves a source usable when legacy
  * hierarchy rows are absent.
  */
-async function buildSourceEntries(
+export async function buildSourceEntries(
   d1: D1Database,
   chunks: ContextChunk[],
   webResults: WebSearchResult[],
   lang: 'en' | 'as',
-  options: { skipHierarchyForDirect?: boolean } = {},
+  options: { question?: string } = {},
 ): Promise<SourceEntry[]> {
   const curriculumCandidates = await Promise.all(chunks.map(async (chunk): Promise<SourceEntry | null> => {
     const snippet = chunk.content.replace(/\s+/g, ' ').trim().slice(0, 360);
-    // fetchChapterContent has already verified publication and exact chapter
-    // identity. Avoid a second hierarchy query before source_card for this
-    // direct path; semantic matches still use the richer hierarchy lookup.
-    if (options.skipHierarchyForDirect && chunk.sourceType?.startsWith('chapter_direct')) {
-      return {
-        id: `chapter:${chunk.chapterId}`,
-        title: chunk.chapterTitle,
-        kind: 'curriculum' as const,
-        url: null,
-        snippet,
-        matched_passage: snippet,
-        chapter_id: chunk.chapterId,
-        retrieval_method: chunk.sourceType,
-        confidence: chunk.score,
-        medium: chunk.medium ?? (lang === 'as' ? 'assamese' : 'english'),
-        source_type: chunk.sourceType,
-        score: chunk.score,
-      };
-    }
     const row = await d1.prepare(`
-      SELECT chapters.slug AS chapter_slug, subjects.slug AS subject_slug,
+      SELECT chapters.title AS chapter_name,
+             chapters.slug AS chapter_slug,
+             chapters.published_topics AS published_topics,
+             subjects.id AS subject_id,
+             subjects.slug AS subject_slug,
+             streams.name AS course_name, streams.slug AS course_slug,
              classes.slug AS class_slug, boards.slug AS board_slug,
              subjects.name AS subject_name, classes.name AS class_name,
              boards.name AS board_name
@@ -1527,8 +1630,13 @@ async function buildSourceEntries(
         AND (classes.id IS NULL OR classes.status = 'published')
         AND (boards.id IS NULL OR boards.status = 'published')
     `).bind(chunk.chapterId).first<{
+      chapter_name: string | null;
       chapter_slug: string | null;
+      published_topics: string | null;
+      subject_id: string | null;
       subject_slug: string | null;
+      course_name: string | null;
+      course_slug: string | null;
       class_slug: string | null;
       board_slug: string | null;
       subject_name: string | null;
@@ -1536,12 +1644,25 @@ async function buildSourceEntries(
       board_name: string | null;
     }>().catch(() => null);
     if (!row) return null;
-    const path = row?.board_slug && row.class_slug && row.subject_slug && row.chapter_slug
-      ? `/${row.board_slug}/${row.class_slug}/${row.subject_slug}/${row.chapter_slug}`
+    const path = row.board_slug && row.class_slug && row.subject_slug && row.chapter_slug
+      ? `/${lang === 'as' ? 'as/' : ''}${[
+          row.board_slug,
+          row.class_slug,
+          ...(row.course_slug ? [row.course_slug] : []),
+          row.subject_slug,
+          row.chapter_slug,
+        ].join('/')}`
       : null;
+    const explicitlyMentionedTopic = findPublishedTopicForQuestion(
+      row.published_topics,
+      options.question ?? '',
+      lang,
+    );
+    const topicTitle = explicitlyMentionedTopic?.title
+      ?? resolvePublishedTopicTitle(row.published_topics, chunk.topicId, lang);
     return {
       id: `chapter:${chunk.chapterId}`,
-      title: chunk.chapterTitle,
+      title: row.chapter_name || chunk.chapterTitle,
       kind: 'curriculum' as const,
       url: path,
       snippet,
@@ -1556,10 +1677,13 @@ async function buildSourceEntries(
       ...(row?.subject_slug && { subject_slug: row.subject_slug }),
       ...(row?.class_slug && { class_slug: row.class_slug }),
       ...(row?.board_slug && { board_slug: row.board_slug }),
-      ...(chunk.topicName && { topic_name: chunk.topicName }),
+      ...(row?.course_slug && { course_slug: row.course_slug }),
+      ...(row?.subject_id && { subject_id: row.subject_id }),
+      ...(topicTitle && { topic_name: topicTitle }),
       ...(row?.subject_name && { subject_name: row.subject_name }),
       ...(row?.class_name && { class_name: row.class_name }),
       ...(row?.board_name && { board_name: row.board_name }),
+      ...(row?.course_name && { course_name: row.course_name }),
     };
   }));
   const curriculum = curriculumCandidates.filter((entry): entry is SourceEntry => entry !== null);
@@ -1883,6 +2007,18 @@ export async function persistCompletedChat(
   const lang       = opts.lang;
   const chId       = opts.chapterId ?? null;
   const subId      = opts.subjectId ?? null;
+  const responseMetadata = opts.responseMetadata && typeof opts.responseMetadata === 'object'
+    ? opts.responseMetadata as { sourceCard?: unknown }
+    : {};
+  const sourceCardMetadata = responseMetadata.sourceCard
+    && typeof responseMetadata.sourceCard === 'object'
+    && !Array.isArray(responseMetadata.sourceCard)
+    ? responseMetadata.sourceCard
+    : null;
+  const assistantMetadata = {
+    model: opts.modelUsed,
+    ...(sourceCardMetadata && { source_card: sourceCardMetadata }),
+  };
 
   // D1 batch is transactional: history, authenticated stats, and the replay
   // marker commit together so a completed answer cannot strand a reserved key.
@@ -1903,7 +2039,7 @@ export async function persistCompletedChat(
         SELECT 1 FROM chat_request_claims
         WHERE request_id = ? AND user_id = ? AND status = 'reserved'
       )
-    `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify({ model: opts.modelUsed }), expiresAt, now + 1, opts.requestId, opts.requestId, uid),
+    `).bind(assistId, uid, sid, opts.assistantResponse.slice(0, 8000), lang, chId, subId, JSON.stringify(assistantMetadata), expiresAt, now + 1, opts.requestId, opts.requestId, uid),
   ];
   if (opts.requestId) {
     statements.push(d1.prepare(`
@@ -2575,16 +2711,46 @@ chatRouter.post('/stream', async (c) => {
     }
   }
   if (!authoritativeIntent && directChapterId) {
-    const [directHistoryResult, directContentResult, directMemoryResult] = await Promise.allSettled([
+    const directContentPromise = fetchChapterContent(
+      c.env.DB,
+      directChapterId,
+      lang,
+      body.subject_id ?? scopedSubjectId,
+      requestedSourceType ?? 'notes',
+    );
+    const directTopicPromise = directContentPromise.then(async (chapterContent) => {
+      if (
+        !chapterContent
+        || !shouldBypassSemanticRetrieval(directChapterId, chapterContent.content)
+      ) {
+        return undefined;
+      }
+      try {
+        return await retrieveDirectQuestionTopicId(
+          c.env.AI,
+          c.env.VECTORIZE,
+          message,
+          lang,
+          directChapterId,
+          requestedSourceType ?? 'notes',
+        );
+      } catch (err) {
+        console.warn('[chat] direct topic mapping failed', {
+          error_class: sanitizedChatErrorClass(err),
+        });
+        return undefined;
+      }
+    });
+    const [
+      directHistoryResult,
+      directContentResult,
+      directMemoryResult,
+      directTopicResult,
+    ] = await Promise.allSettled([
       loadHistory(db, sessionId, userId),
-      fetchChapterContent(
-        c.env.DB,
-        directChapterId,
-        lang,
-        body.subject_id ?? scopedSubjectId,
-        requestedSourceType ?? 'notes',
-      ),
+      directContentPromise,
       memoryPromise,
+      directTopicPromise,
     ]);
     if (directHistoryResult.status === 'fulfilled') {
       history = directHistoryResult.value;
@@ -2594,6 +2760,9 @@ chatRouter.post('/stream', async (c) => {
     directChapterContent = directContentResult.status === 'fulfilled'
       ? directContentResult.value
       : null;
+    const directTopicId = directTopicResult.status === 'fulfilled'
+      ? directTopicResult.value
+      : undefined;
     if (
       directChapterContent
       && shouldBypassSemanticRetrieval(directChapterId, directChapterContent.content)
@@ -2610,6 +2779,7 @@ chatRouter.post('/stream', async (c) => {
         // Explicit page context is stronger than a semantic cosine score.
         score:        1,
         medium:       directChapterContent.language,
+        ...(directTopicId && { topicId: directTopicId }),
         sourceType:   directChapterSourceType(
           requestedSourceType,
           directChapterContent.language,
@@ -2849,7 +3019,7 @@ chatRouter.post('/stream', async (c) => {
     contextChunks,
     webResults,
     lang,
-    { skipHierarchyForDirect: Boolean(directChapterId) },
+    { question: message },
   );
   timings.source_entries_ms = Date.now() - sourceEntriesStart;
   const primaryCurriculumSource = sourceEntries.find(entry => entry.kind === 'curriculum');
@@ -2870,15 +3040,15 @@ chatRouter.post('/stream', async (c) => {
     match_score:      topScore,
     rag_chunks:       contextChunks.length,
      chapter_id:       topChapterId,
-    rag_chapter_name: topChapterTitle,
+    rag_chapter_name: primaryCurriculumSource?.title ?? topChapterTitle,
     rag_chapter_slug: primaryCurriculumSource?.chapter_slug,
-    rag_subject_id:   topSubjectId,
+    rag_subject_id:   primaryCurriculumSource?.subject_id ?? topSubjectId,
     rag_subject_name: primaryCurriculumSource?.subject_name ?? curriculumScope.subjectName ?? body.subject_name,
     rag_topic_name:   primaryCurriculumSource?.topic_name,
     ctx_board_name:   primaryCurriculumSource?.board_name ?? curriculumScope.boardName ?? body.board_name,
     ctx_class_name:   primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
     ctx_class_level:  primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
-    ctx_stream_name:  body.stream_name,
+    ctx_stream_name:  primaryCurriculumSource?.course_name,
     ctx_board_slug:   primaryCurriculumSource?.board_slug,
     ctx_class_slug:   primaryCurriculumSource?.class_slug,
     ctx_subject_slug: primaryCurriculumSource?.subject_slug,
@@ -2886,7 +3056,10 @@ chatRouter.post('/stream', async (c) => {
      // clients. Existing SSE consumers can continue to ignore these fields.
      rag_board_name:   primaryCurriculumSource?.board_name ?? curriculumScope.boardName ?? body.board_name,
      rag_class_name:   primaryCurriculumSource?.class_name ?? curriculumScope.className ?? body.class_name,
-     rag_stream_name:  body.stream_name,
+      rag_stream_name:  primaryCurriculumSource?.course_name,
+      rag_stream_slug:  primaryCurriculumSource?.course_slug,
+      rag_course_name:  primaryCurriculumSource?.course_name,
+      rag_course_slug:  primaryCurriculumSource?.course_slug,
      rag_board_slug:   primaryCurriculumSource?.board_slug,
      rag_class_slug:   primaryCurriculumSource?.class_slug,
      rag_subject_slug: primaryCurriculumSource?.subject_slug,

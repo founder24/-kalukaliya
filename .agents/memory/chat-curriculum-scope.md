@@ -9,6 +9,13 @@ Treat explicit class references as hard curriculum constraints: resolve the clas
 
 **How to apply:** Constrain class-bound queries to the resolved hierarchy, build prompt labels from validated metadata, and require the chapter, subject, and any stream/class/board ancestors to be public before content or provenance reaches the answer. Keep subject-only ambiguity distinct from explicit class mismatch, and ensure web-only exceptions cannot feed curriculum context. Future vector reindexes should retain hierarchy metadata as defense in depth.
 
+## Verified chat source chain
+For every assistant answer with a matched published curriculum source, show the original question followed by Topic → Chapter → Subject → Course/Stream → Class. Derive labels and the navigation URL from the matched topic and its published D1 ancestors; never trust caller-provided stream names or surface raw vector IDs. Direct-chapter answers keep the fast D1 content path and perform a separate topic lookup limited to the selected chapter and content type (defaulting to notes). Persist the verified source card with the assistant message so the same chain appears after conversation reload.
+
+**Why:** The map is part of the student-facing evidence path, not decorative metadata, and must remain consistent with the answer's matched published source.
+
+**How to apply:** Validate the complete source hierarchy before display, preserve exact matched-passage provenance, and return stored source metadata from conversation history only when it contains a verified curriculum entry.
+
 ## Page-selected content sections
 Treat `card_context` as untrusted supplemental page data, never as curriculum evidence or instructions. Explicit Q&A requests must use Q&A fields/chunks; PYQ requests may use only student-supplied question text or indexed PYQ chunks. If no PYQ text exists, ask for the question rather than substituting chapter notes.
 

@@ -717,6 +717,7 @@ export default function ChatPage() {
         ragBoardName: null, ragClassName: null, ragTopicName: null,
         ragChunkSnippet: null, ragStreamName: null, ragBoardSlug: null,
         ragClassSlug: null, ragSubjectSlug: null, libSources: [], sourceEntries: [], hasError: false,
+        ragCourseName: null, ragCourseSlug: null, ragStreamSlug: null,
         // Source card fields emitted by backend before LLM starts
         matchScore: null, sourceType: null, confidenceTier: null, ragPath: null,
          chapterId: null, matchedPassage: null, retrievalMethod: null, sourceConfidence: null,
@@ -775,6 +776,9 @@ export default function ChatPage() {
            if (parsed.rag_board_name) meta.ragBoardName = parsed.rag_board_name;
            if (parsed.rag_class_name) meta.ragClassName = parsed.rag_class_name;
            if (parsed.rag_stream_name) meta.ragStreamName = parsed.rag_stream_name;
+            if (parsed.rag_course_name) meta.ragCourseName = parsed.rag_course_name;
+            if (parsed.rag_course_slug) meta.ragCourseSlug = parsed.rag_course_slug;
+            if (parsed.rag_stream_slug) meta.ragStreamSlug = parsed.rag_stream_slug;
           if (parsed.ctx_stream_name) meta.ragStreamName = parsed.ctx_stream_name;
           if (parsed.ctx_board_slug) meta.ragBoardSlug = parsed.ctx_board_slug;
           if (parsed.ctx_class_slug) meta.ragClassSlug = parsed.ctx_class_slug;
@@ -950,7 +954,7 @@ export default function ChatPage() {
       } else { setConversationId(meta.convId); }
       setMessages((prev) => prev.map((m) =>
         m.id === aiMsgId
-          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_id: meta.chapterId, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, matched_passage: meta.matchedPassage, retrieval_method: meta.retrievalMethod, source_confidence: meta.sourceConfidence, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, source_entries: meta.sourceEntries, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
+          ? { ...m, content: fullContent, streaming: false, rag_source: meta.ragSource, rag_chunks: meta.ragChunks, rag_subject_id: meta.ragSubjectId, rag_subject_name: meta.ragSubjectName, rag_chapter_id: meta.chapterId, rag_chapter_name: meta.ragChapterName, rag_chapter_slug: meta.ragChapterSlug, rag_board_name: meta.ragBoardName, rag_class_name: meta.ragClassName, rag_stream_name: meta.ragStreamName, rag_stream_slug: meta.ragStreamSlug, rag_course_name: meta.ragCourseName, rag_course_slug: meta.ragCourseSlug, rag_board_slug: meta.ragBoardSlug, rag_class_slug: meta.ragClassSlug, rag_subject_slug: meta.ragSubjectSlug, rag_topic_name: meta.ragTopicName, rag_chunk_snippet: meta.ragChunkSnippet, matched_passage: meta.matchedPassage, retrieval_method: meta.retrievalMethod, source_confidence: meta.sourceConfidence, ctx_subject_name: subject?.name || null, ctx_subject_icon: meta.ragSubjectIcon || subject?.icon || null, ctx_subject_gradient: meta.ragSubjectGradient || subject?.gradient || null, sources: meta.libSources, source_entries: meta.sourceEntries, route_trace: meta.routeTrace || null, match_score: meta.matchScore, source_type: meta.sourceType, confidence_tier: meta.confidenceTier, rag_path: meta.ragPath }
           : m
       ));
       setSyncState('idle');
@@ -1171,11 +1175,19 @@ export default function ChatPage() {
                 let lastUIdx = -1;
                 for (let j = messages.length - 1; j >= 0; j--) { if (messages[j].role === 'user') { lastUIdx = j; break; } }
                 const out = [];
+                let previousUserMessage = null;
                 messages.forEach((msg, i) => {
+                  if (msg.role === 'user') previousUserMessage = msg;
+                  const pairedQuestion = msg.role === 'assistant'
+                    ? (msg.userMsgId
+                      ? messages.find((candidate) => String(candidate.id) === String(msg.userMsgId))
+                      : null) || previousUserMessage
+                    : null;
                   out.push(
                     <div key={msg.id || i} ref={i === lastUIdx ? lastUserMsgRef : undefined}>
                       <MessageBubble
                         msg={msg}
+                        questionText={pairedQuestion?.content || null}
                         isLast={i === messages.length - 1}
                         onCopy={handleCopy}
                         onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : null}
