@@ -105,3 +105,4 @@
 - [Live test request fidelity](live-test-request-fidelity.md) — Preserve raw traversal paths and validate every redirect hop before following it.
 - [Syrabit library bundle edge cache](syrabit-library-bundle-edge-cache.md) — CDN purges do not clear the Edge Worker's separate library-bundle KV cache.
 - [Vectorize deletion batching](vectorize-delete-batching.md) — limit each ID-deletion request to 100 IDs; larger cleanup requests fail and can block RAG publishing.
+- [Refresh-token bridge guard baselines](refresh-token-bridge-guard.md) — rebaseline protected auth routes only after reviewing the change and validating its security behavior.
