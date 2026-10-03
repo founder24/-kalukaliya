@@ -330,6 +330,7 @@ describe('atomic quota controls', () => {
 
   it('settles against the claim month after the calendar has rolled over', async () => {
     const userId = await createFreeUser();
+    const sessionId = `session_${crypto.randomUUID()}`;
     const currentPeriod = currentQuotaMonthPeriod();
     const claimPeriod = previousMonthPeriod(currentPeriod);
     const requestId = `monthly_settle_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -349,15 +350,34 @@ describe('atomic quota controls', () => {
 
     await persistCompletedChat(env.DB, {
       userId,
-      sessionId: `session_${crypto.randomUUID()}`,
+      sessionId,
       userMessage: 'Explain inertia',
       assistantResponse: 'A short answer.',
       lang: 'en',
       modelUsed: 'test-model',
       isAnon: false,
       requestId,
-      responseMetadata: {},
+      responseMetadata: {
+        sourceCard: {
+          rag_source: 'chapter_direct_notes',
+          rag_topic_name: 'Cell membrane',
+          rag_course_name: 'Science',
+          sources: [{ kind: 'curriculum', topic_name: 'Cell membrane', course_name: 'Science' }],
+        },
+      },
       confidenceTier: 'high',
+    });
+
+    const assistantRow = await env.DB.prepare(`
+      SELECT metadata FROM chats
+      WHERE user_id = ? AND session_id = ? AND role = 'assistant'
+    `).bind(userId, sessionId).first<{ metadata: string }>();
+    expect(JSON.parse(assistantRow?.metadata ?? '{}')).toMatchObject({
+      model: 'test-model',
+      source_card: {
+        rag_topic_name: 'Cell membrane',
+        rag_course_name: 'Science',
+      },
     });
 
     const oldMonth = await env.DB.prepare(

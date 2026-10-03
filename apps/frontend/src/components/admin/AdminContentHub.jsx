@@ -77,8 +77,13 @@ function loadPersistedCtx() {
 
 const INTERNAL_TABS = new Set(CONTENT_HUB_TABS.map(({ id }) => id));
 
-export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext }) {
-  const [activeTab, setActiveTab] = useState(navContext?.initialTab || 'editor');
+export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext, userRole }) {
+  const staffMode = userRole !== 'admin';
+  const initialTab = !staffMode && INTERNAL_TABS.has(navContext?.initialTab)
+    ? navContext.initialTab
+    : 'editor';
+  const visibleTabs = staffMode ? TABS.filter(tab => tab.id === 'editor') : TABS;
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [boards, setBoards]       = useState([]);
   const [classes, setClasses]     = useState([]);
   const [streams, setStreams]     = useState([]);
@@ -86,10 +91,12 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
   const [loading, setLoading]     = useState(true);
 
   useEffect(() => {
-    if (navContext?.initialTab && INTERNAL_TABS.has(navContext.initialTab)) {
+    if (staffMode) {
+      setActiveTab('editor');
+    } else if (navContext?.initialTab && INTERNAL_TABS.has(navContext.initialTab)) {
       setActiveTab(navContext.initialTab);
     }
-  }, [navContext]);
+  }, [navContext?.initialTab, staffMode]);
 
   const [hubContext, setHubContextRaw] = useState(loadPersistedCtx);
 
@@ -110,11 +117,11 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
   const navigate = useCallback((tab, ctxPatch) => {
     if (ctxPatch) setHubContext(ctxPatch);
     if (INTERNAL_TABS.has(tab)) {
-      setActiveTab(tab);
+      if (!staffMode || tab === 'editor') setActiveTab(tab);
     } else if (topNavigate) {
       topNavigate(tab);
     }
-  }, [setHubContext, topNavigate]);
+  }, [setHubContext, staffMode, topNavigate]);
 
   const reloadHierarchy = useCallback(async () => {
     const cfg = authHeaders(adminToken);
@@ -146,23 +153,29 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
 
         <div className="border-b px-4 py-1.5 flex items-center gap-1 flex-wrap"
           style={{ background: '#ffffff', borderColor: '#e5e7eb' }}>
-          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mr-2">Workflow</span>
-          {FLOW.map((step, i) => (
-            <span key={i} className="flex items-center gap-1">
-              <button
-                onClick={() => setActiveTab(step.tab)}
-                aria-label={`workflow-step-${step.tab}`}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${
-                  activeTab === step.tab
-                    ? COLOR_MAP[TABS.find(t => t.id === step.tab)?.color]?.badge
-                    : 'text-gray-400 hover:text-gray-600'
-                }`}
-              >
-                {step.label}
-              </button>
-              {step.arrow && <ArrowRight size={10} className="text-gray-300 flex-shrink-0" />}
-            </span>
-          ))}
+          {staffMode ? (
+            <span className="text-xs font-semibold text-gray-700">Manual chapter editor</span>
+          ) : (
+            <>
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mr-2">Workflow</span>
+              {FLOW.map((step, i) => (
+                <span key={i} className="flex items-center gap-1">
+                  <button
+                    onClick={() => setActiveTab(step.tab)}
+                    aria-label={`workflow-step-${step.tab}`}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${
+                      activeTab === step.tab
+                        ? COLOR_MAP[TABS.find(t => t.id === step.tab)?.color]?.badge
+                        : 'text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    {step.label}
+                  </button>
+                  {step.arrow && <ArrowRight size={10} className="text-gray-300 flex-shrink-0" />}
+                </span>
+              ))}
+            </>
+          )}
 
           {hubContext.subjectName && (
             <span className="ml-auto flex items-center gap-1.5 flex-wrap">
@@ -185,7 +198,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
 
         <div className="border-b flex-shrink-0" style={{ borderColor: '#e5e7eb', background: '#ffffff' }}>
           <div className="flex px-4 gap-1 h-12 items-end">
-            {TABS.map(tab => {
+            {visibleTabs.map(tab => {
               const colors = COLOR_MAP[tab.color];
               const isActive = activeTab === tab.id;
               const Icon = tab.icon;
@@ -218,10 +231,11 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
           )}
 
           <Suspense fallback={<div className="flex items-center justify-center py-12 text-gray-400 text-sm"><Loader2 size={16} className="animate-spin mr-2" />Loading…</div>}>
-            {activeTab === 'editor' && (
+            {(activeTab === 'editor' || staffMode) && (
               <div className="h-full overflow-hidden" data-testid="content-hub-panel-editor">
                 <AdminContentEditor
                   adminToken={adminToken}
+                  staffMode={staffMode}
                   onNavigate={navigate}
                   hubContext={hubContext}
                   onHubContext={setHubContext}
@@ -230,13 +244,13 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
               </div>
             )}
 
-            {activeTab === 'cms' && (
+            {!staffMode && activeTab === 'cms' && (
               <div className="h-full overflow-y-auto" data-testid="content-hub-panel-cms">
                 <AdminModuleUnavailable moduleId="content-cms" />
               </div>
             )}
 
-            {activeTab === 'blog' && (
+            {!staffMode && activeTab === 'blog' && (
               <div className="h-full overflow-y-auto" data-testid="content-hub-panel-blog">
                 <BlogPublishWizard
                   adminToken={adminToken}
@@ -246,19 +260,19 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
               </div>
             )}
 
-            {activeTab === 'translation' && (
+            {!staffMode && activeTab === 'translation' && (
               <div className="h-full overflow-y-auto p-4 sm:p-6" data-testid="content-hub-panel-translation">
                 <AssameseBackfillPanel adminToken={adminToken} />
               </div>
             )}
 
-            {activeTab === 'progress' && (
+            {!staffMode && activeTab === 'progress' && (
               <div className="h-full overflow-y-auto" data-testid="content-hub-panel-progress">
                 <AdminTranslationProgress adminToken={adminToken} />
               </div>
             )}
 
-            {activeTab === 'seeder' && (
+            {!staffMode && activeTab === 'seeder' && (
               <div className="h-full overflow-y-auto" data-testid="content-hub-panel-seeder">
                 <SeederHistoryPanel
                   adminToken={adminToken}
@@ -279,7 +293,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
                 />
               </div>
             )}
-            {activeTab === 'rag-mirror' && (
+            {!staffMode && activeTab === 'rag-mirror' && (
               <div className="h-full overflow-y-auto" data-testid="content-hub-panel-rag-mirror">
                 <RagMirrorPanel adminToken={adminToken} />
               </div>

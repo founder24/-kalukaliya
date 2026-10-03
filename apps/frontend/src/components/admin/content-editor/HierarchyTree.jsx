@@ -47,6 +47,7 @@ export default function HierarchyTree({
   classNodeLabel = 'Classes', classPlaceholder = 'Class',
   onDelete, onCreateBoard, onCreateClass, onCreateStream,
   onUpdateStatus,
+  manualOnly = false,
 }) {
   return (
     <div className="w-72 border-r border-gray-200 flex flex-col overflow-y-auto" style={{ background: '#ffffff' }}>
@@ -64,7 +65,7 @@ export default function HierarchyTree({
                 <span className="truncate">{b.name}</span>
               </button>
               <StatusInlineSelect type="board" id={b.id} status={b.status} onUpdateStatus={onUpdateStatus} />
-              <button onClick={() => onDelete('board', b.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400"><Trash2 size={12} /></button>
+              {!manualOnly && <button onClick={() => onDelete('board', b.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400"><Trash2 size={12} /></button>}
             </div>
 
             {selBoard === b.id && (
@@ -82,7 +83,7 @@ export default function HierarchyTree({
                         <span className="truncate">{c.name}</span>
                       </button>
                       <StatusInlineSelect type="class" id={c.id} status={c.status} onUpdateStatus={onUpdateStatus} />
-                      <button onClick={() => onDelete('classe', c.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400"><Trash2 size={10} /></button>
+                      {!manualOnly && <button onClick={() => onDelete('classe', c.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400"><Trash2 size={10} /></button>}
                     </div>
 
                     {selClass === c.id && (
@@ -98,20 +99,20 @@ export default function HierarchyTree({
                               <span className="truncate">{st.icon || ''} {st.name}</span>
                             </button>
                             <StatusInlineSelect type="stream" id={st.id} status={st.status} onUpdateStatus={onUpdateStatus} />
-                            <button onClick={() => onDelete('stream', st.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400"><Trash2 size={10} /></button>
+                            {!manualOnly && <button onClick={() => onDelete('stream', st.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400"><Trash2 size={10} /></button>}
                           </div>
                         ))}
-                        <InlineCreator placeholder={streamPlaceholder} onCreate={onCreateStream} icon={GitBranch} color="emerald" />
+                        {!manualOnly && <InlineCreator placeholder={streamPlaceholder} onCreate={onCreateStream} icon={GitBranch} color="emerald" />}
                       </div>
                     )}
                   </div>
                 ))}
-                <InlineCreator placeholder={classPlaceholder} onCreate={onCreateClass} icon={GraduationCap} color="blue" />
+                {!manualOnly && <InlineCreator placeholder={classPlaceholder} onCreate={onCreateClass} icon={GraduationCap} color="blue" />}
               </div>
             )}
           </div>
         ))}
-        <InlineCreator placeholder="Board" onCreate={onCreateBoard} icon={Building2} color="violet" />
+        {!manualOnly && <InlineCreator placeholder="Board" onCreate={onCreateBoard} icon={Building2} color="violet" />}
       </div>
     </div>
   );

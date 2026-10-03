@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { axe, toHaveNoViolations } from 'jest-axe';
-import { render, act } from '@testing-library/react';
+import { render, act, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 expect.extend(toHaveNoViolations);
@@ -38,6 +38,12 @@ vi.mock('@/components/layout/AppLayout', () => ({
   AppLayout: ({ children }) => <div data-testid="app-layout">{children}</div>,
 }));
 
+vi.mock('@/components/ads/ChatSponsoredCard', () => ({
+  default: ({ placementIndex }) => (
+    <aside data-testid="chat-sponsored-ad">Sponsored {placementIndex}</aside>
+  ),
+}));
+
 vi.mock('./chat/EmptyState', () => ({
   EmptyState: () => (
     <main>
@@ -62,7 +68,11 @@ vi.mock('./chat/ModelSelector', () => ({
 }));
 
 vi.mock('./chat/MessageBubble', () => ({
-  MessageBubble: ({ msg }) => <div role="article" aria-label={`${msg.role} message`}>{msg.content}</div>,
+  MessageBubble: ({ msg, questionText }) => (
+    <div role="article" aria-label={`${msg.role} message`} data-question-text={questionText || ''}>
+      {msg.content}
+    </div>
+  ),
 }));
 
 const mockGetAnonConversation = vi.fn(() => new Promise(() => {}));
@@ -115,6 +125,12 @@ const SAMPLE_MESSAGES = [
   { id: 'm1', role: 'user',      content: 'What is photosynthesis?' },
   { id: 'm2', role: 'assistant', content: 'Photosynthesis is the process by which plants make food using sunlight.' },
 ];
+const TWO_COMPLETED_TURNS = [
+  { id: 'u1', role: 'user', content: 'First question' },
+  { id: 'a1', role: 'assistant', content: 'First answer' },
+  { id: 'u2', role: 'user', content: 'Second question' },
+  { id: 'a2', role: 'assistant', content: 'Second answer' },
+];
 
 describe('ChatPage — axe accessibility audit', () => {
   it('has no axe violations for an anonymous user (empty chat, no conversation)', async () => {
@@ -152,5 +168,22 @@ describe('ChatPage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('does not insert sponsored content after completed assistant turns', async () => {
+    mockSearchParams.mockReturnValue([new URLSearchParams('id=ad-free-chat'), vi.fn()]);
+    mockGetAnonConversation.mockResolvedValue({
+      data: { id: 'ad-free-chat', messages: TWO_COMPLETED_TURNS },
+    });
+
+    await act(async () => {
+      render(<ChatPage />);
+    });
+    expect(await screen.findByText('Second answer')).toBeInTheDocument();
+    const assistantMessages = await screen.findAllByRole('article', { name: 'assistant message' });
+    expect(assistantMessages[1]).toHaveAttribute('data-question-text', 'Second question');
+    await waitFor(() => {
+      expect(screen.queryByTestId('chat-sponsored-ad')).not.toBeInTheDocument();
+    });
   });
 });

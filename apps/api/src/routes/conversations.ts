@@ -97,7 +97,20 @@ async function listConversations(
   });
 }
 
-async function conversationDetail(
+function parseStoredSourceCard(metadata: string | null): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(metadata || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const sourceCard = (parsed as Record<string, unknown>).source_card;
+    return sourceCard && typeof sourceCard === 'object' && !Array.isArray(sourceCard)
+      ? sourceCard as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function conversationDetail(
   c: Context<{ Bindings: Env }>,
   userId: string,
   sessionId: string,
@@ -129,14 +142,55 @@ async function conversationDetail(
     message_count: messages.results!.length,
     created_at: toIso(first.created_at),
     updated_at: toIso(meta?.updated_at ?? last.created_at),
-    messages: messages.results!.map(message => ({
-      role: message.role,
-      content: message.content,
-      lang: message.lang ?? 'en',
-      subject_id: message.subject_id,
-      chapter_id: message.chapter_id,
-      created_at: toIso(message.created_at),
-    })),
+    messages: messages.results!.map(message => {
+      const sourceCard = message.role === 'assistant'
+        ? parseStoredSourceCard(message.metadata)
+        : null;
+      const sourceEntries = Array.isArray(sourceCard?.sources)
+        ? sourceCard.sources.filter((entry): entry is Record<string, unknown> =>
+          Boolean(entry)
+          && typeof entry === 'object'
+          && !Array.isArray(entry)
+          && (entry as Record<string, unknown>).kind === 'curriculum',
+        )
+        : [];
+      const hasCurriculumSource = sourceEntries.length > 0;
+      return {
+        role: message.role,
+        content: message.content,
+        lang: message.lang ?? 'en',
+        subject_id: message.subject_id,
+        chapter_id: message.chapter_id,
+        created_at: toIso(message.created_at),
+        ...(hasCurriculumSource && {
+          rag_source: sourceCard?.rag_source,
+          rag_chunks: sourceCard?.rag_chunks,
+          rag_subject_id: sourceCard?.rag_subject_id,
+          rag_subject_name: sourceCard?.rag_subject_name,
+          rag_chapter_id: sourceCard?.chapter_id,
+          rag_chapter_name: sourceCard?.rag_chapter_name,
+          rag_chapter_slug: sourceCard?.rag_chapter_slug,
+          rag_board_name: sourceCard?.rag_board_name,
+          rag_class_name: sourceCard?.rag_class_name,
+          rag_stream_name: sourceCard?.rag_stream_name,
+          rag_stream_slug: sourceCard?.rag_stream_slug,
+          rag_course_name: sourceCard?.rag_course_name,
+          rag_course_slug: sourceCard?.rag_course_slug,
+          rag_board_slug: sourceCard?.rag_board_slug,
+          rag_class_slug: sourceCard?.rag_class_slug,
+          rag_subject_slug: sourceCard?.rag_subject_slug,
+          rag_topic_name: sourceCard?.rag_topic_name,
+          matched_passage: sourceCard?.matched_passage,
+          retrieval_method: sourceCard?.retrieval_method,
+          source_confidence: sourceCard?.source_confidence,
+          match_score: sourceCard?.match_score,
+          confidence_tier: sourceCard?.confidence_tier,
+          source_type: sourceCard?.source_type,
+          rag_path: sourceCard?.rag_path,
+          source_entries: sourceEntries,
+        }),
+      };
+    }),
   });
 }
 

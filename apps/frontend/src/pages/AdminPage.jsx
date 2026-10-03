@@ -501,6 +501,7 @@ export default function AdminPage({ adminCookieAccess = false }) {
               <ActiveComponent
                 adminToken={adminToken}
                 adminName={adminName}
+                userRole={user?.role || (adminName === 'Admin' ? 'admin' : 'staff')}
                 onNavigate={handleNavigate}
                 navContext={SECTIONS_WITH_CONTEXT.has(activeSection) ? navContext : null}
                 moduleId={activeSection}

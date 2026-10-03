@@ -137,6 +137,7 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
 
   it('renders only the internal RAG curriculum path and hides external sources', () => {
     renderBubble({
+      questionText: 'Why does a force change an object’s motion?',
       msg: {
         id: 'sources-1',
         role: 'assistant',
@@ -156,11 +157,21 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
             id: 'chapter:motion',
             title: 'Motion',
             kind: 'curriculum',
-            url: '/assam/hs-1/physics/motion',
+            url: '/as/ahsec/hs-1st-year/science/physics/motion',
             snippet: 'Motion is a change in position.',
             medium: 'assamese',
             source_type: 'rag_chapter',
             score: 0.91,
+            chapter_slug: 'motion',
+            subject_slug: 'physics',
+            class_slug: 'hs-1st-year',
+            board_slug: 'ahsec',
+            course_slug: 'science',
+            topic_name: 'Force and Motion',
+            subject_name: 'Physics',
+            class_name: 'HS 1st Year',
+            board_name: 'AHSEC',
+            course_name: 'Science',
           },
           {
             id: 'web:doi',
@@ -175,13 +186,17 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
       },
     });
 
+    expect(screen.getByTestId('curriculum-match-question')).toHaveTextContent(
+      'Why does a force change an object’s motion?',
+    );
     const path = screen.getByTestId('curriculum-match-path');
     expect(path).toHaveTextContent('Topic: Force and Motion');
     expect(path).toHaveTextContent('Chapter: Motion');
     expect(path).toHaveTextContent('Subject: Physics');
+    expect(path).toHaveTextContent('Course: Science');
     expect(path).toHaveTextContent('Class: HS 1st Year');
-    expect(path).toHaveTextContent('Board: AHSEC');
-    expect(screen.getByRole('button', { name: /Open curriculum match: Topic Force and Motion/ })).toBeTruthy();
+    expect(path).not.toHaveTextContent('Board: AHSEC');
+    expect(screen.getByRole('button', { name: /Open curriculum source: Physics, Topic Force and Motion/ })).toBeTruthy();
     expect(screen.queryByText('Sources used')).toBeNull();
     expect(screen.queryByText('Supporting research')).toBeNull();
   });

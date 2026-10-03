@@ -35,3 +35,10 @@ Degree course types are represented by `streams.slug` values (`major`, `minor`, 
 **Why:** The D1 schema stores the degree taxonomy in the same hierarchy as school streams; grouping by subject names or omitting the board join can mix catalogues.
 
 **How to apply:** Treat the six slugs as the supported taxonomy, scope every lookup to the requested board, and preserve `{ slug, name, description, icon, subject_count, subjects: [{ id, name }] }` for the profile selector.
+
+## AEC content-card placement
+For library content, AEC courses are subject cards under Degree → semester → an existing program stream (such as B.A.). Do not create an AEC stream for these cards. This is distinct from the `aec` stream slug used by the degree profile course-type selector above.
+
+**Why:** The user clarified that AEC is a course within a semester and stream; the profile selector uses a separate course-type taxonomy.
+
+**How to apply:** Place each syllabus AEC card under its correct semester and existing degree stream, while leaving the profile selector taxonomy unchanged.

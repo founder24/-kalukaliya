@@ -6,10 +6,15 @@ import {
   fetchAuthoritativeIntentContext,
   fetchChapterContent,
   fetchMatchedChunkContext,
+  buildSourceEntries,
+  findPublishedTopicForQuestion,
   firstUsableContext,
   normalizeChatSourceType,
   detectAuthoritativeIntent,
+  resolvePublishedTopicTitle,
+  retrieveDirectQuestionTopicId,
   resolveCurriculumScope,
+  selectTopicIdForChapter,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
   shouldSkipSemanticRetrievalForWebIntent,
@@ -19,6 +24,145 @@ import {
 } from './chat';
 
 describe('chapter-scoped chat retrieval', () => {
+  it('resolves Vectorize topic IDs only to published titles in the response language', () => {
+    const topics = JSON.stringify([
+      { id: 'topic-cell', title: 'Cell membrane', title_as: 'কোষ আৱৰণ' },
+    ]);
+
+    expect(resolvePublishedTopicTitle(topics, 'topic-cell')).toBe('Cell membrane');
+    expect(resolvePublishedTopicTitle(topics, 'topic-cell', 'as')).toBe('কোষ আৱৰণ');
+    expect(resolvePublishedTopicTitle(topics, 'unpublished-topic')).toBeNull();
+  });
+
+  it('maps an exact question mention to the longest published topic title', () => {
+    const topics = JSON.stringify([
+      { id: 'topic-cell', title: 'Cell' },
+      { id: 'topic-cell-membrane', title: 'Cell membrane' },
+    ]);
+
+    expect(findPublishedTopicForQuestion(
+      topics,
+      'Why is the cell membrane selectively permeable?',
+    )).toEqual({ topicId: 'topic-cell-membrane', title: 'Cell membrane' });
+    expect(findPublishedTopicForQuestion(topics, 'Explain osmosis')).toBeNull();
+  });
+
+  it('selects direct-question topic matches only from the requested chapter and content type', () => {
+    const matches = [
+      {
+        id: 'other-chapter',
+        score: 0.99,
+        metadata: { chapterId: 'chapter-2', topicId: 'wrong-chapter', sourceType: 'notes' },
+      },
+      {
+        id: 'wrong-type',
+        score: 0.98,
+        metadata: { chapterId: 'chapter-1', topicId: 'wrong-type', sourceType: 'qa' },
+      },
+      {
+        id: 'chapter-topic',
+        score: 0.87,
+        metadata: { chapterId: 'chapter-1', topicId: 'topic-cell', sourceType: 'notes' },
+      },
+    ];
+
+    expect(selectTopicIdForChapter(
+      matches as unknown as Parameters<typeof selectTopicIdForChapter>[0],
+      'chapter-1',
+      'notes',
+    )).toBe('topic-cell');
+  });
+
+  it('embeds a direct chapter question and filters its topic lookup to that chapter', async () => {
+    const aiRun = vi.fn(async () => ({ data: [{ values: [0.1, 0.2, 0.3] }] }));
+    const vectorizeQuery = vi.fn(async (
+      _embedding: number[],
+      _options: { filter?: Record<string, string> },
+    ) => ({
+      matches: [{
+        id: 'cell-topic-vector',
+        score: 0.91,
+        metadata: {
+          chapterId: 'chapter-1',
+          topicId: 'topic-cell',
+          sourceType: 'notes',
+        },
+      }],
+    }));
+
+    await expect(retrieveDirectQuestionTopicId(
+      { run: aiRun } as unknown as Parameters<typeof retrieveDirectQuestionTopicId>[0],
+      { query: vectorizeQuery } as unknown as Parameters<typeof retrieveDirectQuestionTopicId>[1],
+      'Why does the cell membrane control transport?',
+      'en',
+      'chapter-1',
+      'notes',
+    )).resolves.toBe('topic-cell');
+
+    expect(aiRun).toHaveBeenCalledOnce();
+    expect(vectorizeQuery).toHaveBeenCalledOnce();
+    expect(vectorizeQuery.mock.calls[0]?.[1]).toMatchObject({
+      filter: {
+        medium: 'english',
+        chapterId: 'chapter-1',
+        sourceType: 'notes',
+      },
+    });
+  });
+
+  it('builds the source chain and click path from the matched published hierarchy', async () => {
+    let query = '';
+    const row = {
+      chapter_name: 'Cell structure',
+      chapter_slug: 'cell-structure',
+      published_topics: JSON.stringify([{ id: 'topic-cell', title: 'Cell membrane' }]),
+      subject_id: 'biology-11',
+      subject_slug: 'biology',
+      course_name: 'Science',
+      course_slug: 'science',
+      class_slug: 'class-11',
+      board_slug: 'ahsec',
+      subject_name: 'Biology',
+      class_name: 'Class 11',
+      board_name: 'AHSEC',
+    };
+    const d1 = {
+      prepare: vi.fn((sql: string) => {
+        query = sql;
+        return { bind: vi.fn(() => ({ first: vi.fn(async () => row) })) };
+      }),
+    };
+
+    const entries = await buildSourceEntries(
+      d1 as unknown as D1Database,
+      [{
+        chapterId: 'chapter-cell',
+        chapterTitle: 'Unverified client title',
+        content: 'The cell membrane controls movement into and out of the cell.',
+        score: 0.91,
+        topicId: 'topic-cell',
+        sourceType: 'notes',
+      }] as Parameters<typeof buildSourceEntries>[1],
+      [],
+      'en',
+      { question: 'Why does this structure regulate transport?' },
+    );
+
+    expect(query).toContain("chapters.status = 'published'");
+    expect(query).toContain('streams.name AS course_name');
+    expect(entries[0]).toMatchObject({
+      title: 'Cell structure',
+      url: '/ahsec/class-11/science/biology/cell-structure',
+      subject_id: 'biology-11',
+      topic_name: 'Cell membrane',
+      subject_name: 'Biology',
+      course_name: 'Science',
+      class_name: 'Class 11',
+      board_name: 'AHSEC',
+    });
+    expect(JSON.stringify(entries)).not.toContain('topic-cell');
+  });
+
   it.each([
     ['notes', 'notes'],
     ['qa', 'qa'],

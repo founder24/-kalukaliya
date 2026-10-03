@@ -76,7 +76,8 @@
 - [Cloudflare secret verification](cloudflare-secret-verification.md) — verify Worker secret names only; generate shared values once and provision every target together.
 - [Cloudflare analytics workflow permissions](cloudflare-analytics-workflow-permissions.md) — analytics GraphQL schema is valid, but the deployment token needs zone analytics read permission.
 - [Workers AI Assamese generation](workers-ai-assamese.md) — use SEA-LION non-streaming; Assamese/Bengali share script and danda must not trigger Hindi detection.
-- [Explicit curriculum scope](chat-curriculum-scope.md) — explicit class/subject wording must fail closed and every RAG source must pass full published-hierarchy validation.
+- [Explicit curriculum scope](chat-curriculum-scope.md) — fail closed on explicit scope conflicts; map verified chat sources through the published hierarchy and retain provenance in history.
+- [Chat ad scope](chat-ad-scope.md) — hide ad placements on `/chat` only; keep them unchanged on every other page.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
 - [Chat cancellation state](chat-cancellation-state.md) — use immediate stream abort plus bounded D1 tombstone polling, not per-token database reads.
 - [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
@@ -102,3 +103,5 @@
 - [Drizzle migration history](drizzle-migration-history.md) — preserve applied names; verify parallel histories and clean-database replay before restoring or renumbering SQL.
 - [Backend test isolation](backend-test-isolation.md) — Keep endpoint lifespan mocks and canonical script module identity scoped; avoid replacing `sys.modules` in importer tests.
 - [Live test request fidelity](live-test-request-fidelity.md) — Preserve raw traversal paths and validate every redirect hop before following it.
+- [Syrabit library bundle edge cache](syrabit-library-bundle-edge-cache.md) — CDN purges do not clear the Edge Worker's separate library-bundle KV cache.
+- [Vectorize deletion batching](vectorize-delete-batching.md) — limit each ID-deletion request to 100 IDs; larger cleanup requests fail and can block RAG publishing.

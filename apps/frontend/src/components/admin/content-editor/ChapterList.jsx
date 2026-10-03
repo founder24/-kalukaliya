@@ -29,6 +29,7 @@ export default function ChapterList({
   onPublishChapter, publishingChapters = new Set(),
   selSubject, subjectData, onCreateNew,
   selectedIds, onToggleSelect, onToggleSelectAll,
+  manualOnly = false,
 }) {
   const total = typeof totalChapters === 'number' ? totalChapters : chapters.length;
   const [expandedCard, setExpandedCard] = useState(null);
@@ -142,11 +143,13 @@ export default function ChapterList({
                           testIdPrefix={`chapter-status-toggle-${ch.id}`}
                         />
                       : <StatusBadge status={ch.status} />}
-                    <RagSyncBadge
-                      ragUpdatedAt={ch.rag_updated_at}
-                      ragIndexedAt={ch.rag_indexed_at}
-                      size="xs"
-                    />
+                    {!manualOnly && (
+                      <RagSyncBadge
+                        ragUpdatedAt={ch.rag_updated_at}
+                        ragIndexedAt={ch.rag_indexed_at}
+                        size="xs"
+                      />
+                    )}
                     {ch.content_type === 'question_paper' && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(245,158,11,0.15)', color: '#d97706', border: '1px solid rgba(245,158,11,0.25)' }}>PYQ</span>
                     )}
@@ -159,7 +162,7 @@ export default function ChapterList({
                     {hasAssamese && (
                       <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.20)' }}>অসমীয়া</span>
                     )}
-                    {hasUnpublishedEdit && (
+                    {!manualOnly && hasUnpublishedEdit && (
                       <span
                         title={`Saved ${new Date(ch.content_saved_at).toLocaleString()} but last published ${new Date(ch.published_at).toLocaleString()}`}
                         className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide"
@@ -176,24 +179,28 @@ export default function ChapterList({
                     <p className="text-[11px] text-gray-400 mt-1 leading-relaxed line-clamp-2">{preview}{preview.length >= 130 ? '…' : ''}</p>
                   )}
                   {!hasNotes && !preview && (
-                    <p className="text-[11px] text-gray-300 mt-1 italic">No notes yet — generate with AI or edit manually</p>
+                    <p className="text-[11px] text-gray-300 mt-1 italic">
+                      {manualOnly ? 'No notes yet — edit manually' : 'No notes yet — generate with AI or edit manually'}
+                    </p>
                   )}
                 </div>
                 <div className="flex gap-0.5 flex-shrink-0 ml-1">
-                  <button
-                    onClick={() => onGenerateNotes(ch.id, ch.title)}
-                    data-testid={`generate-notes-${ch.id}`}
-                    disabled={generatingNotes.has(ch.id)}
-                    className="flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-semibold disabled:opacity-40 transition-all hover:brightness-110"
-                    style={hasNotes
-                      ? { background: 'rgba(16,185,129,0.15)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.25)' }
-                      : { background: 'linear-gradient(135deg,rgba(124,58,237,0.35),rgba(79,70,229,0.35))', color: '#7c3aed', border: '1px solid rgba(139,92,246,0.35)' }}
-                    title={hasNotes ? 'Regenerate AI notes for this chapter' : 'Generate AI notes for this chapter'}
-                  >
-                    {generatingNotes.has(ch.id)
-                      ? <><Loader2 size={10} className="animate-spin" /> Generating…</>
-                      : <><Sparkles size={10} /> {hasNotes ? 'Regen' : 'AI ⚡'}</>}
-                  </button>
+                  {onGenerateNotes && (
+                    <button
+                      onClick={() => onGenerateNotes(ch.id, ch.title)}
+                      data-testid={`generate-notes-${ch.id}`}
+                      disabled={generatingNotes?.has(ch.id)}
+                      className="flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-semibold disabled:opacity-40 transition-all hover:brightness-110"
+                      style={hasNotes
+                        ? { background: 'rgba(16,185,129,0.15)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.25)' }
+                        : { background: 'linear-gradient(135deg,rgba(124,58,237,0.35),rgba(79,70,229,0.35))', color: '#7c3aed', border: '1px solid rgba(139,92,246,0.35)' }}
+                      title={hasNotes ? 'Regenerate AI notes for this chapter' : 'Generate AI notes for this chapter'}
+                    >
+                      {generatingNotes?.has(ch.id)
+                        ? <><Loader2 size={10} className="animate-spin" /> Generating…</>
+                        : <><Sparkles size={10} /> {hasNotes ? 'Regen' : 'AI ⚡'}</>}
+                    </button>
+                  )}
                   <button onClick={() => onViewChapter(ch)} className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400" title="Preview lesson" data-testid={`open-chapter-${ch.id}`}><Eye size={13} /></button>
                   <button onClick={() => onEditChapter(ch)} data-testid={`edit-chapter-${ch.id}`}
                     className="p-1.5 rounded-lg hover:bg-violet-500/10 text-gray-400 hover:text-violet-400" title="Edit chapter"><Edit2 size={13} /></button>
@@ -264,7 +271,7 @@ export default function ChapterList({
                         {ch.coverage_score}% Coverage
                       </span>
                     )}
-                    {(hasPyqs || hasSeoTopics || hasSeoPages || ch.content_saved_at || ch.published_at || ch.rag_updated_at || ch.rag_indexed_at) && (
+                    {!manualOnly && (hasPyqs || hasSeoTopics || hasSeoPages || ch.content_saved_at || ch.published_at || ch.rag_updated_at || ch.rag_indexed_at) && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setExpandedCard(expandedCard === ch.id ? null : ch.id); }}
                         className="ml-auto flex items-center gap-0.5 text-[9px] text-gray-300 hover:text-gray-500 transition"
