@@ -224,6 +224,9 @@ describe('ChapterPage — ?tab= URL sharing', () => {
     // Q&A cards panel must be present
     expect(screen.getByTestId('topic-answer-cards')).toBeTruthy();
 
+    // Subject context stays visible outside the active content tab.
+    expect(screen.getByTestId('text-subject-name').textContent).toBe('English');
+
     // Notes markdown must NOT be visible
     expect(screen.queryByTestId('notes-content')).toBeNull();
   });
@@ -290,6 +293,7 @@ describe('ChapterPage — ?tab= URL sharing', () => {
     });
 
     expect(screen.getByTestId('notes-content')).toBeTruthy();
+    expect(screen.getByTestId('text-subject-name').textContent).toBe('English');
     expect(screen.queryByTestId('topic-answer-cards')).toBeNull();
     expect(screen.queryByTestId('pyq-viewer')).toBeNull();
   });

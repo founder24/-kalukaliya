@@ -17,6 +17,7 @@ progress and backup records.
 Run from apps/backend:
   python3 -m scripts.ahsec_d1_import --dry-run
   python3 -m scripts.ahsec_d1_import --clean-preambles --dry-run
+  python3 -m scripts.ahsec_d1_import --only-empty --dry-run
   python3 -m scripts.ahsec_d1_import --limit 1
   python3 -m scripts.ahsec_d1_import --confirm-production-write --limit 1
 
@@ -192,6 +193,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--class", dest="class_level", choices=["11", "12"])
     parser.add_argument("--subject", help="D1 subject slug, for example chemistry")
+    parser.add_argument(
+        "--only-empty",
+        action="store_true",
+        help=(
+            "Import only chapters with empty notes and no existing RAG content; "
+            "production writes also use a conditional D1 update"
+        ),
+    )
     parser.add_argument("--delay", type=float, default=1.0)
     parser.add_argument(
         "--restart",
@@ -288,8 +297,19 @@ class CloudflareClient:
             raise RuntimeError(f"D1 query failed: {statement}")
         return statement.get("results") or []
 
-    def execute(self, sql: str, params: list[Any] | None = None) -> None:
-        self.query(sql, params)
+    def execute(self, sql: str, params: list[Any] | None = None) -> int:
+        body = self._post(
+            f"{self.api}/d1/database/{DATABASE_ID}/query",
+            {"sql": sql, "params": params or []},
+        )
+        statements = body.get("result") or []
+        if not statements:
+            return 0
+        statement = statements[0]
+        if not statement.get("success", True):
+            raise RuntimeError(f"D1 query failed: {statement}")
+        meta = statement.get("meta") or {}
+        return int(meta.get("changes") or 0)
 
     def generate(
         self,
@@ -797,6 +817,7 @@ def production_scope(args: argparse.Namespace) -> dict[str, Any]:
         "limit": args.limit,
         "restart": args.restart,
         "skip_index": args.skip_index,
+        "only_empty": getattr(args, "only_empty", False),
         "clean_preambles": args.clean_preambles,
     }
     repair_index = _repair_index_ids(args)
@@ -913,6 +934,19 @@ def fetch_chapters(client: CloudflareClient) -> list[dict[str, Any]]:
         """
         SELECT ch.id, ch.subject_id, ch.title, ch.slug, ch.chapter_number,
                ch.notes_en, ch.rag_text, ch.rag_sections_en,
+               EXISTS (
+                   SELECT 1
+                   FROM rag_documents rd
+                   WHERE rd.id = 'ahsec-notes-en:' || ch.id
+                     AND LENGTH(TRIM(COALESCE(rd.content, ''))) > 0
+               ) AS has_notes_rag_document,
+                EXISTS (
+                    SELECT 1
+                    FROM chunks ck
+                    WHERE ck.chapter_id = ch.id
+                      AND ck.source_type = 'notes'
+                      AND ck.medium = 'english'
+                ) AS has_notes_rag_chunks,
                s.name AS subject_name, s.slug AS subject_slug,
                st.name AS stream_name, c.name AS class_name
         FROM chapters ch
@@ -1041,21 +1075,68 @@ def backup_existing(chapter: dict[str, Any], source_url: str) -> None:
     append_jsonl(BACKUP_FILE, payload)
 
 
+def chapter_has_empty_notes_and_index(chapter: dict[str, Any]) -> bool:
+    """Only seed rows with no English notes or pre-existing RAG content."""
+    if str(chapter.get("notes_en") or "").strip():
+        return False
+    if str(chapter.get("rag_text") or "").strip():
+        return False
+    has_notes_document = str(
+        chapter.get("has_notes_rag_document") or ""
+    ).strip().lower()
+    if has_notes_document not in {"", "0", "false", "none"}:
+        return False
+    has_notes_chunks = str(
+        chapter.get("has_notes_rag_chunks") or ""
+    ).strip().lower()
+    if has_notes_chunks not in {"", "0", "false", "none"}:
+        return False
+    rag_sections = str(chapter.get("rag_sections_en") or "").strip().lower()
+    return rag_sections in {"", "[]", "null"}
+
+
 def write_notes(
     client: CloudflareClient,
     chapter: dict[str, Any],
     notes: str,
     sections: list[dict[str, str]],
     source_url: str,
-) -> None:
+    *,
+    only_if_empty: bool = False,
+) -> bool:
     now = int(time.time())
     sections_json = json.dumps(sections, ensure_ascii=False)
-    client.execute(
+    empty_only_predicate = (
         """
+          AND (notes_en IS NULL OR TRIM(notes_en) = '')
+          AND (rag_text IS NULL OR TRIM(rag_text) = '')
+          AND (
+            rag_sections_en IS NULL
+            OR LOWER(TRIM(rag_sections_en)) IN ('', '[]', 'null')
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM rag_documents rd
+            WHERE rd.id = 'ahsec-notes-en:' || chapters.id
+              AND LENGTH(TRIM(COALESCE(rd.content, ''))) > 0
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM chunks ck
+            WHERE ck.chapter_id = chapters.id
+              AND ck.source_type = 'notes'
+              AND ck.medium = 'english'
+          )
+        """
+        if only_if_empty
+        else ""
+    )
+    changed = client.execute(
+        f"""
         UPDATE chapters
         SET notes_en = ?, rag_text = ?, rag_sections_en = ?,
             word_count_en = ?, rag_updated_at = ?, updated_at = ?
-        WHERE id = ?
+        WHERE id = ?{empty_only_predicate}
         """,
         [
             notes,
@@ -1067,6 +1148,13 @@ def write_notes(
             chapter["id"],
         ],
     )
+    if only_if_empty:
+        if changed is None:
+            raise RuntimeError(
+                "D1 did not report affected rows for the empty-only update"
+            )
+        if changed == 0:
+            return False
     provenance = {
         "provider": "AHSEC/ASSEB",
         "official": True,
@@ -1075,8 +1163,13 @@ def write_notes(
         "subjectSlug": chapter["subject_slug"],
         "chapterTitle": chapter["title"],
     }
+    rag_document_conflict_guard = (
+        " WHERE LENGTH(TRIM(COALESCE(rag_documents.content, ''))) = 0"
+        if only_if_empty
+        else ""
+    )
     client.execute(
-        """
+        f"""
         INSERT INTO rag_documents
           (id, chapter_id, subject_id, source_type, medium, content, metadata,
            indexed_at, created_at)
@@ -1084,7 +1177,7 @@ def write_notes(
         ON CONFLICT(id) DO UPDATE SET
           content = excluded.content,
           metadata = excluded.metadata,
-          indexed_at = excluded.indexed_at
+          indexed_at = excluded.indexed_at{rag_document_conflict_guard}
         """,
         [
             f"ahsec-notes-en:{chapter['id']}",
@@ -1096,6 +1189,7 @@ def write_notes(
             now,
         ],
     )
+    return True
 
 
 def replace_index(
@@ -1207,12 +1301,22 @@ def replace_notes_and_index(
     source_url: str,
     *,
     index: bool,
-) -> int:
+    only_if_empty: bool = False,
+) -> int | None:
     """Write one chapter and, when enabled, replace its index atomically."""
     with chapter_index_lock(str(chapter["id"])):
         try:
             backup_existing(chapter, source_url)
-            write_notes(client, chapter, notes, sections, source_url)
+            wrote_notes = write_notes(
+                client,
+                chapter,
+                notes,
+                sections,
+                source_url,
+                only_if_empty=only_if_empty,
+            )
+            if not wrote_notes:
+                return None
         except Exception as exc:
             raise ChapterContentWriteError(str(exc)) from exc
         if not index:
@@ -1661,6 +1765,16 @@ async def _run_main() -> int:
     if repair_index_ids and args.skip_index:
         log.error("--repair-index cannot be combined with --skip-index")
         return 2
+    if args.only_empty and (
+        args.clean_preambles
+        or repair_index_ids
+        or getattr(args, "archive_history", False)
+    ):
+        log.error(
+            "--only-empty applies only to normal note imports; do not combine it "
+            "with cleanup, index repair, or audit archiving"
+        )
+        return 2
     if getattr(args, "archive_history", False):
         try:
             summary = archive_history(
@@ -1703,6 +1817,20 @@ async def _run_main() -> int:
         chapters = [row for row in chapters if row["class_name"] == expected]
     if args.subject:
         chapters = [row for row in chapters if row["subject_slug"] == args.subject]
+    if args.only_empty:
+        initial_count = len(chapters)
+        chapters = [
+            row for row in chapters if chapter_has_empty_notes_and_index(row)
+        ]
+        log.info(
+            "Only-empty Notes scope: %d eligible chapter(s), %d populated or "
+            "conflicting chapter(s) skipped",
+            len(chapters),
+            initial_count - len(chapters),
+        )
+        if not chapters:
+            log.info("No empty AHSEC Notes match the requested filters; no writes.")
+            return 0
 
     if repair_index_ids:
         if args.dry_run:
@@ -1832,7 +1960,7 @@ async def _run_main() -> int:
         )
 
     sources = await extract_sources(args)
-    done = set() if args.restart else load_done()
+    done = set() if args.restart or args.only_empty else load_done()
     matches: list[tuple[dict[str, Any], dict[str, Any], float]] = []
     unmatched: list[dict[str, Any]] = []
     for chapter in chapters:
@@ -1930,6 +2058,7 @@ async def _run_main() -> int:
                     sections,
                     str(source["source_pdf_url"]),
                     index=not args.skip_index,
+                    only_if_empty=args.only_empty,
                 )
             except ChapterContentWriteError as exc:
                 raise exc.__cause__ or exc
@@ -1945,6 +2074,19 @@ async def _run_main() -> int:
                     source_pdf_url=str(source["source_pdf_url"]),
                 )
                 log.exception("Chapter write/index failed for %s: %s", chapter_id, exc)
+                await asyncio.sleep(max(0.0, args.delay))
+                continue
+            if chunk_count is None:
+                record_progress(
+                    chapter_id,
+                    "skipped",
+                    operation="only-empty-guard",
+                    reason="notes_or_index_became_nonempty_before_write",
+                )
+                log.info(
+                    "Skipped %s because its Notes or RAG content changed after inventory",
+                    chapter_id,
+                )
                 await asyncio.sleep(max(0.0, args.delay))
                 continue
             record_progress(

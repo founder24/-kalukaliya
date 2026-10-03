@@ -1061,8 +1061,13 @@ jobs:
       - name: Verify Chromium runtime libraries
         run: bash .github/scripts/verify-playwright-runtime.sh
 
-      - name: Test staff portal diagnostic privacy
-        run: node --test scripts/staff-portal-diagnostics.test.mjs
+      - name: Test staff portal diagnostics and asset-readiness policy
+        run: node --test scripts/staff-portal-diagnostics.test.mjs scripts/check-production-staff-assets.test.mjs
+
+      - name: Verify fresh production staff shell assets
+        # Only stale hashed bundle 404/network failures retry; Access/document
+        # failures stop before any disposable production account is created.
+        run: node scripts/check-production-staff-assets.mjs
 
       - name: Create, validate, and always remove a temporary admin
         run: bash scripts/run-disposable-staff-auth-cutover.sh

@@ -1259,6 +1259,28 @@ export default function ChapterPage() {
                   <span className="flex items-center gap-1"><Hash size={12} />{filterTopicHeadings(headings).length} {contentLang === 'as' ? 'বিষয়' : 'topics'}</span>
                 )}
               </div>
+              <Link
+                to={basePath}
+                data-testid="link-subject-card"
+                aria-label={contentLang === 'as' ? `${subjectName} বিষয়ৰ অধ্যায়সমূহ চাওক` : `Browse ${subjectName} subject chapters`}
+                className="mt-3 inline-flex max-w-full items-center gap-3 rounded-xl border border-border/60 bg-background/80 px-3 py-2.5 text-left no-underline transition-colors hover:border-primary/40 hover:bg-accent/30 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <BookOpen size={17} aria-hidden="true" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {contentLang === 'as' ? 'বিষয়' : 'Subject'}
+                  </span>
+                  <span data-testid="text-subject-name" className="block truncate text-sm font-semibold text-foreground">
+                    {subjectName}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {[boardName, className, streamName].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                <ChevronRight size={16} className="ml-2 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </Link>
             </div>
           </div>
 
