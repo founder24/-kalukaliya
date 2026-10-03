@@ -1,0 +1,610 @@
+Course Code: AEC0400402N Syllabus Framework: Gauhati University & Assam State FYUGP (NEP Model) Total Marks: 50 Marks (External Written: 30 Marks | Internal Assessment: 20 Marks) Passing Standard: 40% in External & Internal Evaluations
+
+Unit 1: Developing Professional Writing Skills
+Chapter 1: Book Review Writing
+1-Mark Questions (Objective & Factual Recall)
+What is the primary function of the bibliographic header in a book review? Answer: To record critical publication metadata (title, author, publisher, publication year, total pages, price, and ISBN) so prospective readers can identify and procure the text.
+What does the term "spoiler" mean in book review etiquette? Answer: The premature disclosure of major plot twists, climaxes, or narrative endings that deprives prospective readers of the reading experience.
+A book review is strictly an objective summary with no personal opinions. (True or False) Answer: False (A review requires critical evaluation and subjective analytical judgment alongside summary).
+Name the standard concluding component of an academic book review. Answer: Target audience recommendation and final rating.
+2-Mark Questions (Short Concepts & Distinctions)
+Distinguish between a book summary and a book review. Answer:
+Book Summary: An objective, descriptive recapitulation of plot or arguments without personal judgment.
+Book Review: A critical appraisal that analyzes literary craft, evaluates strengths and limitations, and assesses whether the author fulfilled their intended purpose.
+Mention two criteria used to evaluate non-fiction prose in a book review. Answer: (i) The logical validity, factual accuracy, and credibility of the author’s thesis, and (ii) The clarity, structural organization, and readability of the prose style.
+What is the function of the "Hook" in a book review's opening paragraph? Answer: To engage reader attention using an intriguing question, notable quotation, or striking statement while introducing the book's core premise and authorial context.
+5-Mark Applied Writing Task: Model Book Review
+Write a concise critical book review of an autobiographical or non-fiction work you have read recently.
+
+Title: Wings of Fire: An Autobiography Author: Dr. A.P.J. Abdul Kalam (with Arun Tiwari) Publisher: Universities Press | Pages: 180 | Price: ₹250 | ISBN: 978-8173711466
+
+Wings of Fire is an inspiring autobiographical account tracing Dr. A.P.J. Abdul Kalam’s journey from his modest childhood in Rameswaram to leading India's major space satellite and missile defense programs.
+
+The narrative tracks Kalam’s early educational hurdles, highlighting the mentorship of his parents and teachers. The core chapters chronicle his technical leadership at ISRO and DRDO, detailing the development of the SLV-3, along with the Agni and Prithvi missile systems. Rather than focusing solely on technological mechanics, Kalam emphasizes team leadership, organizational resilience, and learning from project failures.
+
+The book’s primary strength lies in its accessible, candid prose, blending patriotic dedication with personal humility. Its only minor limitation is an occasional excess of technical acronyms in later project chapters. Overall, Wings of Fire is an essential read for students and young professionals seeking lessons in leadership and perseverance. Rating: 4.5/5
+
+Chapter 2: Right to Information (RTI) Applications
+1-Mark Questions (Objective & Legal Recall)
+In which year was the Right to Information Act enacted by the Parliament of India? Answer: 2005.
+What does the acronym 'PIO' stand for under the RTI Act? Answer: Public Information Officer.
+What is the statutory deadline for a PIO to reply to a standard RTI application? Answer: 30 days from the date of receipt of the application.
+What is the statutory deadline if the information sought concerns the life or liberty of an individual? Answer: 48 hours.
+What is the prescribed Central Government RTI application fee? Answer: ₹10.
+Applicants belonging to the Below Poverty Line (BPL) category are exempt from paying RTI application fees. (True or False) Answer: True.
+2-Mark Questions (Short Concepts & Legal Procedures)
+What constitutes a 'Public Authority' under Section 2(h) of the RTI Act, 2005? Answer: Any authority, body, or institution established by the Constitution, by parliamentary or state laws, or by government notification, including institutions owned, controlled, or substantially financed by government funds.
+State two legal grounds under which a PIO can reject an RTI request. Answer: (i) If the information falls under the exemption provisions of Section 8 (e.g., national security, cabinet papers, trade secrets), and (ii) If the disclosure infringes third-party copyright.
+What legal remedy is available to an applicant if the PIO fails to respond within 30 days? Answer: The applicant can file a First Appeal under Section 19(1) before the designated First Appellate Authority (FAA) within 30 days of the deadline's expiration.
+5-Mark Applied Writing Task: Model RTI Application
+Draft a formal application under the RTI Act, 2005 addressed to the Public Information Officer of your municipal corporation inquiring about the delay in local civic road repairs.
+
+To, The Public Information Officer (PIO), Guwahati Municipal Corporation (GMC), Panbazar, Guwahati, Assam – 781001
+
+Subject: Application under Section 6(1) of the Right to Information Act, 2005 regarding pending road repairs.
+
+Name of Applicant: Aniket Sharma
+Address for Correspondence: House No. 12, R.G. Baruah Road, Guwahati, Assam – 781024
+Contact Details: +91 98765-XXXXX | aniket.sharma@email.com
+Particulars of Information Sought: Please furnish certified information regarding the repair work on the road connecting Zoo Road Tiniali and Nabagraha Path:
+Certified copy of the sanctioned work order, budget allocation, and completion timeline.
+The name and official business address of the contractor/agency awarded the contract.
+The recorded official reasons for the project exceeding its January 15, 2026 completion deadline.
+Certified copies of the site inspection reports and material quality tests filed by municipal engineers.
+Fee Payment Details: An Indian Postal Order (IPO) No. 45F 987123 of ₹10 is enclosed as the prescribed application fee.
+Declaration: I state that I am a citizen of India and eligible to seek information under the RTI Act, 2005.
+
+Date: 21st September, 2026 Place: Guwahati (Signature) Aniket Sharma
+
+Chapter 3: Resume, CV & Cover Letter Writing
+1-Mark Questions (Objective & Technical Terms)
+What is the full Latin form of the abbreviation 'CV'? Answer: Curriculum Vitae (meaning "course of life").
+What is the standard ideal length of an entry-level professional resume? Answer: One to two pages.
+In a Chronological Resume, employment history is organized starting with the earliest job. (True or False) Answer: False (It is organized in reverse-chronological order, placing the most recent role first).
+Which document explicitly details personal particulars such as religion, marital status, and father's name? Answer: Bio-data.
+2-Mark Questions (Short Concepts & Distinctions)
+Distinguish between a Resume and a Curriculum Vitae (CV). Answer:
+Resume: A concise, targeted 1–2 page document summarizing job skills, education, and employment achievements tailored to a specific role.
+CV: An exhaustive, page-unlimited academic dossier documenting complete publication records, degrees, research grants, and teaching tenure.
+What is a Functional (Skills-Based) Resume, and when should it be used? Answer: A format that groups qualifications under functional skill headings rather than reverse-chronological job titles; it is ideal for career switchers or candidates with employment gaps.
+What is the primary purpose of an accompanying Cover Letter? Answer: To introduce the applicant, explain how their qualifications match the job description, and connect their background directly to the employer's needs.
+10-Mark Comprehensive Task: Complete Application Portfolio
+Draft an application cover letter and an accompanying reverse-chronological resume applying for the post of Junior Content Specialist at an educational publishing firm.
+
+Part A: Formal Cover Letter
+Aniket Sharma Chandmari, Guwahati, Assam – 781003 | +91 98765-XXXXX | aniket.sharma@email.com September 21, 2026
+
+The Hiring Manager Spectrum Academic Publishers, GS Road, Dispur, Guwahati – 781005
+
+Subject: Application for the Position of Junior Content Specialist (Ref: SP/2026/CS-04)
+
+Dear Hiring Manager,
+
+I am writing to express my interest in the Junior Content Specialist position at Spectrum Academic Publishers, as advertised on your corporate careers portal. Having completed my Bachelor of Arts in English under the FYUGP curriculum at Gauhati University, along with editorial internship experience in digital publishing, I offer strong copy editing, proofreading, and content structuring skills.
+
+During my six-month internship at Assam Academic Press, I edited over 60 textbook chapters, verified adherence to Chicago and APA style manuals, and worked directly with authors to resolve copy queries. This hands-on experience refined my ability to produce clear, accurate, and engaging text while meeting firm production schedules.
+
+I welcome the opportunity to discuss how my editorial background can support Spectrum Academic Publishers' upcoming titles. Thank you for your time and consideration.
+
+Sincerely, (Signature) Aniket Sharma Enclosure: Resume
+
+Part B: Professional Resume Format
+================================================================================
+                               ANIKET SHARMA
+        Chandmari, Guwahati – 781003 | 98765-XXXXX | aniket.sharma@email.com
+================================================================================
+
+PROFESSIONAL SUMMARY
+Detail-oriented English graduate with editorial internship experience in copy 
+editing, manuscript proofreading, and educational content production. Skilled 
+in applying Chicago and Oxford style manuals, managing digital publication 
+workflows, and collaborating with authors under strict deadlines.
+
+EDUCATION
+• Bachelor of Arts in English (FYUGP)                               2023 – 2026
+  B. Borooah College, Gauhati University | CGPA: 8.4/10.0
+• Higher Secondary (Arts)                                           2021 – 2023
+  Cotton University, Guwahati | Percentage: 88.6%
+
+EDITORIAL EXPERIENCE
+Editorial Intern | Assam Academic Press, Guwahati             June 2025 – Dec 2025
+• Copy-edited 60+ textbook chapters, correcting syntax, grammar, and typography.
+• Reduced typographical errors by 25% through standardized multi-pass checklists.
+• Formatted references and bibliographies in line with APA and Chicago standards.
+
+KEY SKILLS
+• Editorial: Copy Editing, Proofreading, Fact-Checking, Content Structuring
+• Style Manuals: Chicago Manual of Style (CMOS), Oxford Style Guide, APA
+• Digital Tools: MS Word (Track Changes), Google Docs, Adobe Acrobat Pro, Canva
+
+CERTIFICATIONS & ACHIEVEMENTS
+• Certificate in Professional Editing & Proofreading (Oxford Writing Academy, 2025)
+• First Prize, Inter-College Academic Essay Competition (GU Youth Fest, 2024)
+================================================================================
+Chapter 4: Professional & Technical Formats (Letters, Notices, Memos & Reports)
+1-Mark Questions (Objective & Format Recall)
+What is the primary operational purpose of an Office Memorandum (Memo)? Answer: To communicate internal decisions, administrative updates, or instructions within the same organization.
+A formal public notice must always be enclosed within a boxed frame. (True or False) Answer: True.
+What does 'Ref. No.' indicate in official business letters? Answer: Reference Number (an alphanumeric code used to track, record, and archive correspondence).
+In which grammatical voice and person should an official Incident Report be composed? Answer: Objective third-person voice using passive construction.
+2-Mark Questions (Short Concepts & Conventions)
+Distinguish between an Office Memorandum and an Office Circular. Answer:
+Memorandum: Targeted internal correspondence sent to a specific person or department regarding a focused matter.
+Circular: General internal correspondence sent to all staff members across the entire organization to announce universal policy updates.
+State two essential details that must appear in a formal Letter of Complaint. Answer: (i) Clear transaction details (invoice/bill number, date of purchase, model number), and (ii) An itemized list of defects followed by a specific requested remedy (repair, replacement, or refund).
+5-Mark Applied Writing Tasks
+Option A: Model Letter of Complaint
+Draft a formal business letter to a hardware vendor complaining about the delivery of defective computer monitors for your college laboratory.
+
+The Principal B. Borooah College, Guwahati – 781007 Ref No: BBC/LAB/2026/104 September 21, 2026
+
+The Sales Manager Nexus Infotech Solutions, Paltan Bazar, Guwahati – 781008
+
+Subject: Complaint regarding defective delivery of LED Monitors (Invoice No: NX-8841)
+
+Dear Sir/Madam,
+
+I am writing regarding our purchase order (Ref: BBC/PO/2026/089) dated September 2, 2026, for twenty (20) Dell 24-inch LED monitors. The consignment was received at our laboratory yesterday under Invoice No: NX-8841.
+
+Upon unpacking and testing the units, our technical staff discovered that four (4) monitors (Serial Nos: DL-401 through DL-404) have fractured display panels, and two (2) units fail to power on entirely.
+
+Given that all units are under a three-year comprehensive manufacturer warranty, we request an urgent replacement of these six defective monitors within seven (7) business days. Please arrange for your technical team to inspect and collect the damaged units.
+
+Yours sincerely, (Signature) Dr. P.K. Sarma Principal, B. Borooah College
+
+Option B: Model Official Notice
+Draft an official notice on behalf of the College Literary Society notifying students about an upcoming Inter-College Debate Competition.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     B. BOROOAH COLLEGE LITERARY SOCIETY                      │
+│                                GUWAHATI - 781007                             │
+│                                                                              │
+│ Ref No: BBC/LS/2026/12                                  Date: 21 Sept, 2026  │
+│                                                                              │
+│                                    NOTICE                                    │
+│                    INTER-COLLEGE DEBATE COMPETITION 2026                     │
+│                                                                              │
+│ All students are hereby informed that the College Literary Society is        │
+│ organizing the Annual Inter-College Debate Competition on Friday, October    │
+│ 16, 2026, in the College Auditorium from 10:30 AM onwards.                   │
+│                                                                              │
+│ Topic: "Artificial Intelligence in Higher Education: Catalyst or Obstacle?" │
+│ Eligibility: Undergraduate students of all semesters.                        │
+│ Rules: Each team must consist of two debaters (one 'For' and one 'Against'). │
+│                                                                              │
+│ Interested participants must submit their names to the undersigned on or     │
+│ before October 8, 2026. Certificates and cash prizes will be awarded to the  │
+│ top three teams.                                                             │
+│                                                                              │
+│ (Signature)                                                                  │
+│ Aniket Sharma                                                                │
+│ General Secretary, Literary Society                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+Unit 2: Digital Media, Professional Networking & Ethical AI Communication
+Chapter 5: Professional Email Writing & Digital Etiquette
+1-Mark Questions (Objective & Digital Conventions)
+What is the functional purpose of the 'Bcc' (Blind Carbon Copy) field in an email client? Answer: To send copies of an email to recipients while keeping their email addresses hidden from everyone else on the thread.
+Typing an entire email body in CAPITAL LETTERS is considered the digital equivalent of shouting. (True or False) Answer: True.
+Give an example of an effective, professional email subject line for an internship application. Answer: Internship Application: Editorial Trainee – Aniket Sharma (Roll 45).
+Which sign-off is inappropriate for formal workplace email: "Sincerely" or "Cheers"? Answer: "Cheers".
+2-Mark Questions (Short Concepts & Netiquette)
+Mention two common email etiquette mistakes to avoid in professional correspondence. Answer: (i) Leaving the subject line blank or writing vague phrases like "Hello" or "Urgent", and (ii) Using informal abbreviations (e.g., u, plz, thx) or casual emojis in formal threads.
+When is it appropriate to use the 'Reply All' button in an email thread? Answer: Only when the information in the reply is necessary for every person on the thread to complete their work, avoiding unnecessary inbox clutter for uninvolved recipients.
+What essential details should be included in a professional email signature block? Answer: Full name, current job title/student designation, institutional or corporate affiliation, phone number, and official website or LinkedIn profile link.
+5-Mark Applied Writing Task: Model Professional Email
+Draft a formal email to your college principal requesting permission to organize a one-day workshop on Professional Communication Skills.
+
+To: principal@bborooahcollege.ac.in Cc: englishdept@bborooahcollege.ac.in Subject: Request for Permission: One-Day Workshop on Professional Communication Skills
+
+Dear Principal Sir,
+
+I am writing on behalf of the 4th Semester English Department students to request permission to organize a one-day student workshop titled "Professional Communication and Workplace Writing" on Friday, October 16, 2026, in the College Seminar Hall.
+
+The workshop aims to provide undergraduate students with practical training in resume drafting, professional email etiquette, and interview techniques. Dr. Kaberi Das, Senior Training Specialist at Global Edutech Guwahati, has agreed to lead the sessions as our guest resource speaker. The English Department faculty have reviewed and approved our proposed event schedule (attached).
+
+We kindly request your approval to use the Seminar Hall and audiovisual equipment from 10:00 AM to 3:30 PM.
+
+Thank you for your time and continued support.
+
+Sincerely, Aniket Sharma Student Coordinator, 4th Semester (AEC English) Roll No: 45 | Contact: +91 98765-XXXXX B. Borooah College, Guwahati
+
+Chapter 6: Microblogging & Social Media Communication
+1-Mark Questions (Objective & Platform Rules)
+What is the standard character limit for a single standard post on X (formerly Twitter)? Answer: 280 characters.
+What is the primary function of the hashtag (#) symbol in microblogging? Answer: To index, categorize, and group posts around specific topics, making them discoverable across search streams.
+The '@' symbol in microblogging is used to tag or direct a message to a specific user account. (True or False) Answer: True.
+What is a "thread" in microblogging? Answer: A connected series of related posts published by the same user to share longer ideas beyond single-post character limits.
+2-Mark Questions (Short Concepts & Strategies)
+Explain the 'Inverted Pyramid' writing style used in microblogging. Answer: Placing the most critical information (who, what, when, where) in the opening sentence, followed by supporting details, ensuring readers absorb the main point immediately within short character limits.
+Mention two ethical guidelines an organization should follow during a social media public relations crisis. Answer: (i) Respond promptly with verified facts rather than deleting critical public comments, and (ii) Maintain an empathetic, professional tone without arguing with users.
+What is meant by 'Brand Voice' in social media communication? Answer: The consistent personality, tone, vocabulary, and values an institution projects across its digital channels.
+5-Mark Applied Writing Task: Model Social Media Thread
+Draft a thread of two professional tweets/posts for your university's official account announcing undergraduate admissions, including key deadlines and contact links.
+
+Post 1/2: 🎓 Admissions Open: Gauhati University invites applications for its 4-Year Undergraduate Programme (FYUGP) for the 2026–27 academic session! Explore multidisciplinary programs across Arts, Sciences, and Commerce. 🔗 Apply online by May 15: gauhati.ac.in/admissions #GauhatiUniversity #FYUGP2026 #HigherEducation
+
+Post 2/2: 📌 Need assistance with online applications or subject combinations? Our student support desk is open Monday to Saturday (10 AM – 5 PM). 📧 Contact: admissions@gauhati.ac.in | 📞 0361-257XXXX Begin your academic journey with us! #AssamEducation #CollegeAdmissions #Degree2026
+
+Chapter 7: Professional Networking & LinkedIn Profile Development
+1-Mark Questions (Objective & Profile Mechanics)
+What is the standard character limit for a LinkedIn Professional Headline? Answer: 220 characters.
+In which grammatical person should a LinkedIn 'About' (Summary) narrative be written? Answer: First-person ("I", "my").
+Sending a personalized connection note increases the likelihood of an invitation being accepted on LinkedIn. (True or False) Answer: True.
+What is the primary function of the 'Featured' section on a LinkedIn profile? Answer: To showcase top work samples, articles, portfolio links, certificates, or awards prominently near the top of the profile.
+2-Mark Questions (Short Concepts & Networking Etiquette)
+Why is a generic LinkedIn headline like “Student at ABC College” considered ineffective? Answer: It fails to highlight specific skills, academic focus, or career aspirations, making the profile blend into generic search results.
+Mention two best practices when sending a connection request to an industry professional on LinkedIn. Answer: (i) Add a polite, personalized note explaining how you found their profile and why you want to connect, and (ii) Avoid pitching for a job in the very first message.
+What role do 'Keywords' play in optimizing a LinkedIn profile? Answer: Keywords ensure the profile appears in search results when recruiters search for specific skills, tools, or qualifications.
+5-Mark Applied Writing Tasks
+Option A: Model LinkedIn Headline & Summary
+Draft an optimized LinkedIn Professional Headline and a three-paragraph 'About' Summary for a final-year undergraduate seeking opportunities in corporate communications.
+
+Professional Headline: Undergraduate English Student at Gauhati University | Content Writer & Communications Trainee | Copy Editing, Technical Writing & Digital Networking
+
+About (Summary): I am a final-year English undergraduate at Gauhati University focused on turning ideas into clear, effective writing. My academic coursework and editorial internships have helped me build strong foundations in structural editing, professional correspondence, and corporate communication workflows.
+
+During my time as Student Coordinator for the College Editorial Board, I led the production of our annual journal, editing over 40 articles and managing deadlines across student teams. I enjoy working at the intersection of language, design, and digital media—whether drafting formal reports, writing web copy, or refining professional emails.
+
+Core Competencies: • Copy Editing & Proofreading • Digital Professional Writing & Email Etiquette • Project Reporting & Public Relations • Tools: Microsoft Office, Google Workspace, Canva, CMS platforms
+
+I welcome connections with publishing professionals, content strategists, and fellow writers. Feel free to connect or email me directly at aniket.sharma@email.com.
+
+Option B: Model LinkedIn Connection Request Note
+Draft a personalized 300-character LinkedIn connection request note addressed to a senior editor at a publishing house.
+
+Dear Ms. Baruah, 
+
+I follow your editorial work at Assam Academic Press with great admiration. As a final-year English undergraduate at Gauhati University aspiring to work in academic publishing, I would value connecting with you to learn from your industry insights.
+
+Warm regards,
+Aniket Sharma
+(Character count: ~280 characters)
+
+Chapter 8: Ethical Use of Artificial Intelligence (AI) in Communication
+1-Mark Questions (Objective & AI Literacy)
+What does the term "AI Hallucination" mean in generative language models? Answer: A phenomenon where an AI model generates factually incorrect statements, fake citations, or non-existent quotes while presenting them with plausible authority.
+Submitting an AI-generated essay as your own original work is considered a form of academic plagiarism. (True or False) Answer: True.
+What does the acronym 'HITL' stand for in ethical AI-assisted communication? Answer: Human-in-the-Loop.
+Inputting confidential corporate records or private personal data into commercial AI chatbots can cause data privacy breaches. (True or False) Answer: True.
+2-Mark Questions (Short Concepts & Ethical Dilemmas)
+What is 'Algorithmic Bias' in Generative AI text production? Answer: Systematic prejudices or cultural stereotypes present in an AI tool's training data that cause the model to generate biased or discriminatory outputs.
+State two ethical boundaries students must respect when using AI for academic assignments. Answer: (i) Use AI tools for preliminary brainstorming, outlining, and structural refinement rather than generating entire essays, and (ii) Fact-check every citation, statistic, and quote against primary scholarly literature.
+Why is human editing necessary when using AI translation or writing tools? Answer: To correct factual errors (hallucinations), adjust unnatural phrasing, ensure appropriate cultural context, and preserve an authentic human voice.
+5-Mark Analytical Note: Ethical Guidelines for AI Use
+Write a short note on the ethical guidelines undergraduate students should follow when using Artificial Intelligence tools for writing assignments.
+
+Artificial Intelligence writing assistants can support learning when used responsibly, but students must follow clear ethical boundaries:
+
+Brainstorming over Drafting: AI tools should be used to outline topics, summarize background readings, or refine grammatical structures, rather than generating entire essays.
+Mandatory Fact-Checking: Generative AI tools often hallucinate historical quotes, legal precedents, and scholarly sources. Students must verify every claim against peer-reviewed books and journals.
+Transparent Disclosure: When university guidelines permit AI use, students should acknowledge the tool and prompts used in their methodology or reference notes.
+Preserving Original Voice: Higher education builds critical thinking. Relying entirely on automated text prevents students from developing their own analytical voice. Human writers must remain responsible for the final ideas, interpretations, and integrity of their work.
+
+Unit 1: Developing Professional Writing Skills
+Chapter 1: Book Review Writing
+1. Definition, Purpose & Critical Function
+Definition: A book review is a critical evaluation of a written work that combines an analytical summary of its core content with an objective assessment of its strengths, limitations, and overall contribution to its field or genre.
+Primary Objective: To guide prospective readers on whether the work warrants their time and financial investment, while evaluating how successfully the author fulfilled their stated thesis.
+Book Summary vs. Book Review:
+Summary: A descriptive, objective condensation of plot, arguments, and content with zero subjective judgment or critical evaluation.
+Review: An evaluative appraisal that analyzes literary craft, assesses factual validity, interrogates methodology, and offers a personal verdict.
+2. Standard Five-Part Architecture of a Book Review
+┌────────────────────────────────────────────────────────┐
+│             BOOK REVIEW STRUCTURAL ANATOMY             │
+├────────────────────────────────────────────────────────┤
+│ 1. Bibliographic Header                                │
+│    • Title, Author, Publisher, Year, Pages, Price, ISBN│
+│ 2. Introduction (The Hook & Context)                   │
+│    • Opening statement, author profile, thesis         │
+3. Thematic / Narrative Summary                          │
+│    • Core premise, structure (No Spoilers)             │
+│ 4. Critical Assessment & Literary Appraisal            │
+│    • Prose style, pacing, factual evidence, flaws      │
+│ 5. Conclusion, Audience Recommendation & Rating        │
+│    • Target readership, final value verdict, rating    │
+└────────────────────────────────────────────────────────┘
+Bibliographic Header: Records essential publication metadata at the top: Full Title, Author, Publisher, Year of Publication, Edition, Total Page Count, Retail Price, and ISBN.
+Introduction (The Hook & Thesis): Engages the reader using an intriguing quote, striking observation, or thematic question. Introduces the author’s background, historical context, and the reviewer’s thesis statement regarding the work's overall success.
+Thematic Summary (Spoiler-Free Overview): Condenses the central narrative arc (for fiction/autobiography) or core theoretical arguments (for non-fiction). The Golden Rule: No Spoilers. Avoid revealing major plot twists, turning points, or endings.
+Critical Assessment & Stylistic Evaluation: The analytical core of the review, evaluating:
+Thematic Depth & Originality: Does the author present fresh perspectives or repeat clichés?
+Prose Craft & Pacing: Is the language accessible, lyrical, dense, or jargon-laden? Does the pacing drag?
+Evidence & Research: For non-fiction, are claims backed by verified documentation, primary archives, or data?
+Defects & Limitations: Identify weak character development, unexamined biases, or gaps in argumentation.
+Conclusion, Recommendation & Rating: Summarizes the final impression. Explicitly identifies the target readership (e.g., general readers, undergraduates, academic specialists) and assigns a clear numerical or qualitative rating (e.g., 4.5/5 stars).
+3. Evaluation Criteria for Fiction vs. Non-Fiction
+Dimension	Fiction Review Metrics	Non-Fiction Review Metrics
+Primary Focus	Character development, plot coherence, emotional resonance, narrative voice.	Thesis clarity, empirical evidence, logical consistency, research rigor.
+Pacing & Style	Descriptive imagery, dialogue authenticity, suspense, structural balance.	Readability, structural organization, density of specialized jargon.
+Contribution	Aesthetic originality, subversion of genre tropes, emotional depth.	Contribution to existing scholarship, public discourse, practical applicability.
+Chapter 2: Right to Information (RTI) Applications
+1. Legal Background & Core Statutory Provisions
+The Right to Information Act, 2005: Enacted by the Parliament of India to promote transparency, accountability, and containment of corruption in public authorities. It grants Indian citizens the legal power to inspect public works, access certified documents, and obtain official records.
+Public Authority (Section 2(h)): Any authority, body, or institution established:
+By or under the Constitution of India;
+By any Central or State law;
+By government notification, including non-governmental organizations substantially financed by government funds.
+Public Information Officer (PIO / CPIO): The designated administrative officer in every public authority responsible for receiving applications, procuring information from relevant wings, and delivering it to the applicant.
+Statutory Timelines (Section 7(1)):
+Standard Queries: Information must be provided within 30 days of application receipt.
+Involvement of Assistant PIO (APIO): Timeline extends to 35 days.
+Life or Liberty of a Person: Information must be provided within 48 hours.
+Fee Structure:
+Standard application fee: ₹10 (paid via Indian Postal Order [IPO], Demand Draft, or court fee stamp).
+BPL Exemption: Citizens below the poverty line are exempt from all application and photocopying fees (must enclose a certified copy of a valid BPL card).
+Appellate Mechanisms:
+First Appeal (Section 19(1)): Filed within 30 days of deadline expiry or receipt of an adverse order, addressed to the First Appellate Authority (FAA) (an officer senior in rank to the PIO).
+Second Appeal (Section 19(3)): Filed within 90 days of the FAA's decision before the State Information Commission (SIC) or Central Information Commission (CIC).
+                         THE RTI STATUTORY TIMELINE
+                                     │
+    Day 0: Application filed with PIO + ₹10 Fee
+    Day 30: Deadline for delivery of information (48 hrs if life/liberty)
+                                     │
+                     [If rejected or no reply received]
+                                     │
+    Day 31–60: File First Appeal under Section 19(1) to First Appellate Authority
+    Day 61–105: FAA issues final appellate order (within 30–45 days)
+                                     │
+                     [If dissatisfied with FAA order]
+                                     │
+    Within 90 Days: File Second Appeal under Section 19(3) to State/Central Commission
+2. Drafting Strategy & Rules
+Target Specific Records: Request physical, recorded documentation (e.g., “certified copies of work orders, measurement books, tender notices”).
+Avoid Interrogative "Why" Questions: The RTI Act allows access to recorded data, not administrative justifications.
+Incorrect: “Why did the engineer not fix the road?”
+Correct: “Certified copy of the file notes and inspection reports regarding the repair of Road X.”
+Keep Questions Numbered and Precise: Structure requests into distinct points rather than long paragraphs.
+3. Master Standard Format: RTI Application
+To,
+The Public Information Officer (PIO),
+[Designation & Name of the Public Authority / Department],
+[Official Physical Address, City, State – PIN Code]
+
+1. Full Name of the Applicant : [Your Full Legal Name]
+2. Address for Correspondence : [Complete Residential Address with PIN]
+3. Contact Details            : [Phone Number] | [Email Address]
+4. Citizenship Status         : Citizen of India
+
+5. Particulars of Information Sought under Section 6(1) of the RTI Act, 2005:
+   [Provide specific, numbered, clear requests for recorded information]
+   (i)   Certified copy of [Document Name / Sanction Order / File Notings]...
+   (ii)  Certified copy of the expenditure ledger and funds sanctioned for...
+   (iii) Name, official designation, and contact details of the contractor/official...
+   (iv)  The recorded dates of scheduled inspection and completion of...
+
+6. Period to which Information Relates: [e.g., 01 April 2025 to 31 March 2026]
+
+7. Application Fee Details:
+   Enclosed herewith is an Indian Postal Order (IPO) / Demand Draft No. [XXXXXX] 
+   dated [DD/MM/YYYY] for the prescribed amount of ₹10, drawn in favor of 
+   [Designated Accounts Officer / Public Authority].
+   [OR: The applicant belongs to the Below Poverty Line category; BPL Card No. XXXXX is enclosed].
+
+Declaration:
+I hereby declare that I am a citizen of India and that the information sought 
+falls within the scope of Section 2(f) and Section 6(1) of the RTI Act, 2005.
+
+Place: [City / Town]                                            ..........................
+Date : [DD/MM/YYYY]                                             (Signature of Applicant)
+Chapter 3: Resume, CV & Cover Letter Writing
+1. Document Typology: Resume vs. CV vs. Bio-Data
+Evaluation Metric	Resume	Curriculum Vitae (CV)	Bio-Data
+Etymology	French: Résumé (“summary”).	Latin: Course of Life.	English: Biographical Data.
+Primary Scope	Private sector, corporate roles, technical jobs.	Academia, scientific research, fellowships, medical roles.	Government clerkships, military defense, matrimonial profiles.
+Standard Length	1 to 2 pages maximum.	Unlimited (3 to 10+ pages).	1 to 2 pages.
+Core Emphasis	Specific job skills, achievements, measurable outcomes.	Complete academic record, publications, conferences, grants.	Personal details (gender, religion, date of birth, marital status).
+Customization	Tailored to each specific job description.	Comprehensive record; updated as accomplishments occur.	Static, standardized biographical form.
+2. Resume Structural Formats
+                           RESUME FORMAT CLASSIFICATION
+                                        │
+     ┌──────────────────────────────────┼──────────────────────────────────┐
+     ▼                                  ▼                                  ▼
+CHRONOLOGICAL FORMAT             FUNCTIONAL FORMAT                  COMBINATION / HYBRID
+• Reverse chronological timeline • Skills-based clusters            • Combines skills summary
+• Best for stable career growth  • Hides employment gaps / pivots    with chronological history
+Reverse-Chronological Format:
+Lists education and employment history from most recent to earliest.
+Best suited for: Candidates with a steady, linear career progression in the same field.
+Preferred by automated Applicant Tracking Systems (ATS) and corporate recruiters.
+Functional (Skills-Based) Format:
+Groups qualifications under functional skill categories (e.g., "Editorial Management," "Digital Media Strategy") rather than chronological dates.
+Best suited for: Professionals with employment gaps or candidates changing industries.
+Combination (Hybrid) Format:
+Features a prominent skills summary at the top, followed by a reverse-chronological work history.
+Best suited for: Experienced professionals seeking to highlight specialized competencies while maintaining a verifiable employment record.
+3. Writing Effective Achievement Bullet Points
+The Action-Verb Formula: Start each bullet point with a strong past-tense action verb (e.g., Formulated, Coordinated, Spearheaded, Systematized).
+The Google X-Y-Z Metric: “Accomplished [X] as measured by [Y], by doing [Z].”
+Weak: “Helped with editing student articles.”
+Strong (X-Y-Z): “Edited 45 academic manuscripts [X], reducing typographical errors by 30% [Y], by implementing a standardized three-pass proofreading checklist [Z].”
+4. Cover Letter: The Three-Tier Architecture
+A formal cover letter must accompany a resume, acting as a tailored pitch that links the applicant's credentials directly to the employer's needs.
+
+Salutation: Address the hiring manager by name (“Dear Dr. Baruah,” “Dear Ms. Hazarika”). Use “Dear Hiring Manager” only if the name is unavailable. Avoid “To Whom It May Concern”.
+Paragraph 1 (The Hook & Intent): State the exact position applied for, the job reference code, and a brief statement of qualification.
+Paragraph 2 (The Match & Evidence): Connect your specific background to the role’s requirements. Highlight 2–3 specific accomplishments using evidence and numbers.
+Paragraph 3 (The Actionable Close): Reaffirm enthusiasm for the organization, request an interview, and reference the enclosed resume.
+Chapter 4: Professional & Technical Formats
+1. Formal Business Letters
+Format Structure:
+Sender's Letterhead / Address: Top left or centered.
+Dateline: Fully written out (e.g., 21 September 2026, never 21/9/26).
+Reference Number: Tracks correspondence in corporate filing systems.
+Inside Address: Name, designation, and company address of the recipient.
+Subject Line: Concise, bolded statement of purpose (under 10 words).
+Salutation: Formal greeting (“Dear Sir/Madam,”).
+Body: Three-paragraph structure (Opening statement, core details/evidence, expected remedy/action).
+Complimentary Close: “Yours faithfully” (if recipient is unnamed) or “Yours sincerely” (if named).
+Signature Block: Handwritten signature, typed full name, and designation.
+Types of Formal Business Letters:
+Letter of Inquiry: Requests detailed information, catalogs, price quotations, or service terms.
+Letter of Complaint: Details a contractual breach, defective delivery, or service shortfall, requesting replacement or a refund.
+Placing an Order: Lists items, specifications, unit prices, shipping instructions, and agreed payment terms.
+2. Official Memoranda (Memos)
+Purpose: Internal communication within the same company or department to announce policy updates, assign duties, or document operational directives.
+Key Features: Direct, concise, and operational. Memos omit formal inside addresses and complimentary closes.
+┌────────────────────────────────────────────────────────────────────────┐
+│                   [ORGANIZATION / INSTITUTION NAME]                    │
+│                               MEMORANDUM                               │
+│                                                                        │
+│ TO      : [Recipient Name / Departmental Group]                        │
+│ FROM    : [Sender Name and Designation]                                │
+│ DATE    : [DD Month YYYY]                                              │
+│ REF NO  : [Institutional Reference Code]                               │
+│ SUBJECT : [Concise, Bold Subject Statement]                            │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1. Context / Statement of Issue:                                       │
+│    State the administrative update or policy directive directly.       │
+│                                                                        │
+│ 2. Operational Directives:                                             │
+│    List instructions, guidelines, or procedures in numbered points.    │
+│                                                                        │
+│ 3. Deadline / Action Required:                                         │
+│    Specify the compliance timeline and responsible personnel.          │
+│                                                                        │
+│                                              ......................... │
+│                                              (Sender's Signature)      │
+└────────────────────────────────────────────────────────────────────────┘
+3. Public Notices
+Purpose: Public announcements designed to share important information with a broad audience within an institution.
+Key Format Rules:
+Must be enclosed within a boxed frame.
+The word NOTICE must appear centered in bold capital letters below the institutional name.
+Must include the issue date, an informative title, clear body text covering What, When, Where, Who, and Why, and the issuing authority's signature.
+4. Technical Incident & Event Reports
+Purpose: An objective, factual account of an event, project milestone, or workplace accident.
+Core Style Guidelines:
+Objective Third-Person Voice: Use passive constructions (“The fire was detected,” “The session was inaugurated”); avoid personal pronouns (I, we).
+Chronological Structure: Document events sequentially from initiation to conclusion.
+Factual Precision: Use verified data, specific times, names, and measurable costs.
+Actionable Recommendations: Conclude incident reports with specific preventive measures.
+Unit 2: Digital Media, Professional Networking & Ethical AI Communication
+Chapter 5: Professional Email Writing & Digital Etiquette
+1. Architectural Anatomy of a Workplace Email
+┌────────────────────────────────────────────────────────────────────────┐
+│ TO      : Primary recipient(s) responsible for direct action           │
+│ CC      : Carbon Copy (Secondary stakeholders informed for visibility) │
+│ BCC     : Blind Carbon Copy (Conceals addresses; used for broad groups)│
+│ SUBJECT : Actionable, concise summary (5–8 words)                      │
+├────────────────────────────────────────────────────────────────────────┤
+│ SALUTATION : Formal honorific ("Dear Dr. Sharma,")                     │
+│                                                                        │
+│ OPENING    : Direct statement of purpose in sentence one.              │
+│ BODY       : Scannable paragraphs with bullet points for readability.  │
+│ CLOSING CTA: Clear deadline, request, or expected next steps.          │
+│ SIGN-OFF   : Professional close ("Sincerely," "Best regards,")         │
+│                                                                        │
+│ SIGNATURE BLOCK: Full Name | Job Title | Institution | Contact Details │
+└────────────────────────────────────────────────────────────────────────┘
+The Subject Line: The primary filter determining whether an email is opened. It must be specific, searchable, and professional.
+Poor: “Quick question,” “Hey,” “Urgent”
+Professional: “Request for Leave: Aniket Sharma (Roll 45),” “Minutes: Curriculum Committee Meeting (Sept 21)”
+The Recipient Fields:
+To: The individuals from whom direct action or a response is required.
+Cc (Carbon Copy): Individuals who need to stay informed, but are not required to take direct action.
+Bcc (Blind Carbon Copy): Conceals recipient email addresses from everyone else. Used to protect privacy when sending messages to large groups, or for discreet record-keeping.
+Salutations & Sign-Offs:
+Formal Salutations: “Dear Professor Baruah,” “Dear Mr. Goswami,” “Dear Selection Committee,”
+Casual Salutations (Avoid in Business): “Hey folks,” “Hi there,” “Yo”
+Professional Sign-offs: “Sincerely,” “Respectfully,” “Best regards,” “Warm regards,”
+Inappropriate Sign-offs: “Cheers,” “Thanks a bunch,” “Yours lovingly”
+2. Netiquette: The Rules of Digital Email Etiquette
+Avoid ALL CAPS: Typing in capital letters is read as digital screaming.
+The "Reply All" Rule: Use Reply All only if your response is essential to every recipient on the thread. For personal acknowledgments (“Thank you, got it”), reply only to the sender.
+Double-Check Attachments: Always confirm that files are attached and correctly named before hitting send.
+Maintain Professional Spacing: Use single spacing within paragraphs and a double space between paragraphs. Avoid informal slang, acronyms (BTW, ASAP), and casual emojis.
+Chapter 6: Microblogging & Social Media Communication
+1. Platform Dynamics & Writing Constraints
+Definition: Microblogging involves publishing short, direct messages on platforms like X (formerly Twitter) and Threads to inform, engage, and drive traffic to external resources.
+Character Economy: Standard posts on X are limited to 280 characters. Writers must make every word count by using active verbs, eliminating filler adjectives, and using concise phrasing.
+The Inverted Pyramid Model: Place the most critical information (who, what, when, where) in the opening sentence, followed by supporting details, links, and hashtags.
+                  THE INVERTED PYRAMID IN MICROBLOGGING
+                  ┌───────────────────────────────────┐
+                  │ 1. THE LEAD (Core Fact / Event)   │
+                  ├───────────────────────────────────┤
+                  │ 2. Context & Actionable Links     │
+                  ├───────────────────────────────────┤
+                  │ 3. Category Hashtags & Handles    │
+                  └───────────────────────────────────┘
+2. Social Media Mechanics & Strategy
+Hashtag (#) Usage:
+Functions as a search index to group related conversations across the platform.
+Best Practice: Use 1 to 3 targeted hashtags per post. Cluttering posts with excessive hashtags reduces engagement and readability.
+Account Tagging (@): Mentions other accounts to direct messages, credit sources, or alert institutional partners.
+Thread Architecture: A linked series of posts used to unpack complex stories or multi-step announcements that exceed single-post character limits.
+Brand Voice: The consistent personality, tone, vocabulary, and values an organization maintains across its public channels (e.g., academic, authoritative, accessible, or empathetic).
+3. Crisis Communication on Social Media
+When an institutional mistake, service disruption, or controversy occurs:
+
+Acknowledge Quickly with Verified Facts: Silence allows rumors to spread. Post verified information promptly.
+Never Delete Critical Comments Arbitrarily: Deleting public criticism looks defensive and damages institutional credibility.
+Keep Tone Empathetic and Professional: Avoid arguing with users. Direct complex disputes to private channels (“Please DM our team with your application ID so we can resolve this directly”).
+Chapter 7: Professional Networking & LinkedIn Profile Development
+1. Profile Architecture & Personal Branding
+                    THE LINKEDIN OPTIMIZATION FORMULA
+                                    │
+    ┌───────────────────────────────┼───────────────────────────────┐
+    ▼                               ▼                               ▼
+HEADLINE (220 Chars)            ABOUT SUMMARY                   EXPERIENCE BULLETS
+Role + Skills + Focus           1st-person narrative arc        Action verb + metric
+"English Major | Copy Editor"   Hook + Expertise + Call-to-Act  "Edited 40+ journal articles"
+Professional Photo & Background Banner:
+High-resolution, professional headshot with neutral lighting, plain background, and business attire.
+Custom banner reflecting your academic discipline, industry, or research interests.
+The Professional Headline (Up to 220 Characters):
+The most important textual element for search visibility.
+Formula: [Current Role / Degree] | [Key Technical / Editorial Skills] | [Career Focus / Value Proposition]
+Poor: “Student at Gauhati University”
+Optimized: “BA English Graduate at Gauhati University | Content Strategist | Copy Editing, Technical Writing & Digital Communications”
+The "About" (Summary) Section:
+Written in an engaging first-person voice ("I", "my").
+Paragraph 1 (The Hook): Personal passion, academic focus, and career direction.
+Paragraph 2 (Core Competencies): Highlights technical tools, writing styles, and project experience.
+Paragraph 3 (Key Achievements): Specific accomplishments from internships, leadership roles, or awards.
+Paragraph 4 (Call to Action): Welcomes connections and provides professional contact details.
+Experience & Project Descriptions:
+Uses action verbs paired with clear outcomes: “Coordinated,” “Proofread,” “Authored,” “Organized.”
+Featured Section:
+Highlights your best work samples: articles, portfolio links, research papers, and certificates.
+2. Networking Etiquette & Connection Outreach
+Personalize Every Connection Request: Never send a blank connection invite to an unfamiliar professional. Always include a customized note (up to 300 characters) explaining your context and why you wish to connect.
+Avoid Immediate Job Pitches: Build rapport first. Engage with their posts, ask thoughtful questions, and seek informational advice before asking for job referrals.
+Chapter 8: Ethical Use of Artificial Intelligence (AI) in Communication
+1. Generative AI Writing Tools & Mechanics
+Generative AI (Large Language Models / LLMs): Machine-learning systems (e.g., ChatGPT, Claude, Gemini) trained on large text datasets. They predict and generate natural, human-like text based on user prompts.
+Common Use Cases: Brainstorming topics, generating structural outlines, summarizing long background readings, and checking grammar.
+2. The Four Major Ethical Traps
+                           THE FOUR ETHICAL TRAPS OF AI
+                                        │
+     ┌──────────────────┬───────────────┴───────────────┬──────────────────┐
+     ▼                  ▼                               ▼                  ▼
+AI HALLUCINATIONS      AUTOMATED PLAGIARISM            ALGORITHMIC BIAS    DATA PRIVACY LEAKS
+Invented citations,    Passing off AI-generated        Repeating societal  Feeding private records
+fake quotes & facts    text as original writing        stereotypes         into commercial models
+AI Hallucinations:
+A phenomenon where generative language models produce completely fabricated facts, non-existent book titles, or fake citations while presenting them with plausible authority.
+Ethical Imperative: Writers must manually verify every quote, date, and source against primary scholarly literature.
+Automated Plagiarism & Academic Misconduct:
+Copy-pasting AI-generated text into assignments, reports, or articles without attribution violates copyright norms and institutional academic integrity policies.
+Algorithmic Bias:
+AI systems can reflect the cultural, racial, and gender biases present in their training data. Uncritical use can unintentionally reinforce historical stereotypes.
+Data Privacy & Confidentiality Breaches:
+Feeding sensitive corporate reports, patient records, or unreleased academic research into public commercial AI chatbots can compromise private data, as commercial tools often use prompt history for further model training.
+3. The Human-in-the-Loop (HITL) Framework
+The ethical standard for professional and academic writing requires maintaining Human-in-the-Loop (HITL) oversight:
+
+┌────────────────────────────────────────────────────────┐
+│             THE HUMAN-IN-THE-LOOP WORKFLOW             │
+├────────────────────────────────────────────────────────┤
+│ 1. Conception & Ideation : Human identifies goals.     │
+│ 2. AI Brainstorming      : Generates rough outlines.   │
+│ 3. Human Drafting        : Writes original content.    │
+│ 4. AI Polish (Grammar)   : Suggests style edits.       │
+│ 5. Human Verification    : Fact-checks all claims.     │
+│ 6. Full Accountability   : Human signs the final work. │
+└────────────────────────────────────────────────────────┘
+Clear Ethical Boundaries for Students & Professionals:
+Permitted: Using AI to generate structural outlines, brainstorm ideas, rephrase clumsy sentences, and check basic grammar.
+Prohibited: Using AI to draft complete essays, generate literary analysis, or create fake academic citations.
+Full Attribution: Acknowledge AI tool use transparently in project methodology notes or reference pages whenever used.
+Human Accountability: The human author remains fully responsible for the factual accuracy, logical consistency, and ethical integrity of the final submitted text.

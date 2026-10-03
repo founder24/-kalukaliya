@@ -102,3 +102,4 @@
 - [Drizzle migration history](drizzle-migration-history.md) — preserve applied names; verify parallel histories and clean-database replay before restoring or renumbering SQL.
 - [Backend test isolation](backend-test-isolation.md) — Keep endpoint lifespan mocks and canonical script module identity scoped; avoid replacing `sys.modules` in importer tests.
 - [Live test request fidelity](live-test-request-fidelity.md) — Preserve raw traversal paths and validate every redirect hop before following it.
+- [Syrabit library bundle edge cache](syrabit-library-bundle-edge-cache.md) — CDN purges do not clear the Edge Worker's separate library-bundle KV cache.
