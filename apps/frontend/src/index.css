@@ -1559,59 +1559,84 @@
 
 /* ── Source Card (light mode first) ── */
 .source-card-container {
-  background: rgba(124, 58, 237, 0.06);
-  border: 1px solid rgba(124, 58, 237, 0.18);
-  max-width: fit-content;
-  min-width: 200px;
-  box-shadow: 0 1px 4px rgba(124, 58, 237, 0.06);
+  width: 100%;
+  max-width: min(100%, 34rem);
+  min-width: min(200px, 100%);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.11), rgba(16, 185, 129, 0.035));
+  border: 1px solid rgba(5, 150, 105, 0.35);
+  box-shadow: 0 5px 18px rgba(5, 150, 105, 0.12);
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.12s ease;
 }
 .source-card-container:hover {
-  background: rgba(124, 58, 237, 0.11);
-  border-color: rgba(124, 58, 237, 0.32);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(16, 185, 129, 0.06));
+  border-color: rgba(5, 150, 105, 0.55);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.12);
+  box-shadow: 0 8px 22px rgba(5, 150, 105, 0.16);
 }
-.source-card-icon { color: #7c3aed; }
-.source-card-label { color: #7c3aed; opacity: 0.85; }
-.source-card-browser { color: #92400e; }
-.source-card-title { color: #15803d; }
-.source-card-subject {
-  font-size: 0.78rem;
-  font-weight: 700;
+.source-card-icon-shell {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(5, 150, 105, 0.20);
+}
+.source-card-icon { color: #047857; }
+.source-card-label { color: #047857; }
+.source-card-browser { color: #52645d; }
+.source-card-title {
+  color: #047857;
+  font-size: 0.94rem;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: #15803d;
-  line-height: 1.2;
+  letter-spacing: 0.055em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 .source-card-badge {
-  background: rgba(124, 58, 237, 0.10);
-  color: #5b21b6;
-  border: 1px solid rgba(124, 58, 237, 0.20);
+  background: rgba(16, 185, 129, 0.09);
+  border: 1px solid rgba(5, 150, 105, 0.20);
+}
+.source-card-badge-label {
+  color: #52645d;
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.source-card-badge-value {
+  color: #064e3b;
+  overflow-wrap: anywhere;
+}
+.source-card-evidence {
+  background: rgba(5, 150, 105, 0.045);
+  border-color: rgba(5, 150, 105, 0.16);
 }
 
 /* ── Source Card dark mode ── */
 .dark .source-card-container {
-  background: rgba(139, 92, 246, 0.08);
-  border-color: rgba(139, 92, 246, 0.22);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  background: linear-gradient(135deg, rgba(6, 78, 59, 0.48), rgba(9, 17, 15, 0.94) 72%);
+  border-color: rgba(52, 211, 153, 0.42);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.30), inset 0 1px rgba(110, 231, 183, 0.10);
 }
 .dark .source-card-container:hover {
-  background: rgba(139, 92, 246, 0.15);
-  border-color: rgba(139, 92, 246, 0.38);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(135deg, rgba(6, 95, 70, 0.56), rgba(9, 20, 17, 0.97) 72%);
+  border-color: rgba(74, 222, 128, 0.62);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.38), inset 0 1px rgba(110, 231, 183, 0.14);
 }
-.dark .source-card-icon { color: #a78bfa; }
-.dark .source-card-label { color: #a78bfa; opacity: 0.9; }
-.dark .source-card-browser { color: #fbbf24; }
-.dark .source-card-title { color: #34d399; }
-.dark .source-card-subject {
-  color: #4ade80;
+.dark .source-card-icon-shell {
+  background: rgba(16, 185, 129, 0.17);
+  border-color: rgba(52, 211, 153, 0.24);
+}
+.dark .source-card-icon { color: #4ade80; }
+.dark .source-card-label { color: #6ee7b7; }
+.dark .source-card-browser { color: #c1d4cc; }
+.dark .source-card-title { color: #4ade80; }
+.dark .source-card-badge-label { color: #a1b6ad; }
+.dark .source-card-badge-value { color: #e5fff2; }
+.dark .source-card-evidence {
+  background: rgba(0, 0, 0, 0.20);
+  border-color: rgba(52, 211, 153, 0.18);
 }
 .dark .source-card-badge {
-  background: rgba(139, 92, 246, 0.18);
-  color: #c4b5fd;
-  border-color: rgba(139, 92, 246, 0.30);
+  background: rgba(16, 185, 129, 0.11);
+  border-color: rgba(52, 211, 153, 0.24);
 }
 
 

@@ -16,7 +16,6 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { toast } from 'sonner';
 
 import { MessageBubble } from './chat/MessageBubble';
-import ChatSponsoredCard from '@/components/ads/ChatSponsoredCard';
 import { InputBar } from './chat/InputBar';
 import { ModelSelector, MODELS } from './chat/ModelSelector';
 import { Analytics } from '@/utils/analytics';
@@ -31,7 +30,6 @@ import { startTrace, makeTraceparent } from '@/utils/firebasePerf';
 import { EmptyState } from './chat/EmptyState';
 import { useHashScroll } from '@/hooks/useHashScroll';
 import { requestReviewPrompt } from '@/components/ReviewPrompt';
-import { getChatSponsorIndex } from '@/utils/chatAdPlacement';
 
 const MAX_TRANSPORT_AUTO_RETRIES = 1;
 const TRANSPORT_RETRY_DELAY_MS = import.meta.env.MODE === 'test' ? 10 : 3000;
@@ -43,10 +41,6 @@ function createChatRequestId() {
     return `chat_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   }
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// Sponsored content is inserted only after completed assistant turns. It never
-// renders inside a streaming turn or between a question and its answer.
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ── ChatPage ──────────────────────────────────────────────────────────────────
 export default function ChatPage() {
@@ -1218,15 +1212,6 @@ export default function ChatPage() {
                       />
                     </div>
                   );
-                  const sponsorIndex = getChatSponsorIndex(messages, i);
-                  if (sponsorIndex !== null) {
-                    out.push(
-                      <ChatSponsoredCard
-                        key={`sponsor-after-${msg.id || i}`}
-                        placementIndex={sponsorIndex}
-                      />,
-                    );
-                  }
                 });
                 return out;
               })()}
