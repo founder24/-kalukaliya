@@ -4,9 +4,9 @@
 
 aiohttp>=3.14.3
 bcrypt
-beanie>=2.1.0
+beanie>=2.2.0
 beautifulsoup4
-cryptography>=50.0.0
+cryptography>=50.0.2
 fastapi
 google-auth[aiohttp]
 google-cloud-secret-manager
@@ -16,7 +16,7 @@ ddgs
 httpx
 jinja2
 markdown
-motor>=3.7.0
+motor>=3.7.1
 numpy
 pyasn1>=0.6.4
 posthog
@@ -25,17 +25,17 @@ email-validator
 pydantic-settings>=2.14.2
 Pillow>=10.0.0
 pyjwt[crypto]>=2.14.0
-pymongo>=4.11,<5
+pymongo>=4.18.2,<5
 python-dateutil
 python-dotenv
 python-multipart>=0.0.31
 razorpay
 resend
 sentry-sdk
-starlette>=1.3.1
+starlette>=1.7.0
 tenacity
 uvicorn
-pypdf>=6.15.0
+pypdf>=6.19.0
 pypdfium2>=5.13.0
 
 # Pinned directly (not otherwise a direct dependency) to force a resolved
@@ -44,4 +44,4 @@ pypdfium2>=5.13.0
 # pip-compile treats it as "unsafe" and refuses to pin it here — it's
 # upgraded via `pip install --upgrade setuptools` in the Dockerfile instead,
 # same as pip itself.)
-msgpack>=1.2.1
+msgpack>=1.2.3
