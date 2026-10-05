@@ -5,12 +5,11 @@
 #
 # pip-compile --python-version 3.12 --strip-extras --no-header \
 #     --output-file apps/backend/requirements.txt apps/backend/requirements.in
-
 aiohappyeyeballs==2.6.2
     # via aiohttp
 aiohttp==3.14.3
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   google-auth
 aiosignal==1.4.0
     # via aiohttp
@@ -27,13 +26,11 @@ attrs==26.1.0
 backoff==2.2.1
     # via posthog
 bcrypt==5.0.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-beanie==2.1.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
+beanie==2.2.0
+    # via -r requirements.in
 beautifulsoup4==4.15.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-brotli==1.2.0
-    # via httpx
+    # via -r requirements.in
 certifi==2026.5.20
     # via
     #   httpcore
@@ -49,13 +46,13 @@ click==8.4.1
     #   beanie
     #   ddgs
     #   uvicorn
-cryptography==50.0.1
+cryptography==50.0.2
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   google-auth
     #   pyjwt
-ddgs==9.14.4
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+ddgs==9.16.0
+    # via -r requirements.in
 distro==1.9.0
     # via posthog
 dnspython==2.8.0
@@ -64,12 +61,10 @@ dnspython==2.8.0
     #   pymongo
 email-validator==2.3.0
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   pydantic
-fake-useragent==2.2.0
-    # via ddgs
-fastapi==0.136.3
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+fastapi==0.142.2
+    # via -r requirements.in
 frozenlist==1.8.0
     # via
     #   aiohttp
@@ -81,17 +76,17 @@ google-api-core==2.30.3
     #   google-cloud-storage
 google-auth==2.53.0
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   google-api-core
     #   google-cloud-core
     #   google-cloud-secret-manager
     #   google-cloud-storage
 google-cloud-core==2.6.0
     # via google-cloud-storage
-google-cloud-secret-manager==2.29.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+google-cloud-secret-manager==2.31.0
+    # via -r requirements.in
 google-cloud-storage==3.10.1
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 google-crc32c==1.8.0
     # via
     #   google-cloud-storage
@@ -114,24 +109,16 @@ grpcio==1.81.0
     #   grpcio-status
 grpcio-status==1.81.0
     # via google-api-core
-gunicorn==26.0.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+gunicorn==26.2.0
+    # via -r requirements.in
 h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
-h2==4.4.1
-    # via httpx
-hpack==4.2.0
-    # via h2
 httpcore==1.0.9
     # via httpx
 httpx==0.28.1
-    # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
-    #   ddgs
-hyperframe==6.1.0
-    # via h2
+    # via -r requirements.in
 idna==3.17
     # via
     #   anyio
@@ -140,31 +127,31 @@ idna==3.17
     #   requests
     #   yarl
 jinja2==3.1.6
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 lazy-model==0.4.0
     # via beanie
 lxml==6.1.1
     # via ddgs
-markdown==3.10.2
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+markdown==3.11
+    # via -r requirements.in
 markupsafe==3.0.3
     # via jinja2
-motor==3.7.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-msgpack==1.2.2
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+motor==3.7.1
+    # via -r requirements.in
+msgpack==1.2.3
+    # via -r requirements.in
 multidict==6.7.1
     # via
     #   aiohttp
     #   yarl
-numpy==2.4.6
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-packaging==26.2
-    # via gunicorn
+numpy==2.5.3
+    # via -r requirements.in
+opentelemetry-api==1.45.0
+    # via fastapi
 pillow==12.3.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-posthog==7.16.2
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
+posthog==7.62.0
+    # via -r requirements.in
 primp==1.3.1
     # via ddgs
 propcache==0.5.2
@@ -185,44 +172,44 @@ protobuf==6.33.6
     #   proto-plus
 pyasn1==0.6.4
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0
     # via cffi
-pydantic==2.13.4
+pydantic==2.13.5
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   beanie
     #   fastapi
     #   lazy-model
     #   pydantic-settings
-pydantic-core==2.46.4
+pydantic-core==2.46.5
     # via pydantic
 pydantic-settings==2.15.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 pyjwt==2.15.1
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-pymongo==4.17.0
+    # via -r requirements.in
+pymongo==4.18.2
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   beanie
     #   motor
-pypdf==6.16.2
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+pypdf==6.19.0
+    # via -r requirements.in
 pypdfium2==5.13.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 python-dateutil==2.9.0.post0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-python-dotenv==1.2.2
+    # via -r requirements.in
+python-dotenv==1.2.4
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   pydantic-settings
 python-multipart==0.0.32
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 razorpay==2.0.1
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 requests==2.34.2
     # via
     #   google-api-core
@@ -231,22 +218,20 @@ requests==2.34.2
     #   posthog
     #   razorpay
     #   resend
-resend==2.30.1
-    # via -r /home/runner/workspace/apps/backend/requirements.in
-sentry-sdk==2.61.1
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+resend==2.49.0
+    # via -r requirements.in
+sentry-sdk==2.71.0
+    # via -r requirements.in
 six==1.17.0
     # via python-dateutil
-socksio==1.0.0
-    # via httpx
 soupsieve==2.10
     # via beautifulsoup4
-starlette==1.6.0
+starlette==1.7.0
     # via
-    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   -r requirements.in
     #   fastapi
 tenacity==9.1.4
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+    # via -r requirements.in
 typing-extensions==4.16.0
     # via
     #   aiohttp
@@ -256,6 +241,7 @@ typing-extensions==4.16.0
     #   beautifulsoup4
     #   fastapi
     #   grpcio
+    #   opentelemetry-api
     #   posthog
     #   pydantic
     #   pydantic-core
@@ -271,7 +257,7 @@ urllib3==2.7.0
     # via
     #   requests
     #   sentry-sdk
-uvicorn==0.48.0
-    # via -r /home/runner/workspace/apps/backend/requirements.in
+uvicorn==0.54.0
+    # via -r requirements.in
 yarl==1.24.2
     # via aiohttp
