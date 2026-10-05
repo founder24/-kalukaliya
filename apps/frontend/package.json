@@ -56,7 +56,7 @@
   },
   "devDependencies": {
     "@babel/eslint-parser": "^7.29.7",
-    "@babel/plugin-syntax-jsx": "^7.29.7",
+    "@babel/plugin-syntax-jsx": "^8.0.1",
     "@playwright/test": "^1.59.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.1",
