@@ -443,7 +443,7 @@ jobs:
 
       - name: Upload chat ad Playwright diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: chat-ads-playwright-diagnostics
           path: apps/frontend/test-results/
@@ -473,7 +473,7 @@ jobs:
 
       - name: Upload staff production chunk diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: staff-production-chunk-diagnostics
           path: |
@@ -531,7 +531,7 @@ jobs:
 
       - name: Upload live ad smoke diagnostics
         if: ${{ always() && steps.live-ad-smoke.outcome == 'failure' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: live-ad-smoke-diagnostics
           path: apps/frontend/test-results/
@@ -920,7 +920,7 @@ jobs:
 
       - name: Upload worker chat performance timings
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: worker-chat-performance-${{ github.run_attempt }}
           path: chat-performance-report.json
@@ -1072,7 +1072,7 @@ jobs:
 
       - name: Upload failed staff portal browser diagnostics
         if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: staff-portal-playwright-diagnostics-${{ github.run_attempt }}
           path: staff-portal-diagnostics/

@@ -135,7 +135,7 @@ jobs:
           sha256sum "$PREVIEW_REPORT" > "$PREVIEW_REPORT.sha256"
 
       - name: Upload retained cleanup preview for review
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.PREVIEW_ARTIFACT_NAME }}
           path: ${{ runner.temp }}/ahsec-cleanup-preview/
