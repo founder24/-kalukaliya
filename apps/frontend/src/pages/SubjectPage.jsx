@@ -404,25 +404,39 @@ export default function SubjectPage() {
     const notesChs = chapters.filter(ch => !ch.content_type || !QA_TYPES.has(ch.content_type));
     const qaChs = chapters.filter(ch => QA_TYPES.has(ch.content_type));
     // Subject-level PYQ papers — [{id, name, class_name, year, description, pages}]
-    const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
-      id:          p.id || `pyq-${pi}`,
-      title:       p.name || `Paper ${pi + 1}`,
-      class_name:  p.class_name || '',
-      year:        p.year || null,
-      description: p.description || '',
-      pages: (p.pages || []).map((pg, idx) => ({
-        _key:    pg.id || `${p.id}-${idx}`,
-        url:     pg.url,
-        pageNum: idx + 1,
-      })),
-    }));
+    const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => {
+      const textChapter = chapters.find(ch => {
+        if (ch.content_type !== 'question_paper' || !ch.title) return false;
+        const paperName = String(p.name || '').toLowerCase();
+        const chapterTitle = String(ch.title).toLowerCase();
+        return (paperName && paperName.includes(chapterTitle))
+          || (p.year && chapterTitle.includes(String(p.year)));
+      });
+      const textChapterHref = textChapter && subject?.board_slug && subject?.class_slug && subject?.slug && textChapter.slug
+        ? `/${subject.board_slug}/${subject.class_slug}${subject.stream_slug ? `/${subject.stream_slug}` : ''}/${subject.slug}/${textChapter.slug}`
+        : null;
+
+      return {
+        id:          p.id || `pyq-${pi}`,
+        title:       p.name || `Paper ${pi + 1}`,
+        class_name:  p.class_name || '',
+        year:        p.year || null,
+        description: p.description || '',
+        textChapterHref,
+        pages: (p.pages || []).map((pg, idx) => ({
+          _key:    pg.id || `${p.id}-${idx}`,
+          url:     pg.url,
+          pageNum: idx + 1,
+        })),
+      };
+    });
     return [
       { key: 'notes',           label: 'Notes',      chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
       { key: 'qa',              label: 'Questions',  chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
       { key: 'question_paper',  label: 'PYQs',       chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
       { key: 'blog',            label: 'Blog View',  chapters: [],       pyqGroups: null,  accent: '#0284c7', bg: 'rgba(2,132,199,0.08)',   border: 'rgba(2,132,199,0.25)' },
     ];
-  }, [chapters, subject?.pyq_papers]);
+  }, [chapters, subject]);
 
   const [activeSection, setActiveSection] = useState('notes');
   const [expandedPyqId, setExpandedPyqId] = useState(null);
@@ -632,6 +646,7 @@ export default function SubjectPage() {
               <div className="space-y-3">
                 {groups.map((grp, i) => {
                   const isOpen = expandedPyqId === grp.id;
+                  const isTextVersion = grp.pages.length === 0 && Boolean(grp.textChapterHref);
                   return (
                     <div
                       key={grp.id}
@@ -639,11 +654,11 @@ export default function SubjectPage() {
                       style={{ border: '1px solid rgba(217,119,6,0.20)', background: 'rgba(217,119,6,0.02)' }}
                     >
                       {/* Paper header row — single page: direct link; multi-page: expand */}
-                      {grp.pages.length === 1 ? (
+                      {grp.pages.length === 1 || isTextVersion ? (
                         <a
-                          href={grp.pages[0].url}
-                          target="_blank"
-                          rel="noreferrer"
+                          href={grp.pages.length === 1 ? grp.pages[0].url : grp.textChapterHref}
+                          target={isTextVersion ? undefined : '_blank'}
+                          rel={isTextVersion ? undefined : 'noreferrer'}
                           className="flex items-center gap-3 px-4 py-3 hover:bg-amber-50/70 transition-colors"
                         >
                           <span
@@ -663,10 +678,12 @@ export default function SubjectPage() {
                               {grp.class_name && (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded text-amber-700/70">{grp.class_name}</span>
                               )}
-                              <span className="text-[10px] text-amber-700/50">1 page</span>
+                              <span className="text-[10px] text-amber-700/50">{isTextVersion ? 'Read text version' : '1 page'}</span>
                             </div>
                           </div>
-                          <ExternalLink size={14} className="shrink-0" style={{ color: '#d97706' }} />
+                          {isTextVersion
+                            ? <FileText size={14} className="shrink-0" style={{ color: '#d97706' }} />
+                            : <ExternalLink size={14} className="shrink-0" style={{ color: '#d97706' }} />}
                         </a>
                       ) : (
                         <button
