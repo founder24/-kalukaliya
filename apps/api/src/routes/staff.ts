@@ -678,8 +678,8 @@ async function deleteStaleVectors(
   const allIds = [...new Set([...deterministicIds, ...d1Ids])];
 
   // Vectorize deleteByIds silently ignores non-existent IDs.
-  // Batch to 1000 per call to stay within API limits.
-  const BATCH = 1000;
+  // Its delete endpoint accepts at most 100 IDs per request.
+  const BATCH = 100;
   for (let i = 0; i < allIds.length; i += BATCH) {
     await env.VECTORIZE.deleteByIds(allIds.slice(i, i + BATCH));
   }

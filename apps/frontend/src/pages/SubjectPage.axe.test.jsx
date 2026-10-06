@@ -175,4 +175,40 @@ describe('SubjectPage — axe accessibility audit', () => {
     expect(await screen.findByText('Worker-native study notes.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Published chapter' })).toHaveAttribute('id', 'published-chapter');
   });
+
+  it('links a text-only PYQ record to its matching question-paper chapter', async () => {
+    vi.mocked(useSubject).mockReturnValue({
+      data: {
+        ...SAMPLE_SUBJECT,
+        pyq_papers: [{
+          id: 'paper-2024',
+          name: '2024 Exam Paper — MDC-05 / Paper MDC0100503 (typed transcript)',
+          year: 2024,
+          class_name: 'MDC-01013',
+          pages: [],
+        }],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    vi.mocked(useChapters).mockReturnValue({
+      data: [
+        ...SAMPLE_CHAPTERS,
+        {
+          id: 'paper-chapter',
+          title: '2024 Exam Paper — MDC-05 / Paper MDC0100503',
+          content_type: 'question_paper',
+          slug: '2024-paper-transcript',
+        },
+      ],
+      isLoading: false,
+    });
+
+    render(<SubjectPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'PYQs' }));
+
+    const paperLink = screen.getByRole('link', { name: /2024 Exam Paper.*Read text version/i });
+    expect(paperLink).toHaveAttribute('href', '/ahsec/class-11/arts/english/2024-paper-transcript');
+  });
 });
