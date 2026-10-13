@@ -400,11 +400,18 @@ describe('release regressions', () => {
 
   it('lets ordinary staff publish and unpublish topics', async () => {
     const legacy = await token('legacy');
-    const created = await fetchWorker(request('/api/v1/staff/content/chapter/chapter/topics', legacy, 'POST', { title: 'Topic' }));
+    const created = await fetchWorker(request('/api/v1/staff/content/chapter/chapter/topics', legacy, 'POST', {
+      title: 'Topic',
+      content: 'A cited answer for this topic.',
+    }));
     const topic = (await created.json() as { topic: { id: string } }).topic;
     const limited = await token('limited');
     expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${topic.id}/publish`, limited, 'POST', {}))).status).toBe(200);
     expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${topic.id}/unpublish`, limited, 'POST', {}))).status).toBe(200);
+
+    const blank = await fetchWorker(request('/api/v1/staff/content/chapter/chapter/topics', legacy, 'POST', { title: 'Question without answer' }));
+    const blankTopic = (await blank.json() as { topic: { id: string } }).topic;
+    expect((await fetchWorker(request(`/api/v1/staff/content/chapter/chapter/topics/${blankTopic.id}/publish`, limited, 'POST', {}))).status).toBe(422);
   });
 
   it('binds destructive preview tokens to IDs and consumes them once', async () => {

@@ -47,7 +47,7 @@ beforeAll(async () => {
         'translated', 'subject', 'Motion', 'গতি', 'motion', 'gati',
         'English description', 'অসমীয়া বিৱৰণ', 'motion, physics', 'গতি, পদাৰ্থবিজ্ঞান',
         'published', 'English notes', 'অসমীয়া টোকা',
-        '[{"title":"Velocity","title_as":"বেগ","slug":"velocity"},{"title":"Acceleration","title_as":"  ","slug":"acceleration"}]'
+        '[{"title":"Velocity","title_as":"বেগ","slug":"velocity","content":"Speed with direction.","content_as":"দিশসহ গতি।","status":"published"},{"title":"Acceleration","title_as":"  ","slug":"acceleration"}]'
       )
     `),
     env.DB.prepare(`
@@ -125,10 +125,16 @@ describe('Assamese public content metadata', () => {
         { title: 'বেগ', title_as: 'বেগ', slug: 'velocity' },
         { title: 'Acceleration', title_as: '  ', slug: 'acceleration' },
       ],
-      published_topics: [
-        { title: 'বেগ', title_as: 'বেগ', slug: 'velocity' },
-        { title: 'Acceleration', title_as: '  ', slug: 'acceleration' },
-      ],
+      published_topics: [{
+        title: 'বেগ',
+        title_as: 'বেগ',
+        slug: 'velocity',
+        content: 'Speed with direction.',
+        content_as: 'দিশসহ গতি।',
+        status: 'published',
+        definition: 'দিশসহ গতি।',
+        topic_slug: 'velocity',
+      }],
     });
   });
 
@@ -210,16 +216,28 @@ describe('Assamese public content metadata', () => {
     });
   });
 
-  it('localizes the topics-published query and preserves English fallbacks', async () => {
+  it('localizes published answers and excludes drafts or navigation-only topics', async () => {
     const response = await get('/api/v1/content/chapters/translated/topics-published?lang=as');
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       chapter_id: 'translated',
-      topics: [
-        { title: 'বেগ', title_as: 'বেগ', slug: 'velocity' },
-        { title: 'Acceleration', title_as: '  ', slug: 'acceleration' },
-      ],
-      total: 2,
+      topics: [{
+        title: 'বেগ',
+        title_as: 'বেগ',
+        slug: 'velocity',
+        content: 'Speed with direction.',
+        content_as: 'দিশসহ গতি।',
+        status: 'published',
+        definition: 'দিশসহ গতি।',
+        topic_slug: 'velocity',
+      }],
+      total: 1,
+    });
+
+    const chapter = await get('/api/v1/content/chapter-by-slug-as/ahsec/class-12/physics/gati');
+    expect(chapter.status).toBe(200);
+    await expect(chapter.json()).resolves.toMatchObject({
+      published_topics: [{ topic_slug: 'velocity', definition: 'দিশসহ গতি।' }],
     });
   });
 

@@ -49,8 +49,9 @@ const CHAT_FLASH_STYLE = `
 `;
 
 export default function TopicAnswerCard({ topic, chapterUrl, fromChat = false }) {
-  if (!topic || !topic.title || !topic.definition) return null;
-  const slug = topic.topic_slug || topic.slug || '';
+  const definition = topic?.definition || topic?.content || '';
+  if (!topic || !topic.title || !definition) return null;
+  const slug = topic.topic_slug || topic.slug || topic.id || '';
   if (!slug) return null;
 
   const anchorId = `topic-${slug}`;
@@ -68,7 +69,7 @@ export default function TopicAnswerCard({ topic, chapterUrl, fromChat = false })
         className={`my-6 rounded-2xl border border-violet-200 bg-violet-50/50 p-5 shadow-sm scroll-mt-24${fromChat ? ' topic-chat-flash' : ''}`}
       >
         <h2 className="text-xl font-bold text-violet-900 mb-3" itemProp="name">{topic.title}</h2>
-        <p className="text-gray-800 leading-relaxed mb-3" itemProp="description">{topic.definition}</p>
+        <p className="text-gray-800 leading-relaxed mb-3" itemProp="description">{definition}</p>
         <p className="text-gray-900 italic mb-2" data-attribution>
           {attribution}
         </p>
