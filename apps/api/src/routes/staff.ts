@@ -1738,7 +1738,12 @@ staffRouter.post('/content/chapter/:chapterId/topics/:topicId/:action', async c 
   const denied = await capabilityDenied(c, auth, needed); if (denied) return denied;
   const row = await topicChapter(c.env, c.req.param('chapterId')); if (!row) return c.json({ detail: 'Chapter not found' }, 404);
   const topics = chapterTopics(row); const topic = topics.find(item => item.id === c.req.param('topicId')); if (!topic) return c.json({ detail: 'Topic not found' }, 404);
-  if (action === 'publish') topic.status = 'published';
+  if (action === 'publish') {
+    if (!topic.title.trim() || !(topic.content ?? '').trim()) {
+      return c.json({ detail: 'Question and answer are required before publishing' }, 422);
+    }
+    topic.status = 'published';
+  }
   else if (action === 'unpublish') topic.status = 'draft';
   else if (action === 'translate') {
     const body = await safeBody(c); const translated = typeof body.title_as === 'string' ? body.title_as.trim() : '';
