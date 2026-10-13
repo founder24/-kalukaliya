@@ -144,27 +144,39 @@ function TopicManager({ chapterId, user, fallbackTopics = [] }) {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [draftAs, setDraftAs] = useState('');
+  const [draftContent, setDraftContent] = useState('');
+  const [draftContentAs, setDraftContentAs] = useState('');
+  const [answerDrafts, setAnswerDrafts] = useState({});
   const [busy, setBusy] = useState(null);
   // Match the worker contract exactly: null retains legacy full access, an
   // explicit empty list grants none, and absent identity data grants nothing.
   const allowed = (cap) => canStaffCapability(user, cap);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const res = await api().get(`/staff/content/chapter/${chapterId}/topics`); setTopics(res.data?.topics || []); }
+    try {
+      const res = await api().get(`/staff/content/chapter/${chapterId}/topics`);
+      const rows = res.data?.topics || [];
+      setTopics(rows);
+      setAnswerDrafts(Object.fromEntries(rows.map(t => [t.id, t.content || t.definition || ''])));
+    }
     catch (error) { toast.error(error?.response?.data?.detail || 'Topics could not be loaded'); }
     finally { setLoading(false); }
   }, [chapterId]);
   useEffect(() => { load(); }, [load]);
   const add = async () => {
-    if (!draft.trim() || !allowed('content:edit')) return;
+    if (!draft.trim() || !draftContent.trim() || !allowed('content:edit')) return;
     setBusy('add');
     try {
       await api().post(`/staff/content/chapter/${chapterId}/topics`, {
         title: draft.trim(),
         title_as: draftAs.trim(),
+        content: draftContent.trim(),
+        content_as: draftContentAs.trim(),
       });
       setDraft('');
       setDraftAs('');
+      setDraftContent('');
+      setDraftContentAs('');
       await load();
       toast.success('Topic created');
     }
@@ -182,17 +194,33 @@ function TopicManager({ chapterId, user, fallbackTopics = [] }) {
     catch (error) { toast.error(error?.response?.data?.detail || `Topic ${name} failed`); }
     finally { setBusy(null); }
   };
+  const saveAnswer = async (topic) => {
+    if (!allowed('content:edit')) return;
+    setBusy(`update:${topic.id}`);
+    try {
+      await api().patch(`/staff/content/chapter/${chapterId}/topics/${topic.id}`, {
+        content: answerDrafts[topic.id] || '',
+      });
+      await load();
+      toast.success('Answer saved');
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Answer could not be saved');
+    } finally {
+      setBusy(null);
+    }
+  };
   return <div className="space-y-2">
     {loading ? <div className="h-10 animate-pulse rounded-xl bg-gray-100" /> : topics.map(topic => <div key={topic.id} className="rounded-xl border border-gray-200 bg-white p-2.5">
       <div className="flex flex-wrap items-start gap-2"><div className="min-w-0 flex-1"><div className="text-xs font-semibold text-gray-800">{topic.title}</div>{topic.title_as && <div className="mt-0.5 text-xs text-gray-500">{topic.title_as}</div>}</div><StatusBadge status={topic.status || 'draft'} /></div>
-      <div className="mt-2 flex flex-wrap gap-1.5"><button type="button" disabled={!allowed('content:publish') || busy} onClick={() => action(topic, topic.status === 'published' ? 'unpublish' : 'publish')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">{topic.status === 'published' ? 'Unpublish' : 'Publish'}</button><button type="button" disabled={!allowed('content:edit') || busy} onClick={() => { const value = window.prompt('Assamese title', topic.title_as || ''); if (value) action(topic, 'translate', { title_as: value }); }} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Translate</button><button type="button" disabled={!allowed('rag:reindex') || busy} onClick={() => action(topic, 'reindex')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Reindex</button><button type="button" disabled={!allowed('content:delete') || busy} onClick={() => action(topic, 'delete')} className="rounded-lg border border-rose-200 px-2 py-1 text-[10px] text-rose-700 disabled:opacity-40">Delete</button></div>
+      <textarea value={answerDrafts[topic.id] ?? topic.content ?? topic.definition ?? ''} onChange={e => setAnswerDrafts(v => ({ ...v, [topic.id]: e.target.value }))} rows={4} disabled={!allowed('content:edit')} placeholder="Answer with citations (source titles and URLs)" className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+      <div className="mt-2 flex flex-wrap gap-1.5"><button type="button" disabled={!allowed('content:edit') || busy} onClick={() => saveAnswer(topic)} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Save answer</button><button type="button" disabled={!allowed('content:publish') || busy} onClick={() => action(topic, topic.status === 'published' ? 'unpublish' : 'publish')} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">{topic.status === 'published' ? 'Unpublish' : 'Publish'}</button><button type="button" disabled={!allowed('content:edit') || busy} onClick={() => { const value = window.prompt('Assamese title', topic.title_as || ''); if (value) action(topic, 'translate', { title_as: value }); }} className="rounded-lg border px-2 py-1 text-[10px] disabled:opacity-40">Translate</button><button type="button" disabled={!allowed('content:delete') || busy} onClick={() => action(topic, 'delete')} className="rounded-lg border border-rose-200 px-2 py-1 text-[10px] text-rose-700 disabled:opacity-40">Delete</button></div>
     </div>)}
     {!loading && !topics.length && <div className="text-xs text-gray-400">No topics saved on this chapter.</div>}
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
-      <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} disabled={!allowed('content:edit')} placeholder="Topic title (English)" className="min-w-0 rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
-      <input value={draftAs} onChange={e => setDraftAs(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} disabled={!allowed('content:edit')} placeholder="বিষয়ৰ শিৰোনাম (অসমীয়া)" className="min-w-0 rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
-      <button type="button" onClick={add} disabled={!draft.trim() || !allowed('content:edit') || busy} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Add</button>
-    </div>
+    <input value={draft} onChange={e => setDraft(e.target.value)} disabled={!allowed('content:edit')} placeholder="Question / topic title (English)" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+    <input value={draftAs} onChange={e => setDraftAs(e.target.value)} disabled={!allowed('content:edit')} placeholder="প্ৰশ্ন / বিষয়ৰ শিৰোনাম (অসমীয়া)" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+    <textarea value={draftContent} onChange={e => setDraftContent(e.target.value)} rows={4} disabled={!allowed('content:edit')} placeholder="Answer with citations (source titles and URLs)" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+    <textarea value={draftContentAs} onChange={e => setDraftContentAs(e.target.value)} rows={3} disabled={!allowed('content:edit')} placeholder="অসমীয়াত উত্তৰ (ঐচ্ছিক)" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs disabled:bg-gray-50" />
+    <div className="flex justify-end"><button type="button" onClick={add} disabled={!draft.trim() || !draftContent.trim() || !allowed('content:edit') || busy} className="rounded-xl bg-violet-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Add answer card</button></div>
   </div>;
 }
 

@@ -44,6 +44,25 @@ const COURSE_TYPE_ICONS: Record<CourseTypeSlug, string> = {
   aec: 'brain',
 };
 
+function publishedAnswerTopics(input: unknown[]): Array<Record<string, unknown>> {
+  return input.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const topic = value as Record<string, unknown>;
+    const isPublished = topic.status === 'published'
+      || topic.definition_status === 'ok'
+      || topic.definition_status === 'approved';
+    const definition = typeof topic.definition === 'string'
+      ? topic.definition
+      : typeof topic.content === 'string' ? topic.content : '';
+    const title = typeof topic.title === 'string' ? topic.title.trim() : '';
+    if (!isPublished || !title || !definition.trim()) return [];
+    const slugFromTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const topicSlug = topic.topic_slug || topic.slug || slugFromTitle || topic.id;
+    if (typeof topicSlug !== 'string' || !topicSlug) return [];
+    return [{ ...topic, definition, topic_slug: topicSlug }];
+  });
+}
+
 // Every public content response, including a not-found response, should have
 // an explicit cache policy. Successful handlers set their tighter route-
 // specific policy below; this middleware covers early 404 returns before a
@@ -590,6 +609,18 @@ async function resolveChapterBySlug(
       return titleAs ? { ...row, title: titleAs } : row;
     })
     : topicsArr;
+  const displayPublishedTopics = publishedAnswerTopics(topicsArr).map(topic => {
+    if (!useSlugAs) return topic;
+    const titleAs = typeof topic.title_as === 'string' ? topic.title_as.trim() : '';
+    const definitionAs = typeof topic.definition_as === 'string'
+      ? topic.definition_as
+      : typeof topic.content_as === 'string' ? topic.content_as : '';
+    return {
+      ...topic,
+      ...(titleAs ? { title: titleAs } : {}),
+      ...(definitionAs.trim() ? { definition: definitionAs } : {}),
+    };
+  });
 
   return c.json({
     chapter_id:     chapterRow.id,
@@ -621,7 +652,7 @@ async function resolveChapterBySlug(
     notes_generated: Boolean(contentEn || contentAs),
     chapter_number:  chapterRow.chapterNumber ?? null,
     topics:          displayTopics,
-    published_topics: displayTopics,
+    published_topics: displayPublishedTopics,
     faq_jsonld:      faqArr,
     faq_entries:     faqArr,
     prev_chapter:    prevCh ? {
@@ -932,14 +963,19 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
   const rawTopics = safeParse<unknown[]>(ch.publishedTopics) ?? [];
-  const topics = c.req.query('lang') === 'as'
-    ? rawTopics.map(topic => {
-      if (!topic || typeof topic !== 'object') return topic;
-      const row = topic as Record<string, unknown>;
-      const titleAs = typeof row.title_as === 'string' ? row.title_as.trim() : '';
-      return titleAs ? { ...row, title: titleAs } : row;
-    })
-    : rawTopics;
+  const lang = c.req.query('lang');
+  const topics = publishedAnswerTopics(rawTopics).map(topic => {
+    if (lang !== 'as') return topic;
+    const titleAs = typeof topic.title_as === 'string' ? topic.title_as.trim() : '';
+    const definitionAs = typeof topic.definition_as === 'string'
+      ? topic.definition_as
+      : typeof topic.content_as === 'string' ? topic.content_as : '';
+    return {
+      ...topic,
+      ...(titleAs ? { title: titleAs } : {}),
+      ...(definitionAs.trim() ? { definition: definitionAs } : {}),
+    };
+  });
   return c.json({ chapter_id: ch.id, topics, total: topics.length });
 });
 
