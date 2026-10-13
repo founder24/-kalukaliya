@@ -324,6 +324,7 @@ try {
 
   for (const [id, label, releaseCheck] of sections) {
     activeSection = id;
+    if (id === 'contenthub') activeContentHubTab = 'editor';
     await page.getByTestId(`admin-nav-${id}`).click();
     await page.waitForURL(url => url.pathname === '/staff' && url.searchParams.get('s') === id);
     await waitForRequiredReads(id, label, releaseCheck.requiredReads);
@@ -363,15 +364,33 @@ try {
       }
     }
     if (id === 'contenthub') {
-      // Editor mounts by default while the parent hierarchy is loading. Leave it
-      // first so clicking Editor below remounts it and produces tab-attributed proof.
-      activeContentHubTab = 'cms';
-      await page.getByTestId('content-hub-tab-cms').click();
-      await page.getByTestId('content-hub-panel-cms').waitFor({ state: 'visible' });
+      const editorTab = page.getByTestId('content-hub-tab-editor');
+      await editorTab.waitFor({ state: 'visible' });
+      const hasAdminTabs = (await page.getByTestId('content-hub-tab-cms').count()) > 0;
+      const tabsToCheck = hasAdminTabs
+        ? CONTENT_HUB_TABS
+        : CONTENT_HUB_TABS.filter(tab => tab.id === 'editor');
 
-      for (const tab of CONTENT_HUB_TABS) {
+      if (!hasAdminTabs) {
+        for (const tab of CONTENT_HUB_TABS.filter(candidate => candidate.id !== 'editor')) {
+          if (await page.getByTestId(`content-hub-tab-${tab.id}`).count()) {
+            throw new Error(`Staff session unexpectedly exposed admin-only Content Hub tab "${tab.id}".`);
+          }
+        }
+      } else {
+        // Admins can switch away from the default editor before its tab-attributed
+        // read check. Staff users only have the editor tab, so its initial reads
+        // are attributed before entering the Content Hub above.
+        activeContentHubTab = 'cms';
+        await page.getByTestId('content-hub-tab-cms').click();
+        await page.getByTestId('content-hub-panel-cms').waitFor({ state: 'visible' });
+      }
+
+      for (const tab of tabsToCheck) {
         activeContentHubTab = tab.id;
-        await page.getByTestId(`content-hub-tab-${tab.id}`).click();
+        if (hasAdminTabs || tab.id !== 'editor') {
+          await page.getByTestId(`content-hub-tab-${tab.id}`).click();
+        }
         await page.getByTestId(`content-hub-panel-${tab.id}`).waitFor({ state: 'visible' });
 
         if (!tab.releaseCheck.supported) {
