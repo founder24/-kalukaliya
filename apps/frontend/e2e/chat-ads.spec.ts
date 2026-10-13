@@ -86,7 +86,7 @@ async function send(page: Page, text: string) {
 }
 
 for (const [layout, viewport] of Object.entries({ desktop, mobile })) {
-  test(`sponsored card waits for two completed turns and survives reconnect on ${layout}`, async ({ page }) => {
+  test(`chat stays free of sponsored content across reconnect on ${layout}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await installDeterministicChatStream(page);
     await mockNonChatApis(page);
@@ -128,10 +128,7 @@ for (const [layout, viewport] of Object.entries({ desktop, mobile })) {
     await expect(page.locator('[data-testid^="chat-sponsored-"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="chat-scroll-spacer"]')).toHaveCount(0);
 
-    const sponsored = page.getByRole('complementary', { name: 'Sponsored content' });
-    await expect(sponsored).toHaveCount(1);
-    await expect(sponsored).toContainText('Sponsored');
-    await expect(sponsored).toHaveAttribute('data-testid', 'chat-sponsored-1');
+    await expect(page.locator('[data-testid^="chat-sponsored-"]')).toHaveCount(0);
 
     // The chat remains usable at both target sizes and no element forces the
     // page wider than its viewport.
