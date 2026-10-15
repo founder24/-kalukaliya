@@ -9,6 +9,7 @@ import type { Env } from '../types';
 import { authRouter } from './auth';
 import {
   anonymousQuotaKey,
+  currentQuotaDayPeriod,
   currentQuotaMonthPeriod,
   currentQuotaMinutePeriod,
 } from '../services/anonymous';
@@ -17,13 +18,13 @@ import { assertD1MigrationLedgerMatchesFiles } from '../db/migration-ledger-cont
 import {
   chatRouter,
   fetchMatchedChunkContext,
-  getAuthMonthlyQuotaUsage,
   insertChatRequestClaim,
   persistCompletedChat,
   releaseQuotaReservation,
   reserveAnonQuota,
   reserveAuthQuota,
 } from './chat';
+import { getDailyChatQuotaUsage } from '../services/chat-quota';
 
 const API_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 const JWT_SECRET = 'atomic-controls-test-secret-at-least-32-characters';
@@ -136,6 +137,13 @@ function previousMonthPeriod(period: string): string {
   return new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
 }
 
+function previousDayPeriod(period: string): string {
+  const date = new Date(`${period}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid quota day: ${period}`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function migrationStatements(): string[] {
   const directory = path.join(API_ROOT, 'drizzle/migrations');
   return fs.readdirSync(directory)
@@ -209,48 +217,72 @@ describe('production D1 migration ledger guard', () => {
 });
 
 describe('atomic quota controls', () => {
-  it('reserves exactly 30 authenticated free claims per UTC month under concurrency', async () => {
+  const getAuthMonthlyQuotaUsage = (
+    d1: D1Database,
+    userId: string,
+    period = currentQuotaDayPeriod(),
+  ) => getDailyChatQuotaUsage(d1, userId, false, period);
+
+  it('allows only six free authenticated reservations per UTC day under concurrency', async () => {
     const userId = await createFreeUser();
-    const firstPeriod = '2026-09';
-    const nextPeriod = '2026-10';
+    const firstPeriod = '2026-09-29';
+    const nextPeriod = '2026-09-30';
     const minutePeriod = '2026-09-29T12:00';
 
     const firstMonth = await Promise.all(
-      Array.from({ length: 40 }, (_, index) => insertChatRequestClaim(
+      Array.from({ length: 12 }, (_, index) => insertChatRequestClaim(
         env.DB,
-        `month_sep_${index}_${crypto.randomUUID()}`,
+        `day_sep_${index}_${crypto.randomUUID()}`,
         userId,
         false,
         false,
         minutePeriod,
-        { period: firstPeriod, limit: 30 },
+        { period: firstPeriod, limit: 6 },
       )),
     );
-    expect(firstMonth.filter(Boolean)).toHaveLength(30);
-    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, firstPeriod)).toBe(30);
+    expect(firstMonth.filter(Boolean)).toHaveLength(6);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, firstPeriod)).toBe(6);
 
-    const nextMonth = await Promise.all(
-      Array.from({ length: 30 }, (_, index) => insertChatRequestClaim(
+    const nextDay = await Promise.all(
+      Array.from({ length: 12 }, (_, index) => insertChatRequestClaim(
         env.DB,
-        `month_oct_${index}_${crypto.randomUUID()}`,
+        `day_oct_${index}_${crypto.randomUUID()}`,
         userId,
         false,
         false,
         minutePeriod,
-        { period: nextPeriod, limit: 30 },
+        { period: nextPeriod, limit: 6 },
       )),
     );
-    expect(nextMonth.filter(Boolean)).toHaveLength(30);
-    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, nextPeriod)).toBe(30);
+    expect(nextDay.filter(Boolean)).toHaveLength(6);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, nextPeriod)).toBe(6);
   });
 
-  it('returns a distinct monthly-limit response and refunds the minute reservation', async () => {
+  it('enforces the same six-message daily limit for anonymous identities', async () => {
+    const anonId = `anon_${crypto.randomUUID().replace(/-/g, '').slice(0, 32)}`;
+    const period = currentQuotaDayPeriod();
+    const claims = await Promise.all(
+      Array.from({ length: 12 }, (_, index) => insertChatRequestClaim(
+        env.DB,
+        `anon_day_${index}_${crypto.randomUUID()}`,
+        anonId,
+        true,
+        false,
+        currentQuotaMinutePeriod(),
+        { period, limit: 6 },
+      )),
+    );
+    expect(claims.filter(Boolean)).toHaveLength(6);
+    expect(await getDailyChatQuotaUsage(env.DB, anonId, true, period)).toBe(6);
+  });
+
+  it('returns a distinct daily-limit response and refunds the minute reservation', async () => {
     const userId = await createFreeUser();
-    const period = currentQuotaMonthPeriod();
+    const period = currentQuotaDayPeriod();
     const minutePeriod = currentQuotaMinutePeriod();
-    const clientRequestId = `monthly_limit_${crypto.randomUUID().replace(/-/g, '')}`;
+    const clientRequestId = `daily_limit_${crypto.randomUUID().replace(/-/g, '')}`;
     await env.DB.prepare(
-      'INSERT INTO monthly_quota_usage (user_id, period, count) VALUES (?, ?, 30)',
+      'INSERT INTO daily_chat_quota_usage (identity_id, is_anonymous, period, count) VALUES (?, 0, ?, 6)',
     ).bind(userId, period).run();
     const accessToken = await signAccessToken(userId, 'student', JWT_SECRET);
 
@@ -272,8 +304,8 @@ describe('atomic quota controls', () => {
 
     expect(response.status).toBe(429);
     await expect(response.json()).resolves.toMatchObject({
-      error_code: 'chat_monthly_limit',
-      quota: { used: 30, limit: 30, period },
+      error_code: 'chat_daily_soft_cap',
+      quota: { used: 6, limit: 6, period },
     });
     const minuteRow = await env.DB.prepare(
       'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
@@ -285,7 +317,7 @@ describe('atomic quota controls', () => {
     expect(claim).toBeNull();
   });
 
-  it('frees an authenticated monthly reservation when its owner cancels', async () => {
+  it('frees an authenticated daily reservation when its owner cancels', async () => {
     const userId = await createFreeUser();
     const requestId = `monthly_cancel_${crypto.randomUUID().replace(/-/g, '')}`;
     const monthPeriod = currentQuotaMonthPeriod();
@@ -328,14 +360,14 @@ describe('atomic quota controls', () => {
     expect(minuteRow?.count).toBe(0);
   });
 
-  it('settles against the claim month after the calendar has rolled over', async () => {
+  it('settles daily usage against the claim day after UTC midnight', async () => {
     const userId = await createFreeUser();
     const sessionId = `session_${crypto.randomUUID()}`;
-    const currentPeriod = currentQuotaMonthPeriod();
-    const claimPeriod = previousMonthPeriod(currentPeriod);
-    const requestId = `monthly_settle_${crypto.randomUUID().replace(/-/g, '')}`;
+    const currentPeriod = currentQuotaDayPeriod();
+    const claimPeriod = previousDayPeriod(currentPeriod);
+    const requestId = `daily_settle_${crypto.randomUUID().replace(/-/g, '')}`;
     await env.DB.prepare(
-      'INSERT INTO monthly_quota_usage (user_id, period, count) VALUES (?, ?, 29)',
+      'INSERT INTO daily_chat_quota_usage (identity_id, is_anonymous, period, count) VALUES (?, 0, ?, 5)',
     ).bind(userId, claimPeriod).run();
     const inserted = await insertChatRequestClaim(
       env.DB,
@@ -344,7 +376,7 @@ describe('atomic quota controls', () => {
       false,
       false,
       currentQuotaMinutePeriod(),
-      { period: claimPeriod, limit: 30 },
+      { period: claimPeriod, limit: 6 },
     );
     expect(inserted).toBe(true);
 
@@ -380,16 +412,16 @@ describe('atomic quota controls', () => {
       },
     });
 
-    const oldMonth = await env.DB.prepare(
-      'SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?',
+    const oldDay = await env.DB.prepare(
+      'SELECT count FROM daily_chat_quota_usage WHERE identity_id = ? AND is_anonymous = 0 AND period = ?',
     ).bind(userId, claimPeriod).first<{ count: number }>();
-    expect(oldMonth?.count).toBe(30);
-    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, claimPeriod)).toBe(30);
+    expect(oldDay?.count).toBe(6);
+    expect(await getAuthMonthlyQuotaUsage(env.DB, userId, claimPeriod)).toBe(6);
     expect(await getAuthMonthlyQuotaUsage(env.DB, userId, currentPeriod)).toBe(0);
     const claim = await env.DB.prepare(
-      'SELECT status, monthly_period FROM chat_request_claims WHERE request_id = ?',
-    ).bind(requestId).first<{ status: string; monthly_period: string }>();
-    expect(claim).toEqual({ status: 'completed', monthly_period: claimPeriod });
+      'SELECT status, daily_period FROM chat_request_claims WHERE request_id = ?',
+    ).bind(requestId).first<{ status: string; daily_period: string }>();
+    expect(claim).toEqual({ status: 'completed', daily_period: claimPeriod });
   });
 
   it('does not persist a response when cancellation wins the claim transition', async () => {
