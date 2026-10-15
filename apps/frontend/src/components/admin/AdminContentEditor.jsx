@@ -18,9 +18,10 @@ import StatusBadge, { normalizeStatus, STATUS_FILTER_OPTIONS } from './content-e
 import StatusQuickToggle from './content-editor/StatusQuickToggle';
 import RagJobsPanel from './content-editor/RagJobsPanel';
 import PublishJobsPanel from './content-editor/PublishJobTracker';
+import TopicAnswerManager from './content-editor/TopicAnswerManager';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
-export default function AdminContentEditor({ adminToken, onNavigate, hubContext, onHubContext, onHierarchyChange, staffMode = false }) {
+export default function AdminContentEditor({ adminToken, user, onNavigate, hubContext, onHubContext, onHierarchyChange, staffMode = false }) {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [boards, setBoards] = useState([]);
   const [classes, setClasses] = useState([]);
@@ -711,6 +712,15 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                 {searchFiltered.length === 0 && <p className="text-gray-400 text-sm col-span-3">No subjects found</p>}
               </div>
             </div>
+          ) : editView === 'edit-topic-cards' && editTarget?.id ? (
+            <div className="flex-1 min-h-0">
+              <TopicAnswerManager
+                chapter={editTarget}
+                adminToken={adminToken}
+                user={user}
+                onBack={() => { setEditView(null); setEditTarget(null); }}
+              />
+            </div>
           ) : editView === 'new-chapter' || editView === 'edit-chapter' ? (
             <div className="flex-1 flex flex-col min-h-0">
               {!staffMode && (
@@ -946,6 +956,7 @@ export default function AdminContentEditor({ adminToken, onNavigate, hubContext,
                         content: full.content ?? full.content_en ?? '',
                         content_type: full.content_type || 'notes', order: full.order ?? full.chapter_number ?? 1, topics: (Array.isArray(full.published_topics) ? full.published_topics : (Array.isArray(full.topics) ? full.topics : [])).map(topic => typeof topic === 'string' ? topic : topic?.title || '').filter(Boolean), content_as: full.content_as ?? '', rag_text_en: full.rag_text_en ?? '', rag_text_as: full.rag_text_as ?? '', qa_text_en: full.qa_text_en ?? '', qa_text_as: full.qa_text_as ?? '', qa_rag_text_en: full.qa_rag_text_en ?? '', qa_rag_text_as: full.qa_rag_text_as ?? '', pyq_pdf_url: full.pyq_pdf_url ?? '', version: full.version ?? 0 }); setEditView('edit-chapter'); loadChapterStats(ch.id); }}
                       onPublishChapter={staffMode ? undefined : handlePublishChapter}
+                      onManageTopicAnswers={(chapter) => { setEditTarget(chapter); setEditView('edit-topic-cards'); }}
                       publishingChapters={publishingChapters}
                       selSubject={selSubject} subjectData={subjectData}
                       onCreateNew={() => { setEditView('new-chapter'); setContentForm({ title: '', title_as: '', slug: '', slug_as: '', description: '', meta_description: '', meta_description_as: '', keywords: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: chapters.length + 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); }}

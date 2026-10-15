@@ -77,7 +77,7 @@ function loadPersistedCtx() {
 
 const INTERNAL_TABS = new Set(CONTENT_HUB_TABS.map(({ id }) => id));
 
-export default function AdminContentHub({ adminToken, onNavigate: topNavigate, navContext, userRole }) {
+export default function AdminContentHub({ adminToken, user, onNavigate: topNavigate, navContext, userRole }) {
   const staffMode = userRole !== 'admin';
   const initialTab = !staffMode && INTERNAL_TABS.has(navContext?.initialTab)
     ? navContext.initialTab
@@ -235,6 +235,7 @@ export default function AdminContentHub({ adminToken, onNavigate: topNavigate, n
               <div className="h-full overflow-hidden" data-testid="content-hub-panel-editor">
                 <AdminContentEditor
                   adminToken={adminToken}
+                  user={user}
                   staffMode={staffMode}
                   onNavigate={navigate}
                   hubContext={hubContext}
