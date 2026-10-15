@@ -64,7 +64,7 @@ def main() -> int:
     users_route = (ROOT / "apps" / "api" / "src" / "routes" / "users.ts").read_text(encoding="utf-8")
     if "INSERT INTO quota_usage" not in chat_route or "INSERT INTO anonymous_quota_usage" not in chat_route:
         errors.append("Live chat quota reservation must remain D1-backed")
-    if "SELECT count FROM quota_usage" not in users_route or "getAnonQuotaUsage(c.env.DB" not in users_route:
+    if "SELECT count FROM quota_usage" not in users_route or "getDailyChatQuotaUsage(" not in users_route:
         errors.append("Live user quota reads must remain D1-backed")
 
     # The release workflow passes the resolved Pages API origin here, without
