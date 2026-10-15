@@ -70,7 +70,7 @@ describe('scheduled Cloudflare audit contract', () => {
     expect(chatRoute).toContain('INSERT INTO quota_usage');
     expect(chatRoute).toContain('INSERT INTO anonymous_quota_usage');
     expect(usersRoute).toContain('SELECT count FROM quota_usage');
-    expect(usersRoute).toContain('getAnonQuotaUsage(c.env.DB');
+    expect(usersRoute).toContain('getDailyChatQuotaUsage(');
   });
 
   it('defines the active production services and all required binding types once', () => {
