@@ -68,6 +68,7 @@ describe('student chat curriculum scope', () => {
     )).toBe(true);
     expect(isUsableAssameseAnswer('এটি বাংলা বাক্য হলেও শিক্ষার্থী উত্তরটি পড়তে পারবে।')).toBe(false);
     expect(isUsableAssameseAnswer('এটি বিষয়টো ভালকৈ বুজাই দিয়া।')).toBe(true);
+    expect(isUsableAssameseAnswer('এটি কথাটো আৰু তাৰ কাৰণটো সহজকৈ বুজাই দিয়া।')).toBe(true);
     expect(isUsableAssameseAnswer('This answer is only in English.')).toBe(false);
     expect(isUsableAssameseAnswer('यह उत्तर हिंदी में है।')).toBe(false);
     expect(isDeliverableAssameseAnswer('এটি বাংলা বাক্য হলেও শিক্ষার্থী উত্তরটি পড়তে পারবে।')).toBe(false);

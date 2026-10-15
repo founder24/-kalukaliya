@@ -286,10 +286,14 @@ export const MessageBubble = memo(function MessageBubble({ msg, questionText, on
                     ) : msg.isAssameseUnavailable ? (
                       <>
                         <p className="text-sm font-semibold text-foreground" style={{ lineHeight: '1.55' }}>
-                          অসমীয়া চেট সেৱা সাময়িকভাৱে অনুপলব্ধ
+                          {msg.isAssameseQualityFailure
+                            ? 'বিশ্বাসযোগ্য অসমীয়া উত্তৰ দিব পৰা নগ’ল'
+                            : 'অসমীয়া চেট সেৱা সাময়িকভাৱে অনুপলব্ধ'}
                         </p>
                         <p className="text-[12.5px] text-muted-foreground mt-0.5" style={{ lineHeight: '1.55' }}>
-                          অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত আকৌ চেষ্টা কৰক, বা ইংৰাজী মোডলৈ সলনি কৰক।
+                          {msg.isAssameseQualityFailure
+                            ? 'আকৌ চেষ্টা কৰক, বা ইংৰাজী মোডলৈ সলনি কৰক।'
+                            : 'অনুগ্ৰহ কৰি কিছু সময়ৰ পিছত আকৌ চেষ্টা কৰক, বা ইংৰাজী মোডলৈ সলনি কৰক।'}
                         </p>
                       </>
                     ) : (

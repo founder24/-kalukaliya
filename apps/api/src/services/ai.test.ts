@@ -18,6 +18,7 @@ import {
   drainStream,
   generate,
   generateAssamese,
+  generateFallback,
   streamGenerate,
   AI_MODEL_PRIMARY,
   AI_MODEL_FALLBACK,
@@ -481,6 +482,26 @@ describe('Workers AI cancellation', () => {
     expect(calls).toEqual([AI_MODEL_ASSAMESE]);
     expect(bindingSignal?.aborted).toBe(true);
     expect((bindingSignal?.reason as Error).name).toBe('TimeoutError');
+  });
+
+  it('uses the alternate Workers AI model for a bounded Assamese quality repair', async () => {
+    const calls: string[] = [];
+    const ai = {
+      run: async (model: string, input: { stream?: boolean }) => {
+        calls.push(model);
+        expect(input.stream).toBeUndefined();
+        return { choices: [{ message: { content: 'এইটো এটা পৰীক্ষামূলক অসমীয়া উত্তৰ।' } }] };
+      },
+    } as unknown as Ai;
+
+    const result = await generateFallback(ai, {
+      systemPrompt: 'Respond in Assamese.',
+      userMessage: 'Explain this.',
+    }, 500);
+
+    expect(calls).toEqual([AI_MODEL_FALLBACK]);
+    expect(result.model).toBe(AI_MODEL_FALLBACK);
+    expect(result.text).toContain('অসমীয়া');
   });
 
   it('forwards cancellation to streaming inference and cancels its response reader', async () => {

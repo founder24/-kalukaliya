@@ -28,6 +28,7 @@ import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
   streamGenerate,
   generateAssamese,
+  generateFallback,
   AI_MODEL_PRIMARY,
 } from '../services/ai';
 import {
@@ -551,11 +552,17 @@ export function isReliableAssameseAnswer(text: string): boolean {
  */
 export function isUsableAssameseAnswer(text: string): boolean {
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
-  if (countBengaliDialectMarkers(text) >= 2) return false;
   const scriptChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
   const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
   const letterCount = scriptChars + latinChars;
-  return scriptChars >= 2 && letterCount > 0 && scriptChars / letterCount >= 0.55;
+  if (scriptChars < 2 || letterCount === 0 || scriptChars / letterCount < 0.55) return false;
+
+  // Shared Assamese/Bengali vocabulary is common; only reject a clear cluster
+  // when the output has no Assamese-specific spelling or morphology at all.
+  const hasAssameseAnchor =
+    /[ৰৱ]/u.test(text)
+    || /(?:^|[\s,.!?।])(?:আৰু|তেন্তে|নহয়|হৈছে|কৰা|কৰে|কৰিব|পৰা|টো|বোৰ)(?=$|[\s,.!?।])/u.test(text);
+  return countBengaliDialectMarkers(text) < 3 || hasAssameseAnchor;
 }
 
 /** Accept reliable Assamese, or readable script-heavy output after one repair. */
@@ -3277,18 +3284,34 @@ chatRouter.post('/stream', async (c) => {
       // answer before exposing it, and SEA-LION uses an OpenAI-style response.
       let streamDone = false;
       let generationStartedAt: number | undefined;
+      let alternateAssameseAttempted = false;
 
       const stopCancellationMonitor = startCancellationMonitor();
       try {
         streamFailureStage = 'provider_stream';
         generationStartedAt = Date.now();
         if (lang === 'as') {
-          const generated = await generateAssamese(c.env.AI, {
-            systemPrompt,
-            userMessage: message,
-            maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 384),
-            signal: generationAbortController.signal,
-          }, 8_000);
+          let generated: Awaited<ReturnType<typeof generateAssamese>>;
+          try {
+            generated = await generateAssamese(c.env.AI, {
+              systemPrompt,
+              userMessage: message,
+              maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 384),
+              signal: generationAbortController.signal,
+            }, 8_000);
+          } catch (primaryError) {
+            if (generationAbortController.signal.aborted) throw primaryError;
+            console.warn('[chat] SEA-LION Assamese generation failed; trying alternate model', {
+              error_class: sanitizedChatErrorClass(primaryError),
+            });
+            alternateAssameseAttempted = true;
+            generated = await generateFallback(c.env.AI, {
+              systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা\nকেৱল অসমীয়া লিপিত উত্তৰ দিয়া। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
+              userMessage: message,
+              maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),
+              signal: generationAbortController.signal,
+            }, 6_000);
+          }
           fullResponse = normalizeAssameseStreamChunk(generated.text);
           if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
             reportTombstoneCancellation('provider_stream');
@@ -3393,6 +3416,39 @@ chatRouter.post('/stream', async (c) => {
             console.warn('[chat] Assamese fallback-model repair failed', {
               error_class: sanitizedChatErrorClass(repairError),
             });
+          }
+          if (!alternateAssameseAttempted && !isDeliverableAssameseAnswer(fullResponse)) {
+            try {
+              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+                reportTombstoneCancellation('language_validation');
+                return;
+              }
+              // Diversify the repair instead of asking SEA-LION to repeat the
+              // same style a second time. Keep this bounded and validate it
+              // with the same Assamese gate before showing it to the student.
+              alternateAssameseAttempted = true;
+              const alternate = await generateFallback(c.env.AI, {
+                systemPrompt: `${systemPrompt}\n\n## বাধ্যতামূলক ভাষা সংশোধন\nকেৱল শুদ্ধ অসমীয়া লিপিত নতুনকৈ উত্তৰ লিখিবা। বাংলা, হিন্দী বা ইংৰাজী ব্যাখ্যামূলক বাক্য নিদিবা।`,
+                userMessage: message,
+                maxTokens: Math.min(CHAT_MAX_OUTPUT_TOKENS, 640),
+                signal: generationAbortController.signal,
+              }, 6_000);
+              const alternateText = normalizeAssameseStreamChunk(alternate.text);
+              if (await isChatRequestCancelled(c.env.DB, clientRequestId, userId)) {
+                reportTombstoneCancellation('language_validation');
+                return;
+              }
+              if (isDeliverableAssameseAnswer(alternateText)) {
+                fullResponse = alternateText;
+                actualModel = alternate.model;
+                assameseProseLeakage = !isReliableAssameseAnswer(alternateText);
+              }
+            } catch (alternateError) {
+              if (generationAbortController.signal.aborted) throw alternateError;
+              console.warn('[chat] alternate Assamese model repair failed', {
+                error_class: sanitizedChatErrorClass(alternateError),
+              });
+            }
           }
           if (!isDeliverableAssameseAnswer(fullResponse)) {
             timings.total_ms = Date.now() - startTime;
