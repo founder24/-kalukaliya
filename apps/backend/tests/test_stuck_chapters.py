@@ -76,14 +76,14 @@ def client():
 
 
 @pytest.fixture
-def admin_cookie():
+def admin_cookie(client):
     from app.config import settings
     expire = datetime.now(timezone.utc).replace(microsecond=0)
     from datetime import timedelta
     expire = expire.replace(second=0) + timedelta(hours=8)
     payload = {"sub": "admin-test", "type": "admin", "role": "admin", "exp": expire}
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    return {"syrabit_admin_session": token}
+    client.cookies.set("syrabit_admin_session", token)
 
 
 # ── core deduplication behaviour ──────────────────────────────────────────────
@@ -111,7 +111,7 @@ class TestStuckChapterDeduplication:
                 return_value=chapter_mock,
             ),
         ):
-            resp = client.get(self.URL, cookies=admin_cookie)
+            resp = client.get(self.URL)
 
         assert resp.status_code == 200, resp.text
         return resp.json()
@@ -236,7 +236,7 @@ class TestStuckChapterMongoReconciliation:
             patch("app.models.content.Chapter.get",
                   new_callable=AsyncMock, return_value=chapter_mock),
         ):
-            resp = client.get(self.URL, cookies=admin_cookie)
+            resp = client.get(self.URL)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -262,7 +262,7 @@ class TestStuckChapterMongoReconciliation:
             patch("app.models.content.Chapter.get",
                   new_callable=AsyncMock, return_value=chapter_mock),
         ):
-            resp = client.get(self.URL, cookies=admin_cookie)
+            resp = client.get(self.URL)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -277,7 +277,7 @@ class TestStuckChapterMongoReconciliation:
         file_mock.exists.return_value = False
 
         with patch.object(admin_mod, "_AHSEC_PROGRESS_FILE", file_mock):
-            resp = client.get(self.URL, cookies=admin_cookie)
+            resp = client.get(self.URL)
 
         assert resp.status_code == 200
         data = resp.json()

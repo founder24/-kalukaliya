@@ -35,13 +35,13 @@ def client():
 
 
 @pytest.fixture
-def admin_cookie():
+def admin_cookie(client):
     """Valid admin session cookie (matches require_admin_session logic)."""
     from datetime import timedelta
     expire = datetime.now(timezone.utc) + timedelta(hours=8)
     payload = {"sub": "test_admin_id", "type": "admin", "role": "admin", "exp": expire}
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    return {"syrabit_admin_session": token}
+    client.cookies.set("syrabit_admin_session", token)
 
 
 def _make_chapter(
@@ -110,7 +110,6 @@ class TestChapterListFieldsExposed:
         with patch("app.models.content.Chapter.find", return_value=chapters_qs):
             resp = client.get(
                 "/api/v1/admin/content/chapters?subject_id=507f1f77bcf86cd799439012",
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -129,7 +128,6 @@ class TestChapterListFieldsExposed:
         with patch("app.models.content.Chapter.find", return_value=chapters_qs):
             resp = client.get(
                 "/api/v1/admin/content/chapters?subject_id=507f1f77bcf86cd799439012",
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -151,7 +149,6 @@ class TestChapterListFieldsExposed:
         with patch("app.models.content.Chapter.find", return_value=chapters_qs):
             resp = client.get(
                 "/api/v1/admin/content/chapters?subject_id=507f1f77bcf86cd799439012",
-                cookies=admin_cookie,
             )
 
         chapters = resp.json()["chapters"]
@@ -178,7 +175,6 @@ class TestChapterPatchSavesNotesEn:
             resp = client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_en": "# Updated notes content"},
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -199,7 +195,6 @@ class TestChapterPatchSavesNotesEn:
             client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_en": "# Notes here"},
-                cookies=admin_cookie,
             )
 
         assert ch.notes_generated is True
@@ -215,7 +210,6 @@ class TestChapterPatchSavesNotesEn:
             client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_en": ""},
-                cookies=admin_cookie,
             )
 
         assert ch.notes_generated is False
@@ -231,7 +225,6 @@ class TestChapterPatchSavesNotesEn:
             client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "content": "# Legacy write"},
-                cookies=admin_cookie,
             )
 
         # notes_en must be untouched — only content_en changes
@@ -255,7 +248,6 @@ class TestChapterPatchSavesNotesAs:
             resp = client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_as": "# অসমীয়া টোকা"},
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -275,7 +267,6 @@ class TestChapterPatchSavesNotesAs:
             client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "content_as": "# Legacy Assamese"},
-                cookies=admin_cookie,
             )
 
         assert ch.notes_as == "# Primary Assamese notes"
@@ -297,7 +288,6 @@ class TestWordCountSource:
             client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_en": "one two three four five"},
-                cookies=admin_cookie,
             )
 
         assert ch.word_count == 5
@@ -313,7 +303,6 @@ class TestWordCountSource:
             client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "content": "alpha beta gamma"},
-                cookies=admin_cookie,
             )
 
         assert ch.word_count == 3
@@ -333,7 +322,6 @@ class TestWordCountSource:
                     "notes_en": "a b c d e f g h i j",  # 10 words
                     "content": "x y z",                  # 3 words
                 },
-                cookies=admin_cookie,
             )
 
         assert ch.word_count == 10
@@ -352,7 +340,6 @@ class TestOptimisticLockingWithNotes:
             resp = client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_en": "# New", "version": 3},  # client at 3
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 409
@@ -374,7 +361,6 @@ class TestOptimisticLockingWithNotes:
             resp = client.patch(
                 "/api/v1/admin/content/chapters/507f1f77bcf86cd799439011",
                 json={"title": "Test Chapter", "notes_en": "# Force-written"},
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -415,7 +401,6 @@ class TestSeedNotesFilterSkipsIngestedChapters:
             resp = client.post(
                 "/api/v1/admin/content/seed-notes",
                 json={"force": False},
-                cookies=admin_cookie,
             )
 
         # Either nothing_to_do (empty chapters) or started — both are fine
@@ -453,7 +438,6 @@ class TestSeedNotesFilterSkipsIngestedChapters:
             resp = client.post(
                 "/api/v1/admin/content/seed-notes",
                 json={"force": True},
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -498,7 +482,6 @@ class TestSeedAssameseFilterSkipsIngestedChapters:
             resp = client.post(
                 "/api/v1/admin/content/seed-assamese",
                 json={"force": False},
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200
@@ -537,7 +520,6 @@ class TestSeedAssameseFilterSkipsIngestedChapters:
             resp = client.post(
                 "/api/v1/admin/content/seed-assamese",
                 json={"force": True},
-                cookies=admin_cookie,
             )
 
         assert resp.status_code == 200

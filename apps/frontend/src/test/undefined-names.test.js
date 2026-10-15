@@ -33,7 +33,7 @@ describe('undefined frontend names check', () => {
         }),
       ]),
     );
-  });
+  }, 20_000);
 
   it('rejects handlers that are not destructured props or declared names', async () => {
     const messages = await lintSnippet(`

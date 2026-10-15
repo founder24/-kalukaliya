@@ -97,10 +97,10 @@ async def test_admin_verify_valid_cookie_returns_200(client: AsyncClient):
         "exp": expire,
     }
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    client.cookies.set("syrabit_admin_session", token)
 
     response = await client.get(
         "/api/v1/admin/verify",
-        cookies={"syrabit_admin_session": token},
     )
     assert response.status_code == 200
     data = response.json()
@@ -119,10 +119,10 @@ async def test_admin_verify_non_admin_token_returns_403(client: AsyncClient):
         "exp": expire,
     }
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    client.cookies.set("syrabit_admin_session", token)
 
     response = await client.get(
         "/api/v1/admin/verify",
-        cookies={"syrabit_admin_session": token},
     )
     assert response.status_code == 403
 
@@ -138,9 +138,9 @@ async def test_admin_verify_expired_cookie_returns_401(client: AsyncClient):
         "exp": expire,
     }
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    client.cookies.set("syrabit_admin_session", token)
 
     response = await client.get(
         "/api/v1/admin/verify",
-        cookies={"syrabit_admin_session": token},
     )
     assert response.status_code == 401
