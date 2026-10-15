@@ -27,13 +27,19 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# The final stage starts from a fresh base image and never inherits the
-# builder stage's system pip (only /root/.local is copied across), so the
-# base image's bundled pip must be upgraded here too, not just in the
-# builder — otherwise the shipped image still carries the base image's
-# stale, vulnerable pip regardless of what the builder stage did.
+# The application installs dependencies in the builder and does not need a
+# package installer at runtime. Remove pip and ensurepip from the final image
+# rather than shipping pip's vendored dependencies, which can lag behind the
+# versions installed from requirements.txt.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip setuptools
+    && rm -rf \
+       /usr/local/lib/python3.12/site-packages/pip \
+       /usr/local/lib/python3.12/site-packages/pip-*.dist-info \
+       /usr/local/lib/python3.12/ensurepip \
+       /usr/local/lib/python3.12/ensurepip-*.dist-info \
+       /usr/local/bin/pip \
+       /usr/local/bin/pip3 \
+       /usr/local/bin/pip3.12
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 
