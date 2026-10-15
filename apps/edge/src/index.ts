@@ -707,13 +707,13 @@ export default {
     // ── Library bundle KV cache (stale-while-revalidate) ─────────────────────
     // /api/v1/content/library-bundle is static curriculum metadata (~79 KB)
     // that changes only on admin deploys. Serve from KV to decouple the
-    // library page from backend/MongoDB availability entirely.
+    // library page from API Worker availability entirely.
     //
     // Strategy:
     //   HIT  (age < FRESH_TTL)  → return cached, no backend call
     //   STALE (age ≥ FRESH_TTL) → return cached immediately, revalidate in bg
-    //   MISS                    → proxy to backend, populate cache on 200
-    //   MISS + backend error    → return backend error as-is (no data yet)
+    //   MISS                    → proxy to API Worker, populate cache on 200
+    //   MISS + API Worker error → return API Worker error as-is (no data yet)
     if (
       url.pathname === '/api/v1/content/library-bundle' &&
       request.method === 'GET' &&
@@ -776,7 +776,7 @@ export default {
         }
       }
 
-      // Cache MISS — proxy to backend and populate cache on success
+      // Cache MISS — proxy to the API Worker and populate cache on success
       const backendResp = await proxyToApiWorker(request, env);
       if (backendResp.status === 200) {
         const body = await backendResp.text();
@@ -800,7 +800,7 @@ export default {
         return secured;
       }
 
-      // Backend error and no cache — pass the error through as-is
+      // API Worker error and no cache — pass the error through as-is
       const secured = addSecurityHeaders(backendResp);
       applyCorsHeaders(secured.headers, origin);
       secured.headers.set('X-Request-ID', requestId);

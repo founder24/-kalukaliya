@@ -36,8 +36,8 @@ interface JWTHeader {
  *
  * Group B — OPTIONAL_AUTH_PATHS (JWT verified if present; anonymous allowed):
  *   /api/v1/chat, /api/v1/conversations, /api/v1/edu
- *   The backend uses get_current_user_optional() on these routes.
- *   Anonymous users get a capped monthly quota enforced by MongoDB.
+ *   The API Worker uses optional auth on these routes.
+ *   Anonymous users get a capped monthly quota enforced by D1.
  *
  * Group C — PROTECTED (JWT required at edge; backend enforces tier/permissions):
  *   /api/v1/users/*, /api/v1/subscription/*, /api/v1/feedback/*

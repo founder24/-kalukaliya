@@ -56,9 +56,9 @@ localPort = 8008
 externalPort = 8008
 
 [deployment]
-deploymentTarget = "autoscale"
-run = ["bash", "-c", "cd apps/backend && pip install -r requirements.txt -q && uvicorn app.main:app --host 0.0.0.0 --port 5000"]
+deploymentTarget = "static"
 build = ["bash", "-c", "cd apps/frontend && pnpm install && pnpm build:client"]
+publicDir = "apps/frontend/dist"
 
 [userenv]
 
