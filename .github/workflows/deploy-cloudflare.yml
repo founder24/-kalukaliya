@@ -87,6 +87,8 @@ jobs:
         run: python3 scripts/validate-cloudflare-release-config.py
 
       - name: Enforce Cloudflare-only production release configuration
+        env:
+          VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL || 'https://api.syrabit.ai' }}
         run: python3 scripts/validate-cloudflare-only-production.py
 
       - name: Validate refresh-token bridge release guard

@@ -66,7 +66,6 @@ publicDir = "apps/frontend/dist"
 
 [userenv.shared]
 APP_ENV = "development"
-MONGODB_DB_NAME = "syrabit_prod"
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_MINUTES = "60"
 REFRESH_TOKEN_EXPIRY_DAYS = "7"

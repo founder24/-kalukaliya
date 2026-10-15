@@ -24,10 +24,9 @@ if (!_VITE_BACKEND && !_USE_SAME_ORIGIN_API) {
 export const API_BASE = `${EFFECTIVE_BACKEND_URL}/api/v1`;
 export const HEALTH_API = `${EFFECTIVE_BACKEND_URL}/health`;
 
-const _RENDER_URL = (import.meta.env.VITE_RENDER_API_URL || '').replace(/\/+$/, '');
-const _WORKER_URL = (import.meta.env.VITE_WORKER_API_URL || '').replace(/\/+$/, '');
-const RENDER_API = _RENDER_URL ? `${_RENDER_URL}/api/v1` : API_BASE;
-export const WORKER_API = _WORKER_URL ? `${_WORKER_URL}/api/v1` : API_BASE;
+// All browser API traffic goes through the canonical Edge Worker origin (or
+// the same-origin Vite proxy in development), never directly to a legacy API.
+export const WORKER_API = API_BASE;
 
 let _authToken = null;
 const ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;

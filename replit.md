@@ -8,10 +8,21 @@ The Replit run button starts the React/Vite frontend:
 pnpm --filter @workspace/syrabit run dev
 ```
 
-The frontend uses relative `/api/v1` requests in development. Staff content
-CRUD is served by the Cloudflare API Worker under `/staff/content/...`; the
-legacy Python backend and AHSEC importer are retained offline tools and are
-not part of the default app workflow.
+The browser-to-storage path is:
+
+`React UI → /api/v1 → Vite dev proxy or Cloudflare Edge Worker → API_WORKER service binding → syrabit-api-prod → D1`
+
+In local development, Vite proxies `/api` and `/health` to
+`https://api.syrabit.ai`, the Cloudflare Edge Worker. Production Pages uses the
+same Edge Worker origin. The Edge Worker forwards API and health traffic only
+through its private `API_WORKER` service binding; missing bindings fail closed.
+Chat quota reservations and user/account reads and writes are handled by the
+D1-backed API Worker.
+
+The Replit deployment is static frontend hosting and has no server run command.
+The legacy Python/MongoDB backend is not started by the app workflow or used by
+the production request path; its code and the AHSEC importer are retained only
+for offline/migration work.
 
 ## Verification
 

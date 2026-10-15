@@ -6,18 +6,18 @@ description: How this monorepo is configured to run in the Replit environment
 # Syrabit Dev Environment Setup
 
 ## Architecture
-- Monorepo with pnpm workspaces: `apps/frontend` (Vite+React), `apps/backend` (FastAPI)
-- Frontend on port 5000 (webview), Backend on localhost:8000 (console)
-- Edge/Cloudflare Worker not run locally — only frontend+backend in dev
+- Monorepo with pnpm workspaces: `apps/frontend` (Vite+React), `apps/edge` (Cloudflare Edge Worker), and `apps/api` (Cloudflare API Worker + D1).
+- `apps/backend` is legacy Python/MongoDB code retained for offline or migration tooling; it is not part of the app runtime.
 
 ## Workflows
-- "Start application": `pnpm --filter @workspace/syrabit run dev` — port 5000, webview (run from monorepo root)
-- "Start backend": `cd apps/backend && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload` — port 8000, console
+- "Start application": `pnpm --filter @workspace/syrabit run dev` — Vite on port 5000, webview.
+- The frontend calls relative `/api/v1` paths in local development; Vite proxies them to `https://api.syrabit.ai` (the Cloudflare Edge Worker), which forwards via `API_WORKER` service binding to the D1-backed API Worker.
+- Replit deployment serves the static frontend; it does not run FastAPI.
+- The AHSEC D1 importer is a separate one-off data workflow, not an API server.
 
 ## Key config
-- `apps/backend/.env` sets `APP_ENV=development` and `TRUST_EDGE_AUTH=False` — required for dev startup without errors
 - Vite config already has `host: '0.0.0.0'`, `allowedHosts: true`, port 5000 — no changes needed
-- Backend health returns "degraded" in dev (Redis + Vertex AI not configured) — this is expected and non-fatal
+- Missing `API_WORKER` binding fails closed; do not add a public backend URL fallback.
 
 ## Dependencies
 - Frontend: `pnpm install` in `apps/frontend`
@@ -33,9 +33,8 @@ description: How this monorepo is configured to run in the Replit environment
 **How to apply:** From `apps/backend`, run focused tests with `PYTHONPATH=. uv run --no-project --with-requirements requirements.txt --with-requirements requirements-dev.in pytest ...`; do not add test tools to production requirements.
 
 ## Dev behavior without full secrets
-- App loads and chapter pages render correctly with MongoDB connected
-- Backend "degraded" health is normal in dev — Redis disabled, Vertex AI not configured
-- 401/403/404 console errors for auth-gated resources are expected for unauthenticated users
+- Local app traffic uses the Cloudflare API origin; it does not require MongoDB or start the legacy Python API.
+- 401/403/404 console errors for auth-gated resources are expected for unauthenticated users.
 
 ## Focused API Vitest runs
 
