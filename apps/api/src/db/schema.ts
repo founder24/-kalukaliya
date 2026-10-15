@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,6 +270,18 @@ export const monthlyQuotaUsage = sqliteTable('monthly_quota_usage', {
   uniqueIndex('monthly_quota_user_period_idx').on(t.userId, t.period),
 ]);
 
+// Daily free-tier allowance shared by anonymous and signed-in identities.
+export const dailyChatQuotaUsage = sqliteTable('daily_chat_quota_usage', {
+  identityId: text('identity_id').notNull(),
+  isAnonymous: integer('is_anonymous').notNull(),
+  period: text('period').notNull(),                                   // YYYY-MM-DD (UTC)
+  count: integer('count').notNull().default(0),
+  updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+  primaryKey({ columns: [t.identityId, t.isAnonymous, t.period] }),
+  index('daily_chat_quota_period_idx').on(t.period, t.isAnonymous),
+]);
+
 // A stable browser request key makes a transport retry one logical turn
 // instead of charging a second quota slot.
 export const chatRequestClaims = sqliteTable('chat_request_claims', {
@@ -280,6 +292,8 @@ export const chatRequestClaims = sqliteTable('chat_request_claims', {
   quotaReserved: integer('quota_reserved').notNull().default(1),
   monthlyQuotaReserved: integer('monthly_quota_reserved').notNull().default(0),
   monthlyPeriod: text('monthly_period'),
+  dailyQuotaReserved: integer('daily_quota_reserved').notNull().default(0),
+  dailyPeriod: text('daily_period'),
   status: text('status').notNull().default('reserved'),
   sessionId: text('session_id'),
   responseContent: text('response_content'),

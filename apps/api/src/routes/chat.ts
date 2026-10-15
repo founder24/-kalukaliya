@@ -42,12 +42,12 @@ import {
 } from '../services/web-search';
 import {
   CHAT_RPM_LIMIT,
-  FREE_MONTHLY_CHAT_LIMIT,
   anonUserId,
-  currentQuotaMonthPeriod,
+  currentQuotaDayPeriod,
   currentQuotaMinutePeriod,
   trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
+import { FREE_DAILY_CHAT_LIMIT, getDailyChatQuotaUsage } from '../services/chat-quota';
 import type { Env } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -728,8 +728,8 @@ interface ChatRequestClaim {
   period?: string;
   is_anon?: number;
   quota_reserved?: number;
-  monthly_quota_reserved?: number;
-  monthly_period?: string | null;
+  daily_quota_reserved?: number;
+  daily_period?: string | null;
   session_id: string | null;
   response_content: string | null;
   response_metadata: string | null;
@@ -741,7 +741,7 @@ async function getChatRequestClaim(
 ): Promise<ChatRequestClaim | null> {
   return d1.prepare(
     `SELECT user_id, status, session_id, response_content, response_metadata,
-            quota_reserved, monthly_quota_reserved, monthly_period
+            quota_reserved, daily_quota_reserved, daily_period
      FROM chat_request_claims
      WHERE request_id = ? AND expires_at > ?`,
   ).bind(requestId, Math.floor(Date.now() / 1000)).first<ChatRequestClaim>();
@@ -767,22 +767,22 @@ export async function insertChatRequestClaim(
   isAnon: boolean,
   quotaReserved: boolean,
   period = currentQuotaMinutePeriod(),
-  monthlyQuota?: { period: string; limit: number },
+  dailyQuota?: { period: string; limit: number },
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
-  const result = monthlyQuota
+  const result = dailyQuota
     ? await d1.prepare(`
         INSERT OR IGNORE INTO chat_request_claims
           (request_id, user_id, period, is_anon, quota_reserved,
-           monthly_quota_reserved, monthly_period, status, created_at, expires_at)
+           daily_quota_reserved, daily_period, status, created_at, expires_at)
         SELECT ?, ?, ?, ?, ?, 1, ?, 'reserved', ?, ?
         WHERE COALESCE((
-          SELECT count FROM monthly_quota_usage
-          WHERE user_id = ? AND period = ?
+          SELECT count FROM daily_chat_quota_usage
+          WHERE identity_id = ? AND is_anonymous = ? AND period = ?
         ), 0) + (
           SELECT COUNT(*) FROM chat_request_claims
-          WHERE user_id = ? AND monthly_period = ?
-            AND monthly_quota_reserved = 1 AND status = 'reserved'
+          WHERE user_id = ? AND is_anon = ? AND daily_period = ?
+            AND daily_quota_reserved = 1 AND status = 'reserved'
             AND expires_at > ?
         ) < ?
       `).bind(
@@ -791,15 +791,17 @@ export async function insertChatRequestClaim(
         period,
         isAnon ? 1 : 0,
         quotaReserved ? 1 : 0,
-        monthlyQuota.period,
+        dailyQuota.period,
         now,
         now + 24 * 3600,
         userId,
-        monthlyQuota.period,
+        isAnon ? 1 : 0,
+        dailyQuota.period,
         userId,
-        monthlyQuota.period,
+        isAnon ? 1 : 0,
+        dailyQuota.period,
         now,
-        monthlyQuota.limit,
+        dailyQuota.limit,
       ).run()
     : await d1.prepare(`
         INSERT OR IGNORE INTO chat_request_claims
@@ -815,26 +817,6 @@ export async function insertChatRequestClaim(
         now + 24 * 3600,
       ).run();
   return (result.meta.changes ?? 0) > 0;
-}
-
-export async function getAuthMonthlyQuotaUsage(
-  d1: D1Database,
-  userId: string,
-  period = currentQuotaMonthPeriod(),
-): Promise<number> {
-  const now = Math.floor(Date.now() / 1000);
-  const row = await d1.prepare(`
-    SELECT COALESCE((
-      SELECT count FROM monthly_quota_usage
-      WHERE user_id = ? AND period = ?
-    ), 0) + (
-      SELECT COUNT(*) FROM chat_request_claims
-      WHERE user_id = ? AND monthly_period = ?
-        AND monthly_quota_reserved = 1 AND status = 'reserved'
-        AND expires_at > ?
-    ) AS count
-  `).bind(userId, period, userId, period, now).first<{ count: number }>();
-  return row?.count ?? 0;
 }
 
 async function completeChatRequestClaim(
@@ -2050,13 +2032,13 @@ export async function persistCompletedChat(
   ];
   if (opts.requestId) {
     statements.push(d1.prepare(`
-      INSERT INTO monthly_quota_usage (user_id, period, count, updated_at)
-      SELECT user_id, monthly_period, 1, ?
+      INSERT INTO daily_chat_quota_usage (identity_id, is_anonymous, period, count, updated_at)
+      SELECT user_id, is_anon, daily_period, 1, ?
       FROM chat_request_claims
       WHERE request_id = ? AND user_id = ? AND status = 'reserved'
-        AND monthly_quota_reserved = 1 AND monthly_period IS NOT NULL
-      ON CONFLICT (user_id, period) DO UPDATE
-        SET count = monthly_quota_usage.count + 1,
+        AND daily_quota_reserved = 1 AND daily_period IS NOT NULL
+      ON CONFLICT (identity_id, is_anonymous, period) DO UPDATE
+        SET count = daily_chat_quota_usage.count + 1,
             updated_at = excluded.updated_at
     `).bind(now, opts.requestId, uid));
   }
