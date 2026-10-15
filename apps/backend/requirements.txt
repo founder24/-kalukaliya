@@ -204,12 +204,12 @@ pydantic-settings==2.15.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
 pyjwt==2.15.1
     # via -r /home/runner/workspace/apps/backend/requirements.in
-pymongo==4.17.0
+pymongo==4.19.0
     # via
     #   -r /home/runner/workspace/apps/backend/requirements.in
     #   beanie
     #   motor
-pypdf==6.16.2
+pypdf==6.20.1
     # via -r /home/runner/workspace/apps/backend/requirements.in
 pypdfium2==5.13.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
@@ -267,8 +267,9 @@ typing-inspection==0.4.2
     #   fastapi
     #   pydantic
     #   pydantic-settings
-urllib3==2.7.0
+urllib3==2.8.0
     # via
+    #   -r /home/runner/workspace/apps/backend/requirements.in
     #   requests
     #   sentry-sdk
 uvicorn==0.48.0
