@@ -16,7 +16,7 @@ def client():
 
 
 @pytest.fixture
-def admin_cookie():
+def admin_cookie(client):
     from app.config import settings
 
     expires = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(hours=8)
@@ -25,7 +25,7 @@ def admin_cookie():
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )
-    return {"syrabit_admin_session": token}
+    client.cookies.set("syrabit_admin_session", token)
 
 
 def _write_jsonl(path, *records):
@@ -90,7 +90,6 @@ def test_importer_state_directory_is_read_by_approval_history_endpoint(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/approvals",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200, response.text
@@ -189,7 +188,6 @@ def test_import_approvals_show_safe_metadata_and_linked_progress(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/approvals?limit=1",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200, response.text
@@ -301,7 +299,6 @@ def test_import_approvals_keep_overlapping_chapters_scoped_to_run(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/approvals",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200, response.text
@@ -387,7 +384,6 @@ def test_import_approvals_ignore_malformed_progress_lines(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/approvals",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200, response.text
@@ -433,7 +429,6 @@ def test_import_approvals_report_pending_run_without_progress(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/approvals",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200
@@ -480,7 +475,6 @@ def test_import_approvals_report_running_run_without_terminal_summary(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/approvals",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200
@@ -562,7 +556,6 @@ def test_index_repair_queue_uses_latest_archived_state_and_attempt_limit(
     ):
         response = client.get(
             "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=1",
-            cookies=admin_cookie,
         )
 
     assert response.status_code == 200, response.text
@@ -680,11 +673,9 @@ def test_index_repair_queue_uses_compact_index_after_archive_retention(
     ):
         first = client.get(
             "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
-            cookies=admin_cookie,
         )
         second = client.get(
             "/api/v1/admin/content/ahsec-d1-import/index-repair-queue?limit=10",
-            cookies=admin_cookie,
         )
 
     assert first.status_code == 200, first.text

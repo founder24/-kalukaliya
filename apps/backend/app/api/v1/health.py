@@ -5,6 +5,7 @@ Health Check Endpoints: Basic and Deep Dependency Checks
 import asyncio
 import os
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
@@ -215,7 +216,7 @@ async def basic_health_check():
         "email_failures_last_hour": await get_email_failures_last_hour(),
         # "redis" = fleet-wide cap active; "in_memory" = per-pod only (degraded protection)
         "email_rate_limiter": get_email_rate_limiter_mode(),
-        "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     if warnings:
         response["warnings"] = warnings
@@ -355,7 +356,7 @@ async def provider_health_check():
         content={
             "overall": overall,
             "providers": providers,
-            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
     )
 

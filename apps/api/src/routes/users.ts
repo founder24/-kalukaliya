@@ -31,11 +31,14 @@ import { users, chats, memoryBrain } from '../db/schema';
 import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
   CHAT_RPM_LIMIT,
+  FREE_DAILY_CHAT_LIMIT,
   anonUserId,
+  currentQuotaDayPeriod,
   currentQuotaMinutePeriod,
   isBrowserAnonId,
 } from '../services/anonymous';
 import { getAnonQuotaUsage } from './chat';
+import { getDailyChatQuotaUsage } from '../services/chat-quota';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
@@ -398,6 +401,7 @@ usersRouter.get('/credits', async (c) => {
   let anonymousId: string | null = null;
   let authenticated = false;
   let authenticatedUserId: string | null = null;
+  let authenticatedRole = 'student';
 
   if (token) {
     const payload = await verifyToken(token, c.env.JWT_SECRET);
@@ -408,12 +412,14 @@ usersRouter.get('/credits', async (c) => {
         subscriptionTier: users.subscriptionTier,
         creditsRemaining: users.creditsRemaining,
         creditsUsed: users.creditsUsed,
+        role: users.role,
       }).from(users).where(eq(users.id, payload.sub)).get();
 
       if (user) {
         authenticated = true;
         authenticatedUserId = payload.sub;
         tier = user.subscriptionTier ?? 'free';
+        authenticatedRole = user.role ?? 'student';
       }
     }
   }
@@ -430,32 +436,50 @@ usersRouter.get('/credits', async (c) => {
     anonymousId = isBrowserAnonId(requestedAnonId)
       ? requestedAnonId
       : await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
-    creditsUsed = Math.max(
-      0,
-      await getAnonQuotaUsage(c.env.DB, c.env.RATE_LIMIT_KV, anonymousId),
-    );
+      creditsUsed = await getDailyChatQuotaUsage(
+        c.env.DB,
+        anonymousId,
+        true,
+        currentQuotaDayPeriod(),
+      );
   } else if (authenticatedUserId) {
-    const row = await c.env.DB.prepare(
-      'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
-    ).bind(authenticatedUserId, currentQuotaMinutePeriod()).first<{ count: number }>();
-    creditsUsed = row?.count ?? 0;
+    if (tier === 'free' && authenticatedRole !== 'admin' && authenticatedRole !== 'staff') {
+      creditsUsed = await getDailyChatQuotaUsage(
+        c.env.DB,
+        authenticatedUserId,
+        false,
+        currentQuotaDayPeriod(),
+      );
+    } else {
+      const row = await c.env.DB.prepare(
+        'SELECT count FROM quota_usage WHERE user_id = ? AND period = ?',
+      ).bind(authenticatedUserId, currentQuotaMinutePeriod()).first<{ count: number }>();
+      creditsUsed = row?.count ?? 0;
+    }
   }
 
-  const rpmLimit = CHAT_REQUESTS_PER_MINUTE;
+  const dailyLimited = !authenticated
+    || (tier === 'free' && authenticatedRole !== 'admin' && authenticatedRole !== 'staff');
+  const quotaLimit = dailyLimited ? FREE_DAILY_CHAT_LIMIT : CHAT_REQUESTS_PER_MINUTE;
   const nowMs = Date.now();
-  const resetAt = (Math.floor(nowMs / 60_000) + 1) * 60_000;
+  const resetAt = dailyLimited
+    ? (Math.floor(nowMs / 86_400_000) + 1) * 86_400_000
+    : (Math.floor(nowMs / 60_000) + 1) * 60_000;
   // The edge owns reservations for production chat requests. This explicit
   // per-language envelope lets clients render independent EN/AS allowances
   // without exposing identity or falling back to the retired daily contract.
   const languageQuota = () => ({
-    limit: rpmLimit,
+    limit: quotaLimit,
+    used: creditsUsed,
+    remaining: Math.max(0, quotaLimit - creditsUsed),
     reset_at: new Date(resetAt).toISOString(),
   });
   return c.json({
-    credits_remaining: Math.max(0, rpmLimit - creditsUsed),
+    credits_remaining: Math.max(0, quotaLimit - creditsUsed),
     credits_used: creditsUsed,
-    rpm_limit: rpmLimit,
-    quota_period: 'minute',
+    credits_limit: quotaLimit,
+    rpm_limit: CHAT_REQUESTS_PER_MINUTE,
+    quota_period: dailyLimited ? 'day' : 'minute',
     reset_at: new Date(resetAt).toISOString(),
     languages: {
       // Edge-owned buckets are independent. Their usage is intentionally not

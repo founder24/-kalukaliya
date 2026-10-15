@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { reserveAnonQuota } from './chat';
 import { usersRouter } from './users';
 import type { Env } from '../types';
+import { currentQuotaDayPeriod } from '../services/anonymous';
 
 const ANON_ID = 'anon_0123456789abcdef0123456789abcdef';
 
-function quotaDb(): D1Database {
-  const values = new Map<string, number>();
+function quotaDb(dailyUsed = 0): D1Database {
   return {
     prepare: vi.fn((query: string) => {
       let args: unknown[] = [];
@@ -17,21 +16,12 @@ function quotaDb(): D1Database {
           return statement;
         },
         first: async () => {
-          const key = `${String(args[0])}:${String(args[1])}`;
+          if (query.includes('SELECT COALESCE((')) return { count: dailyUsed };
           if (query.includes('SELECT count FROM anonymous_quota_usage')) {
-            return values.has(key) ? { count: values.get(key) } : null;
+            return null;
           }
           if (query.includes('INSERT INTO anonymous_quota_usage')) {
-            const legacy = Number(args[2]);
-            const current = Math.max(values.get(key) ?? 0, legacy);
-            if (query.includes('SELECT ?, ?, ? + 1')) {
-              const limit = Number(args[5]);
-              if (current >= limit) return null;
-              values.set(key, current + 1);
-              return { count: current + 1 };
-            }
-            values.set(key, current);
-            return { count: current };
+            return { count: 1 };
           }
           throw new Error(`Unexpected query: ${query}`);
         },
@@ -48,10 +38,9 @@ function quotaKv(initial = 0): KVNamespace {
 }
 
 describe('anonymous credit balance', () => {
-  it('reads the same atomic D1 counter that chat reserves', async () => {
-    const DB = quotaDb();
+  it('reads the daily quota balance used by anonymous chat', async () => {
+    const DB = quotaDb(1);
     const RATE_LIMIT_KV = quotaKv();
-    await reserveAnonQuota(DB, RATE_LIMIT_KV, ANON_ID);
 
     const response = await usersRouter.fetch(
       new Request('https://api.example/credits', {
@@ -66,8 +55,9 @@ describe('anonymous credit balance', () => {
       tier: 'free',
       credits_used: 1,
       credits_remaining: 5,
+      credits_limit: 6,
       rpm_limit: 6,
-      quota_period: 'minute',
+      quota_period: 'day',
     });
   });
 
@@ -103,7 +93,7 @@ describe('anonymous credit balance', () => {
       credits_used: 0,
       credits_remaining: 6,
       rpm_limit: 6,
-      quota_period: 'minute',
+      quota_period: 'day',
     });
   });
 });

@@ -13,6 +13,13 @@ updated: 2026-08-17
 - Migrations applied: 0001 (drop FK on chapters/chunks), 0002 (allow NULL stream_id on subjects)
 - RAZORPAY_WEBHOOK_SECRET must be set on API Worker (wrangler secret put --env production)
 
+## Migration release ordering
+Staging D1 can lag production's migration ledger. Inspect each environment's ledger and apply every missing migration in order rather than applying only the newest migration file. Verify the production ledger against active and archived SQL identities before applying.
+
+**Why:** A target may be missing prerequisite schema changes even when production already has them; applying only the latest migration can fail or leave environments inconsistent.
+
+**How to apply:** Check staging and production migration lists independently, review all pending scripts, then apply them in sequence before deploying Worker code.
+
 ## D1-backed routes (all student-facing + payment flows)
 - auth, chat, content (boards/classes/streams/subjects/chapters), users/profile
 - subscription (plans, status, create-order, cancel)

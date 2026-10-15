@@ -52,6 +52,12 @@ recording loses important production safeguards.
 commits; use the aggregate workflow whenever edge, frontend, secrets, or D1
 schema changes are part of the release.
 
+The connected GitHub App may allow repository reads without granting Actions workflow dispatch. Check the connection's workflow permission before choosing dispatch; if it is absent, deploy from the isolated API-only checkout with the same release gates and D1 evidence recording.
+
+**Why:** A repository connection can be usable for inspection while still being unable to start the protected production workflow.
+
+**How to apply:** Do not fall back to deploying the whole workspace just to bypass missing workflow scope. Keep the API-only release boundary and safeguards intact.
+
 ## Live Worker tail target
 
 For a named production environment, tail the deployed script name without also

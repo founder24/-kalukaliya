@@ -23,6 +23,56 @@ function readAuditSource(fileName) {
 }
 
 describe('scheduled Cloudflare audit contract', () => {
+  it('keeps local and published app traffic on the Edge Worker and D1 API Worker', () => {
+    const replit = fs.readFileSync(path.join(repoRoot, '.replit'), 'utf8');
+    const deployment = replit.split('[deployment]')[1]?.split('[userenv]')[0] ?? '';
+    const workflow = replit.split('name = "Start application"')[1]?.split('[[workflows.workflow]]')[0] ?? '';
+    const viteConfig = fs.readFileSync(
+      path.join(repoRoot, 'apps/frontend/vite.config.js'),
+      'utf8',
+    );
+    const apiClient = fs.readFileSync(
+      path.join(repoRoot, 'apps/frontend/src/utils/api.jsx'),
+      'utf8',
+    );
+    const edgeIndex = fs.readFileSync(
+      path.join(repoRoot, 'apps/edge/src/index.ts'),
+      'utf8',
+    );
+    const edgeProxy = fs.readFileSync(
+      path.join(repoRoot, 'apps/edge/src/routes/worker-proxy.ts'),
+      'utf8',
+    );
+    const chatRoute = fs.readFileSync(
+      path.join(repoRoot, 'apps/api/src/routes/chat.ts'),
+      'utf8',
+    );
+    const usersRoute = fs.readFileSync(
+      path.join(repoRoot, 'apps/api/src/routes/users.ts'),
+      'utf8',
+    );
+
+    expect(deployment).toContain('deploymentTarget = "static"');
+    expect(deployment).toContain('publicDir = "apps/frontend/dist"');
+    expect(deployment).not.toContain('run =');
+    expect(deployment).not.toContain('apps/backend');
+    expect(workflow).toContain('pnpm --filter @workspace/syrabit run dev');
+    expect(workflow).not.toContain('apps/backend');
+    expect(replit).not.toContain('MONGODB_DB_NAME');
+
+    expect(viteConfig).toContain("'https://api.syrabit.ai'");
+    expect(apiClient).toContain('export const WORKER_API = API_BASE;');
+    expect(apiClient).not.toContain('VITE_WORKER_API_URL');
+    expect(apiClient).not.toContain('VITE_RENDER_API_URL');
+    expect(edgeIndex).toContain('if (requiresApiWorker && !env.API_WORKER)');
+    expect(edgeIndex).toContain('api_worker_binding_unavailable');
+    expect(edgeProxy).toContain('env.API_WORKER!.fetch(outRequest)');
+    expect(chatRoute).toContain('INSERT INTO quota_usage');
+    expect(chatRoute).toContain('INSERT INTO anonymous_quota_usage');
+    expect(usersRoute).toContain('SELECT count FROM quota_usage');
+    expect(usersRoute).toContain('getDailyChatQuotaUsage(');
+  });
+
   it('defines the active production services and all required binding types once', () => {
     expect(PRODUCTION_SERVICES).toEqual({
       edge: 'syrabitworker-prod',

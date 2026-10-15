@@ -56,9 +56,9 @@ localPort = 8008
 externalPort = 8008
 
 [deployment]
-deploymentTarget = "autoscale"
-run = ["bash", "-c", "cd apps/backend && pip install -r requirements.txt -q && uvicorn app.main:app --host 0.0.0.0 --port 5000"]
+deploymentTarget = "static"
 build = ["bash", "-c", "cd apps/frontend && pnpm install && pnpm build:client"]
+publicDir = "apps/frontend/dist"
 
 [userenv]
 
@@ -66,7 +66,6 @@ build = ["bash", "-c", "cd apps/frontend && pnpm install && pnpm build:client"]
 
 [userenv.shared]
 APP_ENV = "development"
-MONGODB_DB_NAME = "syrabit_prod"
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_MINUTES = "60"
 REFRESH_TOKEN_EXPIRY_DAYS = "7"

@@ -18,7 +18,7 @@ export default defineConfig({
       'src/test/middleware-ssr-route.test.js',
     ],
     setupFiles: ['./src/test/setup.js'],
-    pool: 'forks',
-    singleFork: true,
+    pool: 'threads',
+    maxWorkers: 4,
   },
 });

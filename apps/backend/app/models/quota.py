@@ -15,7 +15,7 @@ class QuotaUsage(Document):
 
     user_id: str
     month: str
-    count: int = Field(default=0)
+    quota_count: int = Field(default=0, alias="count")
     expires_at: datetime
 
     class Settings:

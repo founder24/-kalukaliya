@@ -1,15 +1,12 @@
-"""Rate limiting dependency for FastAPI endpoints.
+"""Legacy FastAPI rate limiting dependency; not used by the live app.
 
-Monthly quota tracking is stored in MongoDB (quota_usage collection).
-Per-request burst rate limiting is handled by the Cloudflare Edge worker
-(apps/edge/src/middleware/rate-limit.ts).
+This retired backend stores monthly quota tracking in MongoDB. The live app
+reserves and reads quota in Cloudflare D1 through apps/api/src/routes/chat.ts
+and apps/api/src/routes/users.ts. Do not route local app or production traffic
+through this module.
 
-Architecture note (HF-026): Double rate limiting is intentional:
-- Edge: 30 req/hr per language (burst protection, fast rejection at the network edge)
-- Backend: 30 req/month total for free tier (quota/billing enforcement)
-The edge limit prevents burst abuse (e.g., scripted requests exhausting the LLM budget
-in seconds). The backend limit enforces the actual subscription quota boundary.
-This is NOT a bug or redundancy — removing either layer creates a gap.
+The FastAPI backend remains only for offline/migration tooling. Runtime routing
+is configured in the frontend Vite proxy and Cloudflare Edge Worker.
 """
 
 import time

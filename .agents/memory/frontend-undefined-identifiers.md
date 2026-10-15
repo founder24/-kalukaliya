@@ -8,3 +8,11 @@ Treat a successful Vite build as insufficient proof that an extracted JSX compon
 **Why:** A staff health tab passed production builds while several imported components and a callback prop were missing, causing sequential runtime `ReferenceError` failures that cascaded across unrelated health checks.
 
 **How to apply:** Keep the static check in normal frontend validation, retain regression snippets for missing JSX components and handler props, and mount the real parent with the active tab after splitting admin JSX. Register plugins named by inline directives even when their rules are disabled. Do not upgrade ESLint majors until the Babel parser and React plugins support them.
+
+## Test-runner contention
+
+ESLint-backed regression tests can exceed Vitest's default per-test timeout under full-suite load even when they pass in isolation. Prefer bounded parallel workers for the frontend suite and give these analyzer-startup tests a scoped timeout.
+
+**Why:** serial execution exceeded the local command limit, while parallel execution exposed a timeout caused by ESLint startup contention rather than an assertion failure.
+
+**How to apply:** when adding tests that instantiate ESLint or another heavyweight analyzer, set a realistic per-test timeout and verify both the focused test and the full suite.

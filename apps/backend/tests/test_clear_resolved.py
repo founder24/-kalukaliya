@@ -64,12 +64,12 @@ def client():
 
 
 @pytest.fixture
-def admin_cookie():
+def admin_cookie(client):
     from app.config import settings
     expire = datetime.now(timezone.utc) + timedelta(hours=8)
     payload = {"sub": "admin-test", "type": "admin", "role": "admin", "exp": expire}
     token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    return {"syrabit_admin_session": token}
+    client.cookies.set("syrabit_admin_session", token)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -90,7 +90,7 @@ class TestClearResolvedEndpoint:
             return compact_return
 
         with patch.object(admin_mod, "_compact_progress_log", side_effect=_fake_compact):
-            resp = client.post(self.URL, cookies=admin_cookie)
+            resp = client.post(self.URL)
 
         assert resp.status_code == 200, resp.text
         return resp.json()

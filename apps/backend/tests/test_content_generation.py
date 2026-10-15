@@ -240,6 +240,7 @@ async def test_admin_generate_notes_returns_rejected_chapter_identity(client):
         settings.JWT_SECRET,
         algorithm="HS256",
     )
+    client.cookies.set("syrabit_admin_session", token)
 
     with (
         patch(
@@ -256,7 +257,6 @@ async def test_admin_generate_notes_returns_rejected_chapter_identity(client):
         response = await client.post(
             f"/api/v1/admin/content/chapters/{_CHAPTER_ID}/generate-notes",
             json={"force": True},
-            cookies={"syrabit_admin_session": token},
         )
 
     assert response.status_code == 422

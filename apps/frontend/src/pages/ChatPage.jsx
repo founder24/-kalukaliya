@@ -227,7 +227,7 @@ export default function ChatPage() {
         });
         setCredits({
           used: c.credits_used ?? c.used ?? 0,
-          limit: c.rpm_limit ?? 6,
+          limit: c.credits_limit ?? c.rpm_limit ?? 6,
           resetAt: c.reset_at ?? null,
           languages: {
             en: normalizeLanguageQuota(c.languages?.en),
@@ -627,11 +627,6 @@ export default function ChatPage() {
             capError === 'chat_daily_soft_cap' ||
             capHeader === 'chat_daily_soft_cap' ||
             /daily.*(chat|free|quota).*allowance|daily.*limit.*reached|daily.*quota.*exhausted|free quota exhausted/i.test(detail);
-          const isMonthlyCap =
-            capError === 'chat_monthly_limit' ||
-            capError === 'chat_budget_exhausted' ||
-            capHeader === 'chat_budget_exhausted' ||
-            /monthly.*budget|monthly.*chat/i.test(detail);
           const isAiRateLimit =
             /ai rate limit|rate limit exceeded|slow down|sending too fast/i.test(detail) ||
             capHeader === 'anon_rate_limited';
@@ -649,13 +644,6 @@ export default function ChatPage() {
             });
           } else if (isDailyCap && user) {
             toast.error('Daily chat allowance reached. Resets at midnight UTC.', { duration: 6000 });
-          } else if (isMonthlyCap) {
-            toast.error(
-              capError === 'chat_monthly_limit'
-                ? detail || 'You have used all 30 free chat requests for this month. Your allowance resets next month.'
-                : 'Monthly chat budget reached. Resets at the start of next month.',
-              { duration: 8000 },
-            );
           } else if (isAiRateLimit) {
             toast.error('Sending too fast — please wait a few seconds and try again.', { duration: 5000 });
           } else if (isNetworkBlock) {

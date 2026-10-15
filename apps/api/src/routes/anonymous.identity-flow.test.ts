@@ -1419,11 +1419,11 @@ describe('anonymous identity flow', () => {
       monthly_message_count: 1,
       total_lifetime_messages: 1,
     });
-    const monthlyUsage = await env.DB.prepare(
-      `SELECT count FROM monthly_quota_usage
-       WHERE user_id = ? AND period = strftime('%Y-%m', 'now')`,
+    const dailyUsage = await env.DB.prepare(
+      `SELECT count FROM daily_chat_quota_usage
+       WHERE identity_id = ? AND is_anonymous = 0 AND period = date('now')`,
     ).bind(userId).first<{ count: number }>();
-    expect(monthlyUsage?.count).toBe(1);
+    expect(dailyUsage?.count).toBe(1);
     const chats = await env.DB.prepare(
       'SELECT COUNT(*) AS count FROM chats WHERE user_id = ?',
     ).bind(userId).first<{ count: number }>();
@@ -1533,7 +1533,7 @@ describe('anonymous identity flow', () => {
       credits_used: 1,
       credits_remaining: 5,
       rpm_limit: 6,
-      quota_period: 'minute',
+      quota_period: 'day',
     });
 
     const list = await workerFetch(new Request(
@@ -1566,7 +1566,7 @@ describe('anonymous identity flow', () => {
       credits_used: 0,
       credits_remaining: 6,
       rpm_limit: 6,
-      quota_period: 'minute',
+      quota_period: 'day',
     });
 
     const otherList = await workerFetch(new Request(
