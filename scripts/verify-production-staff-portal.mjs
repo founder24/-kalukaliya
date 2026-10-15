@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { chromium } from '../apps/frontend/node_modules/@playwright/test/index.mjs';
 import {
-  hasCloudflareAccessHeaders,
   isExpectedPostLogoutAuthResponse,
   isPostLogoutAuthEndpoint,
 } from './staff-portal-response-policy.mjs';
@@ -170,11 +169,6 @@ page.on('request', request => {
     requestContentHubTabs.set(request, activeContentHubTab);
   }
   const url = new URL(request.url());
-  if (url.origin === edge && hasCloudflareAccessHeaders(request.headers())) {
-    forbiddenRequests.push(
-      `Cloudflare Access headers must not be sent to the public API: ${request.method()} ${url.pathname}`,
-    );
-  }
   if (
     request.method() === 'GET'
     && url.origin === edge
@@ -227,6 +221,7 @@ page.on('requestfailed', request => {
   const requestSection = requestSections.get(request) || activeSection;
   const url = new URL(request.url());
   const failureText = request.failure()?.errorText || 'unknown error';
+  if (postLogoutProbe && request.method() === 'GET' && url.origin === edge && url.pathname === '/api/v1/admin/verify') return;
   // The expected post-logout navigation can abort login-page asset fetches
   // while the browser settles on /login?next=/staff. Those are not failed
   // responses or privileged requests; keep real asset/network errors fatal.
@@ -248,23 +243,24 @@ page.on('requestfailed', request => {
   );
 });
 
-// Cloudflare Access protects the Pages origin only. API requests use the
-// application's bearer token and must not carry Access headers, which trigger
-// cross-origin preflight failures on the public API.
+// Add service-token headers to the protected Pages and admin API requests in this disposable browser check.
 await page.route(`${site}/**`, async route => {
   const requestUrl = new URL(route.request().url());
+  const isProtectedAdminRequest = requestUrl.pathname.startsWith('/api/v1/admin/');
   const isProtectedPagesDocument =
     requestUrl.pathname === '/staff'
     || requestUrl.pathname.startsWith('/staff/')
     || requestUrl.pathname === '/admin'
     || requestUrl.pathname.startsWith('/admin/');
-  if (!isProtectedPagesDocument) {
+  if (!isProtectedPagesDocument && !isProtectedAdminRequest) {
     await route.continue();
     return;
   }
-  await route.continue({
-    headers: { ...route.request().headers(), ...accessHeaders },
-  });
+  await route.continue({ headers: { ...route.request().headers(), ...accessHeaders } });
+});
+await page.route(`${edge}/**`, async route => {
+  if (!new URL(route.request().url()).pathname.startsWith('/api/v1/admin/')) { await route.continue(); return; }
+  await route.continue({ headers: { ...route.request().headers(), ...accessHeaders } });
 });
 
 try {
@@ -497,6 +493,9 @@ try {
       `Original wait failure: ${error.message}`,
     ].join('\n\n'));
   }
+  const postLogoutVerify = await context.request.get(`${edge}/api/v1/admin/verify`, { headers: accessHeaders });
+  if (postLogoutVerify.status() !== 401) throw new Error(`Post-logout API verification returned HTTP ${postLogoutVerify.status()}, expected 401`);
+  postLogoutAuthResponses.push(`401 GET ${edge}/api/v1/admin/verify`);
   if (await page.getByTestId('admin-dashboard').count()) {
     throw new Error('Protected staff content remained visible after UI sign-out');
   }

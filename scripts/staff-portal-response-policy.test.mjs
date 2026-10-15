@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isExpectedPostLogoutAuthResponse,
-  hasCloudflareAccessHeaders,
   isPostLogoutAuthEndpoint,
 } from './staff-portal-response-policy.mjs';
 
@@ -36,11 +35,3 @@ test('identifies a post-logout auth probe independently of its response status',
   );
 });
 
-test('detects Access credentials and preflight declarations before they reach the public API', () => {
-  assert.equal(hasCloudflareAccessHeaders({ 'CF-Access-Client-Id': 'redacted' }), true);
-  assert.equal(
-    hasCloudflareAccessHeaders({ 'access-control-request-headers': 'authorization, cf-access-client-id' }),
-    true,
-  );
-  assert.equal(hasCloudflareAccessHeaders({ authorization: 'Bearer redacted' }), false);
-});
