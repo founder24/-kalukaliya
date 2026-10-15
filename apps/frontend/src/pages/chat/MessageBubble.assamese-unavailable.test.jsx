@@ -43,6 +43,24 @@ describe('MessageBubble — Assamese chat unavailable card (Task #370)', () => {
     expect(screen.queryByText(/Auto-retry in/)).toBeNull();
   });
 
+  it('explains a language-quality rejection instead of calling it a service outage', () => {
+    renderBubble({
+      msg: {
+        id: 'quality-1',
+        role: 'assistant',
+        content: '',
+        isAiUnavailable: true,
+        isAssameseUnavailable: true,
+        isAssameseQualityFailure: true,
+      },
+      onSwitchToEnglish: vi.fn(),
+      onRetry: vi.fn(),
+    });
+
+    expect(screen.getByText(/বিশ্বাসযোগ্য অসমীয়া উত্তৰ দিব পৰা নগ’ল/)).toBeTruthy();
+    expect(screen.queryByText(/অসমীয়া চেট সেৱা সাময়িকভাৱে অনুপলব্ধ/)).toBeNull();
+  });
+
   it('falls back to the generic English card when isAssameseUnavailable is false', () => {
     renderBubble({
       msg: { id: 'a2', role: 'assistant', content: '', isAiUnavailable: true, retryText: 'hi' },

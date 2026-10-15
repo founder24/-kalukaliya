@@ -844,9 +844,11 @@ export default function ChatPage() {
             // hatch instead of the generic English "Syra is resting"
             // toast + 8s auto-retry.
             const isAssameseUnavailable =
+              responseLang === 'as' ||
               parsed.error_kind === 'assamese_unavailable' ||
-              (responseLang === 'as' &&
-                /assamese chat|indic language ai|অসমীয়া/i.test(String(parsed.error || '')));
+              /assamese chat|indic language ai|অসমীয়া/i.test(String(parsed.error || ''));
+            const isAssameseQualityFailure =
+              parsed.error_kind === 'assamese_language_validation_failed';
             setMessages((prev) => prev.map((m) =>
               m.id === aiMsgId
                 ? {
@@ -858,6 +860,7 @@ export default function ChatPage() {
                     isConnectionInterrupted: false,
                     isPartialResponse: Boolean(fullContent),
                     isAssameseUnavailable,
+                    isAssameseQualityFailure,
                     retryText: text,
                     userMsgId,
                     chatRequestId,

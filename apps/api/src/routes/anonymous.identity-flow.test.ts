@@ -76,12 +76,16 @@ function migrationStatements(): string[] {
 
 function aiBinding(): Ai {
   return {
-    run: async (model: string) => {
+    run: async (model: string, input?: { stream?: boolean }) => {
       if (model === '@cf/baai/bge-m3') {
         return { data: [{ values: [0.1, 0.2, 0.3] }] };
       }
       generationCalls += 1;
       if (generationBarrier) await generationBarrier;
+
+      if (input?.stream !== true) {
+        return { response: 'এইটো এটা সহায়ক অসমীয়া উত্তৰ।' };
+      }
 
       const bytes = new TextEncoder().encode(
         'data: {"response":"Plants use light to make food."}\n\ndata: [DONE]\n\n',
