@@ -1,5 +1,5 @@
 import {
-  Sparkles, Loader2, Eye, Edit2, Trash2,
+  Sparkles, Loader2, Eye, Edit2, Trash2, CircleHelp,
   CheckCircle, FileText, Layers, Globe, AlertTriangle,
   BookOpen, Hash, Search, ChevronDown, ChevronUp,
   Send, Clock,
@@ -25,7 +25,7 @@ export default function ChapterList({
   sortByStatus = false, setSortByStatus,
   generatingNotes,
   onGenerateNotes, onDeleteChapter, onChangeChapterStatus,
-  onViewChapter, onEditChapter,
+  onViewChapter, onEditChapter, onManageTopicAnswers,
   onPublishChapter, publishingChapters = new Set(),
   selSubject, subjectData, onCreateNew,
   selectedIds, onToggleSelect, onToggleSelectAll,
@@ -202,6 +202,9 @@ export default function ChapterList({
                     </button>
                   )}
                   <button onClick={() => onViewChapter(ch)} className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-400 hover:text-emerald-400" title="Preview lesson" data-testid={`open-chapter-${ch.id}`}><Eye size={13} /></button>
+                  {onManageTopicAnswers && (
+                    <button onClick={() => onManageTopicAnswers(ch)} className="p-1.5 rounded-lg hover:bg-violet-500/10 text-gray-400 hover:text-violet-500" title="Manage question answer cards" data-testid={`manage-topic-answers-${ch.id}`}><CircleHelp size={13} /></button>
+                  )}
                   <button onClick={() => onEditChapter(ch)} data-testid={`edit-chapter-${ch.id}`}
                     className="p-1.5 rounded-lg hover:bg-violet-500/10 text-gray-400 hover:text-violet-400" title="Edit chapter"><Edit2 size={13} /></button>
                   <button onClick={() => onDeleteChapter(ch.id)} data-testid={`delete-chapter-${ch.id}`} className="p-1.5 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400" title="Delete chapter"><Trash2 size={13} /></button>
