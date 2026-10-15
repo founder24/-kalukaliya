@@ -3,8 +3,9 @@
 /**
  * Focused production contract probe for the native Cloudflare chat path.
  *
- * Every run makes two anonymous chat requests: a normal answer and a current-
- * information request that must fail closed while web search is disabled.
+ * Every run makes three anonymous chat requests: a normal answer, an Assamese
+ * answer, and a current-information request that must fail closed while web
+ * search is disabled.
  * The broader student-authenticated checks remain opt-in.
  */
 
@@ -93,6 +94,18 @@ function assertSuccessfulAnswer(stream, name) {
   );
 }
 
+function assertAssameseScriptAnswer(stream, name) {
+  const answer = stream.events
+    .filter(event => typeof event.content === 'string' && event.content.trim() && !event.done)
+    .map(event => event.content)
+    .join('');
+  assert(/[\u0980-\u09FF]/u.test(answer), `${name} emitted no Assamese-script answer`);
+  assert(
+    !/[\u0900-\u0963\u0970-\u097F]/u.test(answer),
+    `${name} emitted Devanagari rather than Assamese-script output`,
+  );
+}
+
 function assertSearchSkipped(events, name) {
   const sourceCard = events.find(event => event.event === 'source_card');
   const terminal = events.find(event => event.event === 'syrabit_done' || event.event === 'chat_error');
@@ -115,6 +128,16 @@ async function runAnonymousContract() {
   assertSuccessfulAnswer(ordinary, 'ordinary anonymous answer');
   assertSearchSkipped(ordinary.events, 'ordinary anonymous answer');
   console.log('[live-chat] anonymous ordinary answer: content, source card, completion, and no web passed');
+
+  const assamese = await streamChat({
+    message: 'নিউটনৰ প্ৰথম গতিৰ নিয়মটো এটা চুটি বাক্যত বুজাই দিয়া।',
+    lang: 'as',
+    client_request_id: `${prefix}_assamese`,
+  });
+  assertSuccessfulAnswer(assamese, 'anonymous Assamese answer');
+  assertAssameseScriptAnswer(assamese, 'anonymous Assamese answer');
+  assertSearchSkipped(assamese.events, 'anonymous Assamese answer');
+  console.log('[live-chat] anonymous Assamese answer: script, source card, completion, and no errors passed');
 
   const subjects = await request('/api/v1/content/subjects', {
     headers: { Accept: 'application/json' },
