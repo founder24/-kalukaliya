@@ -43,7 +43,7 @@ describe('chat Workers AI media routes', () => {
       expect.objectContaining({
         task: 'query',
         image: `data:image/png;base64,${btoa(String.fromCharCode(0, 1, 2))}`,
-        reasoning: false,
+        reasoning: true,
         max_tokens: 512,
       }),
     );
@@ -66,7 +66,7 @@ describe('chat Workers AI media routes', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('audio/mpeg');
     expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual([1, 2, 3]);
-    expect(aiRun).toHaveBeenCalledWith('@cf/myshell/melotts', {
+    expect(aiRun).toHaveBeenCalledWith('@cf/myshell-ai/melotts', {
       prompt: 'Hello there',
       lang: 'as',
     });
@@ -126,7 +126,7 @@ describe('chat Workers AI media routes', () => {
     const response = await api.fetch(request, env);
 
     expect(response.status).toBe(200);
-    expect(aiRun).toHaveBeenCalledWith('@cf/myshell/melotts', {
+    expect(aiRun).toHaveBeenCalledWith('@cf/myshell-ai/melotts', {
       prompt: 'Mounted route check',
       lang: 'en',
     });

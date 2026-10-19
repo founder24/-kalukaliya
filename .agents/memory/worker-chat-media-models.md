@@ -5,8 +5,8 @@ description: Current Cloudflare Workers AI contracts for chat image OCR and text
 
 Keep chat OCR and TTS inside the API Worker through its Workers AI binding. Do not copy model fields from the legacy backend client without checking the current Workers AI catalog.
 
-The supported MeloTTS contract uses `prompt` (not `text`) and returns MP3 binary. The older configured Uform vision model was absent from the current model catalog checked on 2026-10-19; use a currently listed image-to-text model and follow its own input/output schema.
+The current MeloTTS model ID is `@cf/myshell-ai/melotts` (not `@cf/myshell/melotts`); its input uses `prompt` (not `text`), and its output schema allows raw MP3 or JSON containing base64 audio. The older configured Uform vision model was absent from the current model catalog checked on 2026-10-19; use a currently listed image-to-text model and follow its own input/output schema.
 
-**Why:** The legacy backend's request fields and model selection were stale relative to Cloudflare's current Workers AI contracts, which would make the new Worker routes fail despite using the right service.
+**Why:** Cloudflare returned `5007: No such model ... or task` for the shorter, plausible-looking MeloTTS namespace. A production smoke test also showed why mock-only checks are insufficient for model identifiers.
 
-**How to apply:** Before changing chat media models, verify the current model catalog and schemas, then keep the Worker route and its contract tests aligned with those schemas.
+**How to apply:** Before changing chat media models, verify the complete model ID and schemas, then keep response normalization, Worker routes, and contract tests aligned with those schemas. Include a live smoke test before declaring a model integration operational.
