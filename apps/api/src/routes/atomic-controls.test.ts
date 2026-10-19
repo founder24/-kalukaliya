@@ -260,6 +260,7 @@ describe('atomic quota controls', () => {
 
   it('enforces the same six-message daily limit for anonymous identities', async () => {
     const anonId = `anon_${crypto.randomUUID().replace(/-/g, '').slice(0, 32)}`;
+    const sharedIpIdentity = 'ip_shared_daily_test';
     const period = currentQuotaDayPeriod();
     const claims = await Promise.all(
       Array.from({ length: 12 }, (_, index) => insertChatRequestClaim(
@@ -270,10 +271,37 @@ describe('atomic quota controls', () => {
         false,
         currentQuotaMinutePeriod(),
         { period, limit: 6 },
+        sharedIpIdentity,
       )),
     );
     expect(claims.filter(Boolean)).toHaveLength(6);
-    expect(await getDailyChatQuotaUsage(env.DB, anonId, true, period)).toBe(6);
+    expect(await getDailyChatQuotaUsage(env.DB, sharedIpIdentity, true, period)).toBe(6);
+  });
+
+  it('atomically enforces the 30-message monthly free-account cap', async () => {
+    const userId = await createFreeUser();
+    const month = currentQuotaMonthPeriod();
+    const day = currentQuotaDayPeriod();
+    await env.DB.prepare(
+      'INSERT INTO monthly_quota_usage (user_id, period, count) VALUES (?, ?, 29)',
+    ).bind(userId, month).run();
+
+    const reserve = (requestId: string) => insertChatRequestClaim(
+      env.DB,
+      requestId,
+      userId,
+      false,
+      false,
+      currentQuotaMinutePeriod(),
+      { period: day, limit: 6 },
+      userId,
+      { period: month, limit: 30 },
+    );
+    const results = await Promise.all([
+      reserve(`monthly_cap_a_${crypto.randomUUID()}`),
+      reserve(`monthly_cap_b_${crypto.randomUUID()}`),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 
   it('returns a distinct daily-limit response and refunds the minute reservation', async () => {

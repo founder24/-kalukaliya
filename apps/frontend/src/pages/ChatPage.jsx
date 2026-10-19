@@ -229,6 +229,8 @@ export default function ChatPage() {
           used: c.credits_used ?? c.used ?? 0,
           limit: c.credits_limit ?? c.rpm_limit ?? 6,
           resetAt: c.reset_at ?? null,
+          quotaPeriod: c.quota_period ?? 'minute',
+          monthlyQuota: c.monthly_quota ?? null,
           languages: {
             en: normalizeLanguageQuota(c.languages?.en),
             as: normalizeLanguageQuota(c.languages?.as),
@@ -627,6 +629,10 @@ export default function ChatPage() {
             capError === 'chat_daily_soft_cap' ||
             capHeader === 'chat_daily_soft_cap' ||
             /daily.*(chat|free|quota).*allowance|daily.*limit.*reached|daily.*quota.*exhausted|free quota exhausted/i.test(detail);
+          const isMonthlyCap =
+            capError === 'chat_monthly_soft_cap' ||
+            capHeader === 'chat_monthly_soft_cap' ||
+            /monthly.*(chat|free|quota).*allowance|monthly.*limit.*reached|monthly.*quota.*exhausted/i.test(detail);
           const isAiRateLimit =
             /ai rate limit|rate limit exceeded|slow down|sending too fast/i.test(detail) ||
             capHeader === 'anon_rate_limited';
@@ -644,6 +650,8 @@ export default function ChatPage() {
             });
           } else if (isDailyCap && user) {
             toast.error('Daily chat allowance reached. Resets at midnight UTC.', { duration: 6000 });
+          } else if (isMonthlyCap) {
+            toast.error('Monthly free chat limit reached. It resets at the start of next month (UTC).', { duration: 7000 });
           } else if (isAiRateLimit) {
             toast.error('Sending too fast — please wait a few seconds and try again.', { duration: 5000 });
           } else if (isNetworkBlock) {
@@ -930,12 +938,9 @@ export default function ChatPage() {
         refreshCredits();
         return;
       }
-      // Anonymous SSE responses omit quota totals. Re-read the current
-      // minute bucket after a send so the informational RPM state stays
-      // current without changing the reservation count.
-      if (!user) {
-        refreshCredits();
-      }
+      // Refresh daily and monthly balances after a completed turn. The RPM
+      // limiter is a separate burst guard, not the allowance shown to users.
+      refreshCredits();
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
       if (pendingChunk) { fullContent += pendingChunk; pendingChunk = ''; }
       if (meta.convId && meta.convId !== conversationId) {
@@ -1256,6 +1261,7 @@ export default function ChatPage() {
           input={input} setInput={setInput} isLoading={isLoading}
           isOutOfCredits={isOutOfCredits} isLow={isLow} credits={credits}
           effectiveLimit={effectiveLimit} remaining={remaining} creditPercent={creditPercent}
+          monthlyQuota={credits.monthlyQuota} quotaPeriod={credits.quotaPeriod}
           textareaRef={textareaRef} adjustTextarea={adjustTextarea} sendMsg={sendMsg} handleStop={handleStop}
           isAnon={!user}
           activeChapter={activeChapter}

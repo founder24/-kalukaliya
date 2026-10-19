@@ -172,3 +172,17 @@ describe('InputBar — OCR image upload', () => {
     expect(queryByTestId('chat-image-preview')).not.toBeInTheDocument();
   });
 });
+
+describe('InputBar — chat allowances', () => {
+  it('shows the daily and monthly free limits instead of a minute allowance', () => {
+    const { getByTestId, getByText } = render(<InputBar {...makeDefaultProps({
+      effectiveLimit: 6,
+      remaining: 4,
+      quotaPeriod: 'day',
+      monthlyQuota: { limit: 30, remaining: 18 },
+    })} />);
+
+    expect(getByTestId('chat-rpm-limit').textContent).toContain('4 of 6 messages left today');
+    expect(getByTestId('chat-monthly-limit').textContent).toContain('18 of 30 messages left');
+  });
+});
