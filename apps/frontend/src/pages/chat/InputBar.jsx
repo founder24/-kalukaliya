@@ -9,7 +9,7 @@ import { MicButton } from '@/components/study/MicButton';
 import { getTTSLang } from '@/hooks/useTTS';
 import { API_BASE, getAnonId } from '@/utils/api';
 
-const ALLOWED_IMAGE_MIME = /^image\//i;
+const ALLOWED_IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const SECTION_LABELS = {
@@ -99,8 +99,8 @@ export function InputBar({
 
   const handleImagePicked = useCallback(async (file) => {
     if (!file) return;
-    if (!ALLOWED_IMAGE_MIME.test(file.type)) {
-      toast.error('Please select an image file (JPEG, PNG, WebP, GIF or HEIC).');
+    if (!ALLOWED_IMAGE_MIMES.has(file.type)) {
+      toast.error('Please choose a JPEG, PNG, WebP, or GIF image.');
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
@@ -114,7 +114,7 @@ export function InputBar({
     try {
       const fd = new FormData();
       fd.append('file', file, file.name || 'image');
-      const headers = { 'Content-Type': 'multipart/form-data' };
+      const headers = {};
       if (isAnon) {
         const anonId = getAnonId();
         if (anonId) headers['x-anon-id'] = anonId;
