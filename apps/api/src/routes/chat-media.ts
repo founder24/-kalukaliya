@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../types';
 
 const IMAGE_MODEL = '@cf/moondream/moondream3.1-9B-A2B';
-const TTS_MODEL = '@cf/myshell/melotts';
+const TTS_MODEL = '@cf/myshell-ai/melotts';
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_TTS_TEXT_LENGTH = 5000;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -149,10 +149,21 @@ chatMediaRouter.post('/image', async (c) => {
       question: typeof body.prompt === 'string' && body.prompt.trim()
         ? body.prompt.trim().slice(0, 500)
         : 'Transcribe every visible word and number exactly. Preserve the original language and line breaks.',
-      reasoning: false,
+      reasoning: true,
       max_tokens: 512,
     });
-    return c.json({ text: extractImageText(result), model: IMAGE_MODEL });
+    const text = extractImageText(result);
+    if (!text) {
+      const metadata = result && typeof result === 'object'
+        ? {
+            keys: Object.keys(result),
+            finishReason: (result as Record<string, unknown>).finish_reason,
+            answerType: typeof (result as Record<string, unknown>).answer,
+          }
+        : { resultType: typeof result };
+      console.warn('[chat-media] image model returned no readable text:', metadata);
+    }
+    return c.json({ text, model: IMAGE_MODEL });
   } catch (error) {
     console.error('[chat-media] image analysis failed:', error);
     return c.json({ detail: 'Image analysis failed. Please try again.' }, 502);
