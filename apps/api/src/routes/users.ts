@@ -32,13 +32,16 @@ import { isSessionValid, verifyToken, extractBearer } from '../middleware/auth';
 import {
   CHAT_RPM_LIMIT,
   FREE_DAILY_CHAT_LIMIT,
+  FREE_MONTHLY_CHAT_LIMIT,
+  anonymousDailyQuotaIdentity,
   anonUserId,
   currentQuotaDayPeriod,
+  currentQuotaMonthPeriod,
   currentQuotaMinutePeriod,
   isBrowserAnonId,
 } from '../services/anonymous';
 import { getAnonQuotaUsage } from './chat';
-import { getDailyChatQuotaUsage } from '../services/chat-quota';
+import { getDailyChatQuotaUsage, getMonthlyChatQuotaUsage } from '../services/chat-quota';
 import type { Env } from '../types';
 
 export const usersRouter = new Hono<{ Bindings: Env }>();
@@ -398,6 +401,7 @@ usersRouter.get('/credits', async (c) => {
   let tier = 'free';
   let creditsRemaining = 0;
   let creditsUsed = 0;
+  let monthlyCreditsUsed = 0;
   let anonymousId: string | null = null;
   let authenticated = false;
   let authenticatedUserId: string | null = null;
@@ -436,9 +440,14 @@ usersRouter.get('/credits', async (c) => {
     anonymousId = isBrowserAnonId(requestedAnonId)
       ? requestedAnonId
       : await anonUserId(c.req.raw, c.env.EDGE_SHARED_SECRET);
+    const dailyIdentityId = await anonymousDailyQuotaIdentity(
+      c.req.raw,
+      anonymousId,
+      c.env.EDGE_SHARED_SECRET,
+    );
       creditsUsed = await getDailyChatQuotaUsage(
         c.env.DB,
-        anonymousId,
+        dailyIdentityId,
         true,
         currentQuotaDayPeriod(),
       );
@@ -449,6 +458,11 @@ usersRouter.get('/credits', async (c) => {
         authenticatedUserId,
         false,
         currentQuotaDayPeriod(),
+      );
+      monthlyCreditsUsed = await getMonthlyChatQuotaUsage(
+        c.env.DB,
+        authenticatedUserId,
+        currentQuotaMonthPeriod(),
       );
     } else {
       const row = await c.env.DB.prepare(
@@ -465,6 +479,11 @@ usersRouter.get('/credits', async (c) => {
   const resetAt = dailyLimited
     ? (Math.floor(nowMs / 86_400_000) + 1) * 86_400_000
     : (Math.floor(nowMs / 60_000) + 1) * 60_000;
+  const monthlyResetAt = Date.UTC(
+    new Date(nowMs).getUTCFullYear(),
+    new Date(nowMs).getUTCMonth() + 1,
+    1,
+  );
   // The edge owns reservations for production chat requests. This explicit
   // per-language envelope lets clients render independent EN/AS allowances
   // without exposing identity or falling back to the retired daily contract.
@@ -473,6 +492,16 @@ usersRouter.get('/credits', async (c) => {
     used: creditsUsed,
     remaining: Math.max(0, quotaLimit - creditsUsed),
     reset_at: new Date(resetAt).toISOString(),
+    ...(authenticated && tier === 'free' && authenticatedRole !== 'admin' && authenticatedRole !== 'staff'
+      ? {
+          monthly_quota: {
+            limit: FREE_MONTHLY_CHAT_LIMIT,
+            used: monthlyCreditsUsed,
+            remaining: Math.max(0, FREE_MONTHLY_CHAT_LIMIT - monthlyCreditsUsed),
+            reset_at: new Date(monthlyResetAt).toISOString(),
+          },
+        }
+      : {}),
   });
   return c.json({
     credits_remaining: Math.max(0, quotaLimit - creditsUsed),

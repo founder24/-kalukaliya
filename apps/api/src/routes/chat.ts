@@ -43,12 +43,15 @@ import {
 import {
   CHAT_RPM_LIMIT,
   FREE_DAILY_CHAT_LIMIT,
+  FREE_MONTHLY_CHAT_LIMIT,
+  anonymousDailyQuotaIdentity,
   anonUserId,
   currentQuotaDayPeriod,
+  currentQuotaMonthPeriod,
   currentQuotaMinutePeriod,
   trustedEdgeRateLimitUsage,
 } from '../services/anonymous';
-import { getDailyChatQuotaUsage } from '../services/chat-quota';
+import { getDailyChatQuotaUsage, getMonthlyChatQuotaUsage } from '../services/chat-quota';
 import type { Env } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -769,40 +772,64 @@ export async function insertChatRequestClaim(
   quotaReserved: boolean,
   period = currentQuotaMinutePeriod(),
   dailyQuota?: { period: string; limit: number },
+  dailyIdentityId = userId,
+  monthlyQuota?: { period: string; limit: number },
 ): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
-  const result = dailyQuota
+  const result = dailyQuota || monthlyQuota
     ? await d1.prepare(`
         INSERT OR IGNORE INTO chat_request_claims
           (request_id, user_id, period, is_anon, quota_reserved,
-           daily_quota_reserved, daily_period, status, created_at, expires_at)
-        SELECT ?, ?, ?, ?, ?, 1, ?, 'reserved', ?, ?
-        WHERE COALESCE((
+           monthly_quota_reserved, monthly_period,
+           daily_quota_reserved, daily_period, daily_identity_id,
+           status, created_at, expires_at)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?
+        WHERE (? IS NULL OR COALESCE((
           SELECT count FROM daily_chat_quota_usage
           WHERE identity_id = ? AND is_anonymous = ? AND period = ?
         ), 0) + (
           SELECT COUNT(*) FROM chat_request_claims
-          WHERE user_id = ? AND is_anon = ? AND daily_period = ?
+          WHERE daily_identity_id = ? AND is_anon = ? AND daily_period = ?
             AND daily_quota_reserved = 1 AND status = 'reserved'
             AND expires_at > ?
-        ) < ?
+        ) < ?)
+        AND (? IS NULL OR COALESCE((
+          SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?
+        ), 0) + (
+          SELECT COUNT(*) FROM chat_request_claims
+          WHERE user_id = ? AND monthly_period = ?
+            AND monthly_quota_reserved = 1 AND status = 'reserved'
+            AND expires_at > ?
+        ) < ?)
       `).bind(
         requestId,
         userId,
         period,
         isAnon ? 1 : 0,
         quotaReserved ? 1 : 0,
-        dailyQuota.period,
+        monthlyQuota ? 1 : 0,
+        monthlyQuota?.period ?? null,
+        dailyQuota ? 1 : 0,
+        dailyQuota?.period ?? null,
+        dailyIdentityId,
         now,
         now + 24 * 3600,
-        userId,
+        dailyQuota?.period ?? null,
+        dailyIdentityId,
         isAnon ? 1 : 0,
-        dailyQuota.period,
-        userId,
+        dailyQuota?.period ?? null,
+        dailyIdentityId,
         isAnon ? 1 : 0,
-        dailyQuota.period,
+        dailyQuota?.period ?? null,
         now,
-        dailyQuota.limit,
+        dailyQuota?.limit ?? 0,
+        monthlyQuota?.period ?? null,
+        userId,
+        monthlyQuota?.period ?? null,
+        userId,
+        monthlyQuota?.period ?? null,
+        now,
+        monthlyQuota?.limit ?? 0,
       ).run()
     : await d1.prepare(`
         INSERT OR IGNORE INTO chat_request_claims
@@ -2034,12 +2061,22 @@ export async function persistCompletedChat(
   if (opts.requestId) {
     statements.push(d1.prepare(`
       INSERT INTO daily_chat_quota_usage (identity_id, is_anonymous, period, count, updated_at)
-      SELECT user_id, is_anon, daily_period, 1, ?
+      SELECT COALESCE(daily_identity_id, user_id), is_anon, daily_period, 1, ?
       FROM chat_request_claims
       WHERE request_id = ? AND user_id = ? AND status = 'reserved'
         AND daily_quota_reserved = 1 AND daily_period IS NOT NULL
       ON CONFLICT (identity_id, is_anonymous, period) DO UPDATE
         SET count = daily_chat_quota_usage.count + 1,
+            updated_at = excluded.updated_at
+    `).bind(now, opts.requestId, uid));
+    statements.push(d1.prepare(`
+      INSERT INTO monthly_quota_usage (user_id, period, count, updated_at)
+      SELECT user_id, monthly_period, 1, ?
+      FROM chat_request_claims
+      WHERE request_id = ? AND user_id = ? AND status = 'reserved'
+        AND monthly_quota_reserved = 1 AND monthly_period IS NOT NULL
+      ON CONFLICT (user_id, period) DO UPDATE
+        SET count = monthly_quota_usage.count + 1,
             updated_at = excluded.updated_at
     `).bind(now, opts.requestId, uid));
   }
@@ -2296,6 +2333,7 @@ chatRouter.post('/stream', async (c) => {
   let quotaAllowed: boolean;
   let ownsQuotaReservation = false;
   let dailyQuotaExhausted = false;
+  let monthlyQuotaExhausted = false;
 
   const quotaStart = Date.now();
   const reservationPeriod = currentQuotaMinutePeriod();
@@ -2306,11 +2344,20 @@ chatRouter.post('/stream', async (c) => {
   )
     ? { period: currentQuotaDayPeriod(), limit: FREE_DAILY_CHAT_LIMIT }
     : undefined;
+  const dailyIdentityId = dailyReservation && isAnon
+    ? await anonymousDailyQuotaIdentity(c.req.raw, userId, c.env.EDGE_SHARED_SECRET)
+    : userId;
+  const monthlyReservation = !isAnon
+    && userTier === 'free'
+    && userRole !== 'admin'
+    && userRole !== 'staff'
+    ? { period: currentQuotaMonthPeriod(), limit: FREE_MONTHLY_CHAT_LIMIT }
+    : undefined;
   // Free authenticated requests need a claim even when older clients omit the
   // stable request key. This gives cancellation and failure cleanup a period-
   // bound reservation record without changing retry semantics for those clients.
   let claimRequestId = clientRequestId
-    ?? (dailyReservation ? `daily-${crypto.randomUUID()}` : null);
+    ?? (dailyReservation || monthlyReservation ? `quota-${crypto.randomUUID()}` : null);
   try {
     const edgeRateLimitUsage = await trustedEdgeRateLimitUsage(
       c.req.raw,
@@ -2378,6 +2425,8 @@ chatRouter.post('/stream', async (c) => {
         ownsQuotaReservation,
         reservationPeriod,
         dailyReservation,
+        dailyIdentityId,
+        monthlyReservation,
       );
       if (!inserted) {
         if (ownsQuotaReservation) {
@@ -2394,18 +2443,25 @@ chatRouter.post('/stream', async (c) => {
             failure_stage: 'request_validation',
           }, 409);
         }
-        if (!racedClaim && dailyReservation) {
-          const used = await getDailyChatQuotaUsage(
-            c.env.DB,
-            userId,
-            isAnon,
-            dailyReservation.period,
-          );
-          if (used >= dailyReservation.limit) {
+        if (!racedClaim && (dailyReservation || monthlyReservation)) {
+          const [dailyUsed, monthlyUsed] = await Promise.all([
+            dailyReservation
+              ? getDailyChatQuotaUsage(c.env.DB, dailyIdentityId, isAnon, dailyReservation.period)
+              : Promise.resolve(0),
+            monthlyReservation
+              ? getMonthlyChatQuotaUsage(c.env.DB, userId, monthlyReservation.period)
+              : Promise.resolve(0),
+          ]);
+          if (dailyReservation && dailyUsed >= dailyReservation.limit) {
             quotaAllowed = false;
             dailyQuotaExhausted = true;
-            quotaCount = used;
+            quotaCount = dailyUsed;
             quotaLimit = dailyReservation.limit;
+          } else if (monthlyReservation && monthlyUsed >= monthlyReservation.limit) {
+            quotaAllowed = false;
+            monthlyQuotaExhausted = true;
+            quotaCount = monthlyUsed;
+            quotaLimit = monthlyReservation.limit;
           } else {
             throw new Error('Unable to establish chat request claim');
           }
@@ -2463,14 +2519,20 @@ chatRouter.post('/stream', async (c) => {
       {
         detail: dailyQuotaExhausted
           ? 'You have used all 6 free chat messages for today. Your allowance resets at midnight UTC.'
+          : monthlyQuotaExhausted
+            ? 'You have used all 30 free chat messages this month. Your allowance resets at the start of next month (UTC).'
           : 'Rate limit reached. Please wait a minute before sending another message.',
-        error_code: dailyQuotaExhausted ? 'chat_daily_soft_cap' : 'chat_rpm_limit',
+        error_code: dailyQuotaExhausted
+          ? 'chat_daily_soft_cap'
+          : monthlyQuotaExhausted ? 'chat_monthly_soft_cap' : 'chat_rpm_limit',
         quota: {
           used: quotaCount,
           limit: quotaLimit,
-          ...(dailyQuotaExhausted && dailyReservation
+          ...((dailyQuotaExhausted && dailyReservation)
             ? { period: dailyReservation.period }
-            : {}),
+            : monthlyQuotaExhausted && monthlyReservation
+              ? { period: monthlyReservation.period }
+              : {}),
         },
         request_id: serverRequestId,
         failure_stage: 'quota',

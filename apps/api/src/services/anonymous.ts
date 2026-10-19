@@ -10,7 +10,7 @@ export const BROWSER_ANON_ID_PATTERN = /^anon_[a-f0-9]{32}$/;
 export const ANONYMOUS_COOKIE_NAME = 'syrabit_anon_id';
 export const CHAT_RPM_LIMIT = 6;
 export const FREE_DAILY_CHAT_LIMIT = 6;
-export const ANONYMOUS_MONTHLY_LIMIT = CHAT_RPM_LIMIT;
+export const FREE_MONTHLY_CHAT_LIMIT = 30;
 const SIGNATURE_PATTERN = /^[a-f0-9]{64}$/;
 
 export function isBrowserAnonId(value: string | null | undefined): value is string {
@@ -49,6 +49,25 @@ function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes))
     .map(byte => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+/** Use a one-way IP digest for anonymous daily quotas; never persist the IP itself. */
+export async function anonymousDailyQuotaIdentity(
+  req: Request,
+  fallbackIdentity: string,
+  secret?: string,
+): Promise<string> {
+  const ip = req.headers.get('CF-Connecting-IP')?.trim();
+  if (!ip || !secret) return fallbackIdentity;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const digest = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip));
+  return `ip_${hex(digest)}`;
 }
 
 function timingSafeEqual(left: string, right: string): boolean {
