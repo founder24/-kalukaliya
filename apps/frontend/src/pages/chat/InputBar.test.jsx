@@ -75,6 +75,7 @@ describe('InputBar — OCR image upload', () => {
         expect.objectContaining({ withCredentials: true }),
       );
     });
+    expect(axios.post.mock.calls[0][2].headers).not.toHaveProperty('Content-Type');
 
     await waitFor(() => {
       expect(props.setInput).toHaveBeenCalled();
@@ -132,6 +133,21 @@ describe('InputBar — OCR image upload', () => {
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringMatching(/too large/i),
     );
+  });
+
+  it('rejects image formats that Workers AI cannot process', async () => {
+    const props = makeDefaultProps();
+    render(<InputBar {...props} />);
+    const galleryInput = document.querySelector('[data-testid="chat-gallery-input"]');
+
+    await act(async () => {
+      fireEvent.change(galleryInput, {
+        target: { files: [new File(['pdf'], 'notes.pdf', { type: 'application/pdf' })] },
+      });
+    });
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/jpeg, png, webp, or gif/i));
   });
 
   it('shows error toast when OCR API call fails without leaving a broken attachment', async () => {

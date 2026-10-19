@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { healthRouter } from './health';
 import { authRouter } from './auth';
 import { chatRouter } from './chat';
+import { chatMediaRouter } from './chat-media';
 import { contentRouter } from './content';
 import { staffRouter } from './staff';
 import { usersRouter } from './users';
@@ -29,6 +30,7 @@ api.route('/health', healthRouter);
 // These routes read/write D1 exclusively.
 api.route('/api/v1/auth',         authRouter);        // login, signup, refresh, logout, me
 api.route('/api/v1/chat',         chatRouter);        // streaming chat, history, feedback
+api.route('/api/v1/chat',         chatMediaRouter);   // Workers AI image OCR and TTS
 api.route('/api/v1/content',      contentRouter);     // boards, classes, streams, subjects, chapters
 api.route('/api/v1/staff',        staffRouter);       // staff CRUD: chapters, subjects, reindex, PYQ
 // The legacy admin panel keeps its /admin/content URL family. Mount the
