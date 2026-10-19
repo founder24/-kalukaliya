@@ -19,7 +19,7 @@ function makeEnv(aiRun: ReturnType<typeof vi.fn>, requestCount = 1) {
 
 describe('chat Workers AI media routes', () => {
   it('sends uploaded images to the OCR model and returns extracted text', async () => {
-    const aiRun = vi.fn().mockResolvedValue({ answer: 'Question from image' });
+    const aiRun = vi.fn().mockResolvedValue({ result: { answer: 'Question from image' } });
     const { env } = makeEnv(aiRun);
     const form = new FormData();
     form.append('file', new File([new Uint8Array([0, 1, 2])], 'question.png', {
@@ -70,6 +70,45 @@ describe('chat Workers AI media routes', () => {
       prompt: 'Hello there',
       lang: 'as',
     });
+  });
+
+  it('returns MP3 bytes when Workers AI provides base64 audio directly', async () => {
+    const mp3 = new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]);
+    const encoded = btoa(String.fromCharCode(...mp3));
+    const aiRun = vi.fn().mockResolvedValue(encoded);
+    const { env } = makeEnv(aiRun);
+    const request = new Request('https://api.example/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '203.0.113.12',
+      },
+      body: JSON.stringify({ text: 'Base64 output check' }),
+    });
+
+    const response = await chatMediaRouter.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(Array.from(mp3));
+  });
+
+  it('returns MP3 bytes when Workers AI provides a Response', async () => {
+    const mp3 = new Uint8Array([0x49, 0x44, 0x33, 7, 8, 9]);
+    const aiRun = vi.fn().mockResolvedValue(new Response(mp3));
+    const { env } = makeEnv(aiRun);
+    const request = new Request('https://api.example/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': '203.0.113.13',
+      },
+      body: JSON.stringify({ text: 'Response output check' }),
+    });
+
+    const response = await chatMediaRouter.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(Array.from(new Uint8Array(await response.arrayBuffer()))).toEqual(Array.from(mp3));
   });
 
   it('mounts the media routes under the public API chat path', async () => {
