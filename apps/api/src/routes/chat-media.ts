@@ -72,22 +72,37 @@ async function mediaRateLimitResponse(
   }
 }
 
-function extractImageText(result: unknown): string {
+function extractImageText(result: unknown, depth = 0): string {
   if (typeof result === 'string') return result.trim();
-  if (!result || typeof result !== 'object') return '';
+  if (!result || typeof result !== 'object' || depth >= 4) return '';
   const value = result as Record<string, unknown>;
-  for (const key of ['answer', 'description', 'response', 'text']) {
-    if (typeof value[key] === 'string') return (value[key] as string).trim();
+  for (const key of ['answer', 'caption', 'description', 'response', 'text', 'output', 'result']) {
+    const text = extractImageText(value[key], depth + 1);
+    if (text) return text;
   }
   return '';
 }
 
+function decodeBase64Audio(value: string): Uint8Array | null {
+  const base64 = value.replace(/^data:audio\/mpeg;base64,/, '').replace(/\s/g, '');
+  try {
+    const binary = atob(base64);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
 async function audioBytes(result: unknown): Promise<Uint8Array | null> {
+  if (result instanceof Response) {
+    return new Uint8Array(await result.arrayBuffer());
+  }
   if (result instanceof Uint8Array) return result;
   if (result instanceof ArrayBuffer) return new Uint8Array(result);
   if (ArrayBuffer.isView(result)) {
     return new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
   }
+  if (typeof result === 'string') return decodeBase64Audio(result);
   if (result instanceof ReadableStream) {
     const response = new Response(result);
     return new Uint8Array(await response.arrayBuffer());
@@ -96,14 +111,7 @@ async function audioBytes(result: unknown): Promise<Uint8Array | null> {
     const audio = (result as Record<string, unknown>).audio;
     if (audio instanceof Uint8Array) return audio;
     if (audio instanceof ArrayBuffer) return new Uint8Array(audio);
-    if (typeof audio === 'string') {
-      try {
-        const binary = atob(audio);
-        return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-      } catch {
-        return null;
-      }
-    }
+    if (typeof audio === 'string') return decodeBase64Audio(audio);
   }
   return null;
 }
@@ -140,7 +148,7 @@ chatMediaRouter.post('/image', async (c) => {
       image: `data:${file.type};base64,${image}`,
       question: typeof body.prompt === 'string' && body.prompt.trim()
         ? body.prompt.trim().slice(0, 500)
-        : 'Extract all readable text from this image. Preserve the original language and line breaks.',
+        : 'Transcribe every visible word and number exactly. Preserve the original language and line breaks.',
       reasoning: false,
       max_tokens: 512,
     });
