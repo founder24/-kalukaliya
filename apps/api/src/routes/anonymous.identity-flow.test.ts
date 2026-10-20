@@ -1489,7 +1489,7 @@ describe('anonymous identity flow', () => {
     }
   });
 
-  it('keeps chat reservation, persistence, reload, credits, and history on one browser ID', async () => {
+  it('keys anonymous daily credits to IP while keeping history on the browser ID', async () => {
     const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
       method: 'POST',
       headers: {
@@ -1521,8 +1521,7 @@ describe('anonymous identity flow', () => {
 
     const reloadHeaders = {
       'x-anon-id': ANON_ID,
-      // The persistent browser ID must survive a changed network address.
-      'CF-Connecting-IP': '198.51.100.44',
+      'CF-Connecting-IP': '203.0.113.9',
     };
     const credits = await workerFetch(new Request(
       'https://api.example/api/v1/user/credits',
@@ -1534,6 +1533,14 @@ describe('anonymous identity flow', () => {
       credits_remaining: 5,
       rpm_limit: 6,
       quota_period: 'day',
+    });
+    const changedNetworkCredits = await workerFetch(new Request(
+      'https://api.example/api/v1/user/credits',
+      { headers: { ...reloadHeaders, 'CF-Connecting-IP': '198.51.100.44' } },
+    ));
+    await expect(changedNetworkCredits.json()).resolves.toMatchObject({
+      credits_used: 0,
+      credits_remaining: 6,
     });
 
     const list = await workerFetch(new Request(
@@ -1585,7 +1592,7 @@ describe('anonymous identity flow', () => {
     expect(otherDetail.status).toBe(404);
   });
 
-  it('isolates credits and history between cookie-only browsers sharing one network', async () => {
+  it('keeps cookie-only history isolated but shares anonymous credits on one IP', async () => {
     const browserCookie = await signedCookie(COOKIE_ANON_ID);
     const otherBrowserCookie = await signedCookie(OTHER_COOKIE_ANON_ID);
     const chat = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
@@ -1609,7 +1616,7 @@ describe('anonymous identity flow', () => {
 
     const reloadHeaders = {
       Cookie: browserCookie,
-      'CF-Connecting-IP': '198.51.100.77',
+      'CF-Connecting-IP': '203.0.113.25',
     };
     const credits = await workerFetch(new Request(
       'https://api.example/api/v1/user/credits',
@@ -1638,8 +1645,8 @@ describe('anonymous identity flow', () => {
     ));
     await expect(otherCredits.json()).resolves.toMatchObject({
       anon_id: OTHER_COOKIE_ANON_ID,
-      credits_used: 0,
-      credits_remaining: 6,
+      credits_used: 1,
+      credits_remaining: 5,
     });
     const otherHistory = await workerFetch(new Request(
       'https://api.example/api/v1/conversations/anon',

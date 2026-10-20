@@ -18,7 +18,7 @@ export async function getDailyChatQuotaUsage(
       WHERE identity_id = ? AND is_anonymous = ? AND period = ?
     ), 0) + (
       SELECT COUNT(*) FROM chat_request_claims
-      WHERE user_id = ? AND is_anon = ? AND daily_period = ?
+      WHERE daily_identity_id = ? AND is_anon = ? AND daily_period = ?
         AND daily_quota_reserved = 1 AND status = 'reserved'
         AND expires_at > ?
     ) AS count
@@ -31,5 +31,25 @@ export async function getDailyChatQuotaUsage(
     period,
     now,
   ).first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
+/** Completed free-account turns plus live monthly reservations. */
+export async function getMonthlyChatQuotaUsage(
+  d1: D1Database,
+  userId: string,
+  period: string,
+): Promise<number> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await d1.prepare(`
+    SELECT COALESCE((
+      SELECT count FROM monthly_quota_usage WHERE user_id = ? AND period = ?
+    ), 0) + (
+      SELECT COUNT(*) FROM chat_request_claims
+      WHERE user_id = ? AND monthly_period = ?
+        AND monthly_quota_reserved = 1 AND status = 'reserved'
+        AND expires_at > ?
+    ) AS count
+  `).bind(userId, period, userId, period, now).first<{ count: number }>();
   return row?.count ?? 0;
 }

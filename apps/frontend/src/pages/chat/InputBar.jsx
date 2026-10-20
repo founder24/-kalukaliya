@@ -26,7 +26,7 @@ const SECTION_COLORS = {
 export function InputBar({
   subject, messages, scopedChapters, input, setInput,
   isLoading, isOutOfCredits, isLow, credits,
-  effectiveLimit, remaining, creditPercent,
+  effectiveLimit, remaining, creditPercent, monthlyQuota, quotaPeriod,
   textareaRef, adjustTextarea, sendMsg, handleStop,
   isAnon,
   activeChapter, onDismissChapter,
@@ -476,8 +476,13 @@ export function InputBar({
 
         {effectiveLimit !== null && effectiveLimit > 0 && (
           <div className="mt-2 px-1 text-right text-[10px] font-medium text-muted-foreground" data-testid="chat-rpm-limit">
-            {responseLang === 'as' ? 'অসমীয়া' : 'English'} allowance: {remaining == null ? 'available' : `${remaining} of ${effectiveLimit} messages left`} this minute
+            {responseLang === 'as' ? 'অসমীয়া' : 'English'} allowance: {remaining == null ? 'available' : `${remaining} of ${effectiveLimit} messages left`} {quotaPeriod === 'day' ? 'today' : 'this minute'}
             {resetLabel ? ` · resets in ${resetLabel}` : ''}
+          </div>
+        )}
+        {monthlyQuota && (
+          <div className="mt-1 px-1 text-right text-[10px] font-medium text-muted-foreground" data-testid="chat-monthly-limit">
+            Monthly free allowance: {monthlyQuota.remaining} of {monthlyQuota.limit} messages left
           </div>
         )}
       </div>
