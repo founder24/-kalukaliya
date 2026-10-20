@@ -17,6 +17,16 @@ on:
         required: false
         default: false
         type: boolean
+      validate_live_chat:
+        description: 'Send anonymous production chat prompts for latency and contract checks'
+        required: false
+        default: false
+        type: boolean
+      validate_staff_auth:
+        description: 'Create and sign in with temporary production staff/admin fixtures'
+        required: false
+        default: false
+        type: boolean
       rehearse_chat_latency_failure:
         description: 'Rehearsal only: fail the chat latency job after its production-safe checks'
         required: false
@@ -31,6 +41,16 @@ on:
         type: boolean
       validate_reset_delivery:
         description: 'Require a fresh disposable password-reset email proof after deployment'
+        required: false
+        default: false
+        type: boolean
+      validate_live_chat:
+        description: 'Send anonymous production chat prompts for latency and contract checks'
+        required: false
+        default: false
+        type: boolean
+      validate_staff_auth:
+        description: 'Create and sign in with temporary production staff/admin fixtures'
         required: false
         default: false
         type: boolean
@@ -735,6 +755,7 @@ jobs:
     needs: [deploy-api, deploy-edge, deploy-frontend]
     if: |
       always() &&
+      inputs.validate_live_chat == true &&
       needs.deploy-api.result == 'success' &&
       needs.deploy-edge.result == 'success' &&
       needs.deploy-frontend.result == 'success'
@@ -981,9 +1002,10 @@ jobs:
         env:
           CUTOVER_STAGE: ${{ inputs.validate_authenticated && 'full' || 'public' }}
           INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
-          STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
-          STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
-          ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
+          CUTOVER_VALIDATE_CHAT: ${{ inputs.validate_live_chat && inputs.validate_authenticated }}
+          STUDENT_TOKEN: ${{ inputs.validate_authenticated && secrets.CUTOVER_STUDENT_TOKEN || '' }}
+          STAFF_TOKEN: ${{ inputs.validate_authenticated && secrets.CUTOVER_STAFF_TOKEN || '' }}
+          ADMIN_SESSION_TOKEN: ${{ inputs.validate_authenticated && secrets.CUTOVER_ADMIN_SESSION_TOKEN || '' }}
           EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
           TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -999,6 +1021,7 @@ jobs:
     needs: post-native-smoke
     if: |
       always() &&
+      inputs.validate_live_chat == true &&
       needs.post-native-smoke.result == 'success'
     env:
       PUBLIC_EDGE_URL: https://api.syrabit.ai
@@ -1015,6 +1038,10 @@ jobs:
     name: Prove disposable staff sign-in
     runs-on: ubuntu-latest
     needs: post-native-smoke
+    if: |
+      always() &&
+      inputs.validate_staff_auth == true &&
+      needs.post-native-smoke.result == 'success'
     env:
       # Keep the public auth targets explicit here. This job is intentionally
       # independent from the broader release validation env so a future
@@ -1097,6 +1124,8 @@ jobs:
           LIVE_CHAT_CONTRACT_RESULT: ${{ needs.live-chat-contract.result }}
           STAFF_ACCESS_RESULT: ${{ needs.disposable-staff-auth.result }}
           PAGES_ASSET_SMOKE_RESULT: ${{ needs.deploy-frontend.outputs.pages_asset_smoke_outcome }}
+          VALIDATE_LIVE_CHAT: ${{ inputs.validate_live_chat }}
+          VALIDATE_STAFF_AUTH: ${{ inputs.validate_staff_auth }}
         run: |
           {
             echo "## Independent release checks"
@@ -1112,19 +1141,25 @@ jobs:
           if [[ "$PAGES_ASSET_SMOKE_RESULT" != "success" ]]; then
             echo "::error::Pages hashed-asset propagation result: ${PAGES_ASSET_SMOKE_RESULT}"
           fi
-          if [[ "$CHAT_PERFORMANCE_RESULT" != "success" ]]; then
-            echo "::error::Chat first-token latency check result: ${CHAT_PERFORMANCE_RESULT}"
-          fi
-          if [[ "$LIVE_CHAT_CONTRACT_RESULT" != "success" ]]; then
-            echo "::error::Live chat/content contract result: ${LIVE_CHAT_CONTRACT_RESULT}"
-          fi
-          if [[ "$STAFF_ACCESS_RESULT" != "success" ]]; then
-            echo "::error::Disposable staff access check result: ${STAFF_ACCESS_RESULT}"
-          fi
-          [[ "$CHAT_PERFORMANCE_RESULT" == "success" \
-            && "$LIVE_CHAT_CONTRACT_RESULT" == "success" \
-            && "$STAFF_ACCESS_RESULT" == "success" \
-            && "$PAGES_ASSET_SMOKE_RESULT" == "success" ]]
+          assert_optional_result() {
+            local name="$1"
+            local enabled="$2"
+            local result="$3"
+            local expected="skipped"
+            [[ "$enabled" == "true" ]] && expected="success"
+            if [[ "$result" != "$expected" ]]; then
+              echo "::error::${name} result was ${result}; expected ${expected}."
+              return 1
+            fi
+          }
+
+          assert_optional_result "Chat first-token latency" "$VALIDATE_LIVE_CHAT" "$CHAT_PERFORMANCE_RESULT"
+          assert_optional_result "Live chat/content contract" "$VALIDATE_LIVE_CHAT" "$LIVE_CHAT_CONTRACT_RESULT"
+          assert_optional_result "Disposable staff access" "$VALIDATE_STAFF_AUTH" "$STAFF_ACCESS_RESULT"
+          [[ "$PAGES_ASSET_SMOKE_RESULT" == "success" ]] || {
+            echo "::error::Pages hashed-asset propagation result: ${PAGES_ASSET_SMOKE_RESULT}"
+            exit 1
+          }
 
   request-reset-email:
     name: Request fresh disposable password-reset email

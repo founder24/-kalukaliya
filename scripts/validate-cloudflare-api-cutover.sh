@@ -25,12 +25,21 @@ set -euo pipefail
 : "${PUBLIC_EDGE_URL:?Set PUBLIC_EDGE_URL to the deployed edge API origin}"
 RESET_ONLY="${CUTOVER_RESET_ONLY:-false}"
 CUTOVER_STAFF_AUTH_ONLY="${CUTOVER_STAFF_AUTH_ONLY:-false}"
+CUTOVER_VALIDATE_CHAT="${CUTOVER_VALIDATE_CHAT:-false}"
 if [[ "$RESET_ONLY" != "true" && "$RESET_ONLY" != "false" ]]; then
   echo "CUTOVER_RESET_ONLY must be true or false." >&2
   exit 1
 fi
 if [[ "$CUTOVER_STAFF_AUTH_ONLY" != "true" && "$CUTOVER_STAFF_AUTH_ONLY" != "false" ]]; then
   echo "CUTOVER_STAFF_AUTH_ONLY must be true or false." >&2
+  exit 1
+fi
+if [[ "$CUTOVER_VALIDATE_CHAT" != "true" && "$CUTOVER_VALIDATE_CHAT" != "false" ]]; then
+  echo "CUTOVER_VALIDATE_CHAT must be true or false." >&2
+  exit 1
+fi
+if [[ "$CUTOVER_VALIDATE_CHAT" == "true" && -z "${STUDENT_TOKEN:-}" ]]; then
+  echo "CUTOVER_VALIDATE_CHAT=true requires STUDENT_TOKEN." >&2
   exit 1
 fi
 if [[ "$RESET_ONLY" != "true" ]]; then
@@ -722,22 +731,26 @@ if [[ -n "${STUDENT_TOKEN:-}" ]]; then
   edge_auth_status "/payments/history" "410" "${STUDENT_TOKEN}"
   edge_auth_status "/payments/verify" "410" "${STUDENT_TOKEN}" "POST"
 
-  echo "Checking authenticated student chat through the public edge"
-  chat_output=$(mktemp)
-  chat_headers=$(mktemp)
-  TMP_FILES+=("$chat_output" "$chat_headers")
-  chat_status=$(curl --silent --show-error --no-buffer --max-time 60 \
-    --request POST --header 'Content-Type: application/json' \
-    --header "Authorization: Bearer ${STUDENT_TOKEN}" \
-    --data '{"message":"Reply with exactly: cutover chat ready.","lang":"en"}' \
-    --dump-header "$chat_headers" --output "$chat_output" --write-out '%{http_code}' \
-    "${EDGE_BASE}/api/v1/chat/stream")
-  test "$chat_status" = "200" || { cat "$chat_output"; echo "Authenticated public-edge chat failed with ${chat_status}" >&2; exit 1; }
-  grep -qi '^x-syrabit-route: worker-native' "$chat_headers" || { cat "$chat_headers"; echo "Authenticated chat used a fallback route" >&2; exit 1; }
-  grep -q '"event":"source_card"' "$chat_output"
-  grep -q '"event":"syrabit_done"' "$chat_output"
-  grep -q '"content":' "$chat_output"
-  ! grep -q '"error":true' "$chat_output"
+  if [[ "$CUTOVER_VALIDATE_CHAT" == "true" ]]; then
+    echo "Checking authenticated student chat through the public edge"
+    chat_output=$(mktemp)
+    chat_headers=$(mktemp)
+    TMP_FILES+=("$chat_output" "$chat_headers")
+    chat_status=$(curl --silent --show-error --no-buffer --max-time 60 \
+      --request POST --header 'Content-Type: application/json' \
+      --header "Authorization: Bearer ${STUDENT_TOKEN}" \
+      --data '{"message":"Reply with exactly: cutover chat ready.","lang":"en"}' \
+      --dump-header "$chat_headers" --output "$chat_output" --write-out '%{http_code}' \
+      "${EDGE_BASE}/api/v1/chat/stream")
+    test "$chat_status" = "200" || { cat "$chat_output"; echo "Authenticated public-edge chat failed with ${chat_status}" >&2; exit 1; }
+    grep -qi '^x-syrabit-route: worker-native' "$chat_headers" || { cat "$chat_headers"; echo "Authenticated chat used a fallback route" >&2; exit 1; }
+    grep -q '"event":"source_card"' "$chat_output"
+    grep -q '"event":"syrabit_done"' "$chat_output"
+    grep -q '"content":' "$chat_output"
+    ! grep -q '"error":true' "$chat_output"
+  else
+    echo "Authenticated chat request skipped: CUTOVER_VALIDATE_CHAT=false."
+  fi
 else
   echo "STUDENT_TOKEN not set: authenticated student checks skipped."
 fi

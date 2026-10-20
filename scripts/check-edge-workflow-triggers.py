@@ -17,6 +17,8 @@ WORKFLOW_CONTRACTS: dict[str, list[str] | None] = {
         "scripts/update-actionlint.py",
         "scripts/check-edge-workflow-triggers.py",
         "scripts/test-edge-workflow-triggers.py",
+        "scripts/test-release-validation-opt-ins.py",
+        "scripts/validate-cloudflare-api-cutover.sh",
         "scripts/check-ci-workflow-concurrency.py",
         "scripts/test-ci-workflow-concurrency.py",
         "scripts/check-staff-chunk-release-gate.py",
