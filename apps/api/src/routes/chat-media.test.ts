@@ -18,8 +18,12 @@ function makeEnv(aiRun: ReturnType<typeof vi.fn>, requestCount = 1) {
 }
 
 describe('chat Workers AI media routes', () => {
-  it('sends uploaded images to the OCR model and returns extracted text', async () => {
-    const aiRun = vi.fn().mockResolvedValue({ result: { answer: 'Question from image' } });
+  it('uses the documented Moondream query contract and extracts its answer', async () => {
+    const aiRun = vi.fn().mockResolvedValue({
+      answer: 'Question from image',
+      finish_reason: 'stop',
+      metrics: { output_tokens: 4 },
+    });
     const { env } = makeEnv(aiRun);
     const form = new FormData();
     form.append('file', new File([new Uint8Array([0, 1, 2])], 'question.png', {
@@ -43,10 +47,47 @@ describe('chat Workers AI media routes', () => {
       expect.objectContaining({
         task: 'query',
         image: `data:image/png;base64,${btoa(String.fromCharCode(0, 1, 2))}`,
-        reasoning: true,
+        question: 'Transcribe every visible word and number exactly. Preserve the original language and line breaks.',
+        reasoning: false,
         max_tokens: 512,
       }),
     );
+  });
+
+  it('logs only safe response metadata when Moondream returns no answer', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const aiRun = vi.fn().mockResolvedValue({
+      answer: '',
+      finish_reason: 'length',
+      metrics: { output_tokens: 512 },
+      reasoning: { text: 'private model reasoning that must not be logged' },
+    });
+    const { env } = makeEnv(aiRun);
+    const form = new FormData();
+    form.append('file', new File([new Uint8Array([1])], 'question.png', {
+      type: 'image/png',
+    }));
+    const request = new Request('https://api.example/image', {
+      method: 'POST',
+      headers: { 'CF-Connecting-IP': '203.0.113.10' },
+      body: form,
+    });
+
+    const response = await chatMediaRouter.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ text: '', model: '@cf/moondream/moondream3.1-9B-A2B' });
+    expect(warn).toHaveBeenCalledWith(
+      '[chat-media] image model returned no readable text:',
+      expect.objectContaining({
+        answerType: 'string',
+        answerLength: 0,
+        finishReason: 'length',
+        outputTokens: 512,
+      }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private model reasoning');
+    warn.mockRestore();
   });
 
   it('uses the Workers AI MeloTTS contract and returns MP3 bytes', async () => {

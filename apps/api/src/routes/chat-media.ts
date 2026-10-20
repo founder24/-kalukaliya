@@ -149,16 +149,28 @@ chatMediaRouter.post('/image', async (c) => {
       question: typeof body.prompt === 'string' && body.prompt.trim()
         ? body.prompt.trim().slice(0, 500)
         : 'Transcribe every visible word and number exactly. Preserve the original language and line breaks.',
-      reasoning: true,
+      // OCR needs the answer field, not a reasoning trace. Keep reasoning off
+      // so the model spends its output budget on the transcription itself.
+      reasoning: false,
       max_tokens: 512,
     });
     const text = extractImageText(result);
     if (!text) {
-      const metadata = result && typeof result === 'object'
+      const output = result && typeof result === 'object'
+        ? result as Record<string, unknown>
+        : null;
+      const metrics = output?.metrics && typeof output.metrics === 'object'
+        ? output.metrics as Record<string, unknown>
+        : null;
+      const answer = output?.answer;
+      const metadata = output
         ? {
-            keys: Object.keys(result),
-            finishReason: (result as Record<string, unknown>).finish_reason,
-            answerType: typeof (result as Record<string, unknown>).answer,
+            keys: Object.keys(output).sort(),
+            finishReason: output.finish_reason,
+            answerType: typeof answer,
+            answerLength: typeof answer === 'string' ? answer.length : null,
+            reasoningType: typeof output.reasoning,
+            outputTokens: metrics?.output_tokens,
           }
         : { resultType: typeof result };
       console.warn('[chat-media] image model returned no readable text:', metadata);
