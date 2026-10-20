@@ -14,6 +14,10 @@ import {
   JSON_ENDPOINTS,
   validateJsonPayload,
 } from "../../scripts/generate-static-data.mjs";
+import {
+  chapterLookupRecovery,
+  selectChapterCandidates,
+} from "../../scripts/_prerender-chapter-policy.mjs";
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
@@ -239,6 +243,53 @@ describe("prerender release manifest guards", () => {
     expect(result.failures.join("\n")).toContain(
       "counts.chapters_written must be a non-negative integer",
     );
+  });
+});
+
+describe("published chapter prerender coverage", () => {
+  const subjectUrl = "/ahsec/hs-1st-year/physics";
+  const published = new Set([`${subjectUrl}/laws-of-motion`]);
+
+  it("excludes stale or unpublished candidates when a sitemap is available", () => {
+    const selected = selectChapterCandidates({
+      subjectUrl,
+      rankedChapters: [
+        { slug: "old-chapter" },
+        { slug: "laws-of-motion" },
+        { slug: "old-chapter" },
+      ],
+      publishedChapterPaths: published,
+      strict: false,
+      limit: 10,
+    });
+
+    expect(selected.map((chapter) => chapter.slug)).toEqual(["laws-of-motion"]);
+  });
+
+  it("keeps the local development fallback when no sitemap exists", () => {
+    const selected = selectChapterCandidates({
+      subjectUrl,
+      rankedChapters: [{ slug: "draft-preview" }],
+      publishedChapterPaths: new Set(),
+      strict: false,
+      limit: 10,
+    });
+
+    expect(selected.map((chapter) => chapter.slug)).toEqual(["draft-preview"]);
+  });
+
+  it("uses static recovery or fails rather than silently dropping a published chapter", () => {
+    const path = `${subjectUrl}/laws-of-motion`;
+    expect(chapterLookupRecovery(path, published, true)).toBe("use-static-fallback");
+    expect(() => chapterLookupRecovery(path, published, false)).toThrow(
+      "refusing to emit a shell instead of a chapter snapshot",
+    );
+    expect(chapterLookupRecovery(`${subjectUrl}/draft`, published, false)).toBe(
+      "skip-unpublished",
+    );
+    expect(
+      chapterLookupRecovery(`${subjectUrl}/draft`, new Set(), true, true),
+    ).toBe("use-static-fallback");
   });
 });
 

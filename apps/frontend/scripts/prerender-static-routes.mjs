@@ -232,18 +232,12 @@ function rewriteHead(html, { title, description, canonical, robots, ogImageAlt }
   // Insert canonical + hreflang. Swap if a placeholder exists (legacy
   // build), else inject before </head> so Lighthouse always sees one
   // canonical tag pointing to the real route.
-  if (/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/.test(html)) {
-    html = html.replace(
-      /<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/,
-      `<link rel="canonical" href="${canonical}" />\n    `,
-    );
-  } else {
-    html = html.replace(
-      /<\/head>/,
-      `    <link rel="canonical" href="${canonical}" />\n` +
+  html = html.replace(/<link\b(?=[^>]*\brel=["']canonical["'])[^>]*>\s*/gi, "");
+  html = html.replace(
+    /<\/head>/i,
+    `    <link rel="canonical" href="${canonical}" />\n` +
       `    <link rel="alternate" hreflang="en-IN" href="${canonical}" />\n  </head>`,
-    );
-  }
+  );
 
   // og:url + matching titles/descriptions + og:image:alt
   html = html.replace(

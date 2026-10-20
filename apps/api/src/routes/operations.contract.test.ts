@@ -338,4 +338,54 @@ describe('Worker-native site-operation routes', () => {
     await expect(notesFeed.text()).resolves.toContain('Study Notes &amp; Exam Prep');
     await expect(llms.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
   });
+
+  it('emits canonical, unique sitemap URLs and omits empty topic maps', async () => {
+    const duplicateRows = [
+      ...chapterRows,
+      { ...chapterRows[0]!, title: 'Duplicate source row' },
+      {
+        ...chapterRows[0]!,
+        chapter_slug: 'empty-notes',
+        notes_en: '',
+        published_topics: '[]',
+      },
+    ];
+    const envWithRows = (rows: typeof duplicateRows) => ({
+      ...testEnv(),
+      DB: {
+        prepare: () => ({ all: async () => ({ results: rows }) }),
+      },
+    }) as unknown as Env;
+
+    const env = envWithRows(duplicateRows);
+    const [staticMap, chapterMap, topicMap, index] = await Promise.all([
+      api.fetch(request('/api/v1/seo/sitemap-static.xml'), env),
+      api.fetch(request('/api/v1/seo/sitemap-chapters.xml'), env),
+      api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env),
+      api.fetch(request('/api/v1/seo/sitemap.xml'), env),
+    ]);
+    const staticXml = await staticMap.text();
+    const chapterXml = await chapterMap.text();
+    const topicXml = await topicMap.text();
+    const indexXml = await index.text();
+
+    expect(staticXml).toContain('https://syrabit.ai/library');
+    expect(staticXml).toContain('https://syrabit.ai/home');
+    expect(staticXml).toContain('https://syrabit.ai/privacy');
+    expect(staticXml).toContain('https://syrabit.ai/terms');
+    expect(staticXml).not.toContain('<loc>https://syrabit.ai</loc>');
+    expect(staticXml).not.toContain('https://syrabit.ai/chat');
+    expect(staticXml).not.toContain('https://syrabit.ai/pricing');
+    expect((chapterXml.match(/<loc>/g) ?? []).length).toBe(1);
+    expect(chapterXml).not.toContain('empty-notes');
+    expect((topicXml.match(/<loc>/g) ?? []).length).toBe(1);
+    expect((indexXml.match(/sitemap-topics\.xml/g) ?? []).length).toBe(1);
+
+    const noTopics = duplicateRows.map((row) => ({ ...row, published_topics: '[]' }));
+    const emptyTopicIndex = await api.fetch(
+      request('/api/v1/seo/sitemap.xml'),
+      envWithRows(noTopics),
+    );
+    expect(await emptyTopicIndex.text()).not.toContain('sitemap-topics.xml');
+  });
 });

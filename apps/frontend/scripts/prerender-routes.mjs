@@ -50,6 +50,10 @@ import {
 } from "./_prerender-data.mjs";
 import { injectPrerenderPath } from "./_prerender-marker.mjs";
 import { createJsonRequestPool } from "./_prerender-request-pool.mjs";
+import {
+  chapterLookupRecovery,
+  selectChapterCandidates,
+} from "./_prerender-chapter-policy.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -166,7 +170,7 @@ function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
   );
   // Task #494 / Task #538: strip ALL existing canonical tags globally, then
   // inject the single authoritative canonical + hreflang before </head>.
-  html = html.replace(/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/g, "");
+  html = html.replace(/<link\b(?=[^>]*\brel=["']canonical["'])[^>]*>\s*/gi, "");
   html = html.replace(
     /<\/head>/,
     `    <link rel="canonical" href="${canonical}" />\n` +
@@ -618,64 +622,6 @@ function enumerateSitemapSubjectRoutes(chapterPaths, bundleRoutes) {
   return [...routes.values()];
 }
 
-function filterStaleChapterPaths(chapterPaths, bundleRoutes, staticBundle) {
-  const staticChapters = Array.isArray(staticBundle?.chapters)
-    ? staticBundle.chapters.filter(
-        (chapter) => chapter?.subject_id && chapter?.slug,
-      )
-    : [];
-  // If the full bundle was not available, do not infer that the sitemap is
-  // stale from an incomplete/slim payload. The per-chapter API request and
-  // strict coverage check remain authoritative in that case.
-  if (staticChapters.length === 0) return chapterPaths;
-
-  const subjectIdByPath = new Map();
-  for (const route of bundleRoutes) {
-    const id = route.subject?.id || route.subject?._id;
-    if (!id) continue;
-    const key = subjectPath(route);
-    // Match enumerateSitemapSubjectRoutes(), whose last bundle record wins
-    // when duplicate source rows share one canonical public path.
-    subjectIdByPath.set(key, String(id));
-  }
-
-  const validPaths = new Set();
-  const stalePaths = [];
-  for (const chapterPath of chapterPaths) {
-    const segments = chapterPath.split("/").filter(Boolean);
-    if (segments.length !== 4) {
-      validPaths.add(chapterPath);
-      continue;
-    }
-    const [board, classSlug, subjectSlug, chapterSlug] = segments;
-    const subjectId = subjectIdByPath.get(
-      `/${board}/${classSlug}/${subjectSlug}`,
-    );
-    const hasStaticChapter = subjectId
-      ? staticChapters.some(
-          (chapter) =>
-            String(chapter.subject_id) === subjectId &&
-            chapter.slug === chapterSlug,
-        )
-      : false;
-    if (hasStaticChapter) {
-      validPaths.add(chapterPath);
-    } else {
-      stalePaths.push(chapterPath);
-    }
-  }
-
-  if (stalePaths.length > 0) {
-    console.warn(
-      `[prerender-routes] ignoring ${stalePaths.length} sitemap chapter path(s) ` +
-        "missing from the full static curriculum bundle: " +
-        stalePaths.slice(0, 5).join(", ") +
-        (stalePaths.length > 5 ? ", ..." : ""),
-    );
-  }
-  return validPaths;
-}
-
 function subjectPath(route) {
   return `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
 }
@@ -789,11 +735,10 @@ async function main() {
       .filter((chapter) => chapter?.subject_id && chapter?.slug)
       .map((chapter) => [`${chapter.subject_id}:${chapter.slug}`, chapter]),
   );
-  const publishedChapterPaths = filterStaleChapterPaths(
-    readPublishedChapterPaths(),
-    allSubjectRoutes,
-    staticBundle,
-  );
+  // The sitemap defines the public chapter contract. The bundled curriculum
+  // is useful for recovering failed detail requests, but it can be incomplete
+  // or use different subject IDs and must not prune listed routes.
+  const publishedChapterPaths = new Set(readPublishedChapterPaths());
   const sitemapSubjectRoutes = enumerateSitemapSubjectRoutes(
     publishedChapterPaths,
     allSubjectRoutes,
@@ -1078,19 +1023,17 @@ async function main() {
           return chapterCandidates.indexOf(a) - chapterCandidates.indexOf(b);
         })
       : chapterCandidates;
-    const candidateChapters = [
-      ...new Map(
-        rankedChapters
-          .filter(
-            (chapter) =>
-              !STRICT_CURRICULUM_BUILD ||
-              publishedChapterPaths.has(`${url}/${chapter.slug}`),
-          )
-          .map((chapter) => [chapter.slug, chapter]),
-      ).values(),
-    ].slice(0, CHAPTERS_PER_SUBJECT);
+    const candidateChapters = selectChapterCandidates({
+      subjectUrl: url,
+      rankedChapters,
+      publishedChapterPaths,
+      strict: STRICT_CURRICULUM_BUILD,
+      limit: CHAPTERS_PER_SUBJECT,
+    });
     for (const chapter of candidateChapters) {
-      chapterExpectedPaths.add(`${url}/${chapter.slug}`);
+      if (publishedChapterPaths.size === 0) {
+        chapterExpectedPaths.add(`${url}/${chapter.slug}`);
+      }
     }
 
     await pMap(candidateChapters, async (ch) => {
@@ -1113,29 +1056,16 @@ async function main() {
         // curriculum bundle instead of dropping its deployable HTML file.
         const staticChapter =
           staticChaptersBySubjectSlug.get(`${subjectId}:${chapterSlug}`);
-        if (!staticChapter || !publishedChapterPaths.has(chapterUrl)) {
-          // A stale sitemap can survive the bundle prefilter when duplicate
-          // hierarchy records share one public subject path. A definitive
-          // chapter 404 with no static recovery payload is publication drift,
-          // not a transient backend outage; remove only that path from the
-          // strict expected sets. Timeouts and other errors still fail closed.
-          if (
-            !staticChapter &&
-            publishedChapterPaths.has(chapterUrl) &&
-            /\bHTTP 404\b/.test(err.message || "")
-          ) {
-            publishedChapterPaths.delete(chapterUrl);
-            chapterExpectedPaths.delete(chapterUrl);
-            console.warn(
-              `[prerender-routes] ignoring stale sitemap chapter ${chapterUrl}: ` +
-                "chapter API returned 404 and no static curriculum fallback exists",
-            );
-            return;
-          }
+        const recovery = chapterLookupRecovery(
+          chapterUrl,
+          publishedChapterPaths,
+          Boolean(staticChapter),
+          publishedChapterPaths.size === 0 && !STRICT_CURRICULUM_BUILD,
+        );
+        if (recovery === 'skip-unpublished') {
           console.warn(
-            `[prerender-routes] chapter data fetch failed for ${chapterUrl}: ${err.message}`,
+            `[prerender-routes] skipped non-sitemap chapter ${chapterUrl}: ${err.message}`,
           );
-          chaptersFailed++;
           return;
         }
         chapterPayload = {

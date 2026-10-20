@@ -40,9 +40,10 @@ function escapeHtml(s = "") {
 }
 
 function rewriteHead(html) {
+  html = html.replace(/<title\b[^>]*>[\s\S]*?<\/title>/gi, "");
   html = html.replace(
-    /<title>[^<]*<\/title>/,
-    `<title>${escapeHtml(TITLE)}</title>`,
+    /<\/head>/i,
+    `    <title>${escapeHtml(TITLE)}</title>\n  </head>`,
   );
   html = html.replace(
     /<meta name="description" content="[^"]*"\s*\/?>(\n)?/,
@@ -53,7 +54,7 @@ function rewriteHead(html) {
   // insert the single authoritative canonical + hreflang before </head>.
   // Using a global replace avoids the "found 2" verify-all violation that
   // occurred when a non-global replace left a second canonical behind.
-  html = html.replace(/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/g, "");
+  html = html.replace(/<link\b(?=[^>]*\brel=["']canonical["'])[^>]*>\s*/gi, "");
   html = html.replace(
     /<\/head>/,
     `    <link rel="canonical" href="${CANONICAL}" />\n` +

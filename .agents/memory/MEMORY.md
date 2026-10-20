@@ -60,6 +60,7 @@
 - [Atomic quota and refresh state](atomic-quota-refresh.md) — D1 owns quota/refresh claims; preserve legacy KV floors/markers through safe rollout windows.
 - [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.
 - [Prerender canonical counts](prerender-canonical-counts.md) — Release manifests must count unique canonical output paths, not duplicate source records.
+- [Sitemap prerender authority](sitemap-prerender-authority.md) — Published chapter sitemap paths remain expected even when a static bundle cannot map their subject IDs.
 - [Prerender backend signals](prerender-backend-signals.md) — Coalesce concurrent schema probes, but never TTL-cache completed signals across cache reads.
 - [Prerender request concurrency](prerender-request-concurrency.md) — enforce one process-wide backend request pool; nested route loops otherwise multiply fan-out.
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.

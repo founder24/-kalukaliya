@@ -48,6 +48,26 @@ function contentUrl(row: Pick<ContentUrl, 'boardSlug' | 'classSlug' | 'subjectSl
   return `${SITE_URL}/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}`;
 }
 
+function topicEntries(rows: ContentUrl[]): string[] {
+  const entries = new Map<string, string>();
+  for (const row of rows) {
+    try {
+      const topics = JSON.parse(row.publishedTopics ?? '[]') as Array<{ slug?: string; topic_slug?: string }>;
+      for (const topic of topics) {
+        const slug = topic.topic_slug ?? topic.slug;
+        if (!slug) continue;
+        const location = `${contentUrl(row)}/topic/${encodeURIComponent(slug)}`;
+        if (!entries.has(location)) {
+          entries.set(location, urlEntry(location, date(row.updatedAt), '0.6'));
+        }
+      }
+    } catch {
+      // Bad legacy topic JSON must not make the complete sitemap unavailable.
+    }
+  }
+  return [...entries.values()];
+}
+
 function xmlResponse(content: string, contentType = XML_CONTENT_TYPE): Response {
   return new Response(content, {
     headers: {
@@ -226,30 +246,33 @@ Allow: /
 Crawl-delay: 0
 
 Sitemap: ${SITE_URL}/sitemap-index.xml
-Sitemap: ${SITE_URL}/sitemap-static.xml
-Sitemap: ${SITE_URL}/sitemap-subjects.xml
-Sitemap: ${SITE_URL}/sitemap-chapters.xml
-Sitemap: ${SITE_URL}/sitemap-topics.xml
 `;
 
 seoRouter.get('/sitemap.xml', sitemapIndex);
 seoRouter.get('/sitemap-index.xml', sitemapIndex);
-async function sitemapIndex(c: { text: (body: string, status?: number, headers?: Record<string, string>) => Response }): Promise<Response> {
+async function sitemapIndex(c: {
+  env: Env;
+  text: (body: string, status?: number, headers?: Record<string, string>) => Response;
+}): Promise<Response> {
   const today = new Date().toISOString().slice(0, 10);
+  const topics = topicEntries(await publishedContent(c));
+  const topicSitemap = topics.length
+    ? `  <sitemap><loc>${SITE_URL}/sitemap-topics.xml</loc><lastmod>${today}</lastmod></sitemap>\n`
+    : '';
   return c.text(`<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <sitemap><loc>${SITE_URL}/sitemap-static.xml</loc><lastmod>${today}</lastmod></sitemap>
   <sitemap><loc>${SITE_URL}/sitemap-subjects.xml</loc><lastmod>${today}</lastmod></sitemap>
   <sitemap><loc>${SITE_URL}/sitemap-chapters.xml</loc><lastmod>${today}</lastmod></sitemap>
-  <sitemap><loc>${SITE_URL}/sitemap-topics.xml</loc><lastmod>${today}</lastmod></sitemap>
+${topicSitemap}
 </sitemapindex>`, 200, { 'Content-Type': XML_CONTENT_TYPE, 'Cache-Control': 'public, max-age=600, s-maxage=600' });
 }
 
 seoRouter.get('/sitemap-static.xml', (c) => xmlResponse(urlSet([
-  urlEntry(SITE_URL, new Date().toISOString().slice(0, 10), '1.0'),
+  urlEntry(`${SITE_URL}/home`, '', '0.9'),
   urlEntry(`${SITE_URL}/library`, '', '0.9'),
-  urlEntry(`${SITE_URL}/chat`, '', '0.8'),
-  urlEntry(`${SITE_URL}/pricing`, '', '0.6'),
+  urlEntry(`${SITE_URL}/privacy`, '', '0.5'),
+  urlEntry(`${SITE_URL}/terms`, '', '0.5'),
   urlEntry(`${SITE_URL}/about`, '', '0.5'),
   urlEntry(`${SITE_URL}/technology`, '', '0.6'),
   urlEntry(`${SITE_URL}/exam-routine`, '', '0.7'),
@@ -268,26 +291,20 @@ seoRouter.get('/sitemap-subjects.xml', async (c) => {
 
 seoRouter.get('/sitemap-chapters.xml', async (c) => {
   const rows = await publishedContent(c);
-  return xmlResponse(urlSet(rows
-    .filter((row) => Boolean(row.notesEn?.trim()))
-    .map((row) => urlEntry(contentUrl(row), date(row.updatedAt), '0.7'))));
+  const entries = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.notesEn?.trim()) continue;
+    const location = contentUrl(row);
+    if (!entries.has(location)) {
+      entries.set(location, urlEntry(location, date(row.updatedAt), '0.7'));
+    }
+  }
+  return xmlResponse(urlSet([...entries.values()]));
 });
 
 seoRouter.get('/sitemap-topics.xml', async (c) => {
   const rows = await publishedContent(c);
-  const entries: string[] = [];
-  for (const row of rows) {
-    try {
-      const topics = JSON.parse(row.publishedTopics ?? '[]') as Array<{ slug?: string; topic_slug?: string }>;
-      for (const topic of topics) {
-        const slug = topic.topic_slug ?? topic.slug;
-        if (slug) entries.push(urlEntry(`${contentUrl(row)}/topic/${encodeURIComponent(slug)}`, date(row.updatedAt), '0.6'));
-      }
-    } catch {
-      // Bad legacy topic JSON must not make the complete sitemap unavailable.
-    }
-  }
-  return xmlResponse(urlSet(entries));
+  return xmlResponse(urlSet(topicEntries(rows)));
 });
 
 seoRouter.get('/robots.txt', (c) => c.text(

@@ -274,7 +274,11 @@ async function main() {
     for (const target of targets) {
       const url = `${baseUrl}${target.route}`;
       const messages = [];
-      const context = await browser.newContext();
+      // This check validates React hydration, not service-worker lifecycle.
+      // Blocking worker registration keeps Chromium's temporary localhost
+      // server from producing intermittent "script (Unknown)" update errors;
+      // worker cache behavior has separate unit coverage.
+      const context = await browser.newContext({ serviceWorkers: "block" });
       const page = await context.newPage();
 
       page.on("console", (msg) => {

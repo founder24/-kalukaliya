@@ -93,7 +93,7 @@ function rewriteHead(html) {
   );
   // Task #494 / Task #538: strip ALL existing canonical tags globally, then
   // inject the single authoritative canonical + hreflang before </head>.
-  html = html.replace(/<link rel="canonical" href="[^"]*"\s*\/?>(\n)?/g, "");
+  html = html.replace(/<link\b(?=[^>]*\brel=["']canonical["'])[^>]*>\s*/gi, "");
   html = html.replace(
     /<\/head>/,
     `    <link rel="canonical" href="${CANONICAL}" />\n` +
