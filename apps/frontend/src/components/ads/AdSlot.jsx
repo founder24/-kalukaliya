@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getAdConfig, adsConsentGranted } from '@/utils/adsConfig';
 import Analytics from '@/utils/analytics';
 import { injectAdScript } from '@/utils/adScriptRegistry';
+import { shouldCollapseEmptyAdSlot } from '@/utils/emptyAdSlotPolicy';
 
 // AdSense queue pushes are also session-scoped. The module survives React
 // unmounts caused by ChapterPage tab switches, but is recreated on a full
@@ -45,6 +46,7 @@ export default function AdSlot({ placement, className = '', style = {} }) {
   const ref = useRef(null);
   const [shouldLoad, setShouldLoad] = useState(false);
   const [consentOk, setConsentOk] = useState(false);
+  const [emptyAd, setEmptyAd] = useState(false);
   // Task #528: ensure the viewability ping fires at most once per mount.
   const viewedRef = useRef(false);
 
@@ -55,7 +57,14 @@ export default function AdSlot({ placement, className = '', style = {} }) {
   // or logging out flips this slot on/off without a page reload.
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const apply = () => setConsentOk(adsConsentGranted());
+    const apply = () => {
+      const allowed = adsConsentGranted();
+      setConsentOk(allowed);
+      if (!allowed) {
+        setShouldLoad(false);
+        setEmptyAd(false);
+      }
+    };
     apply();
     window.addEventListener('syrabit:ads-consent-changed', apply);
     return () => window.removeEventListener('syrabit:ads-consent-changed', apply);
@@ -97,6 +106,50 @@ export default function AdSlot({ placement, className = '', style = {} }) {
     }
   }, [shouldLoad, cfg.enabled, cfg.scriptUrl, cfg.network, cfg.publisherId, cfg.slotId, cfg.crossorigin]);
 
+  // AdSense can complete a slot without returning a creative. The browser
+  // then displays a broken-image placeholder (or a large empty reserved box)
+  // inside the ad frame. Collapse explicit no-fill responses immediately and
+  // bound unresolved empty slots so they cannot remain as broken placeholders.
+  useEffect(() => {
+    if (!shouldLoad || !cfg.enabled || cfg.network !== 'adsense') return undefined;
+    const slot = ref.current?.querySelector('ins.adsbygoogle');
+    if (!slot) return undefined;
+
+    let timer;
+    let settleTimer;
+    let observer;
+    const inspect = (timedOut = false) => {
+      const hasCreative = Boolean(
+        slot.querySelector('iframe, img, video, canvas') ||
+        slot.textContent?.trim(),
+      );
+      const adStatus = slot.getAttribute('data-ad-status');
+      if (shouldCollapseEmptyAdSlot({ adStatus, hasCreative, timedOut })) {
+        observer?.disconnect();
+        clearTimeout(timer);
+        clearTimeout(settleTimer);
+        setEmptyAd(true);
+        return;
+      }
+      if (
+        !hasCreative &&
+        slot.getAttribute('data-adsbygoogle-status') === 'done' &&
+        settleTimer === undefined
+      ) {
+        settleTimer = setTimeout(() => inspect(true), 1200);
+      }
+    };
+
+    observer = new MutationObserver(() => inspect());
+    observer.observe(slot, { attributes: true, childList: true, subtree: true });
+    timer = setTimeout(() => inspect(true), 8000);
+    return () => {
+      observer.disconnect();
+      clearTimeout(timer);
+      clearTimeout(settleTimer);
+    };
+  }, [shouldLoad, cfg.enabled, cfg.network]);
+
   // Task #528: viewability ping. Fire one PostHog event the first time
   // this slot is at least 50% within the viewport. Gated on the same
   // consent + enabled checks as the script loader so opt-out users
@@ -136,7 +189,7 @@ export default function AdSlot({ placement, className = '', style = {} }) {
   // when consent is denied / build is not production: per the task spec
   // ("when disabled, the slot collapses with no reserved space"), a
   // user who has not granted ad consent must see zero reserved height.
-  if (!cfg.enabled || !consentOk) return null;
+  if (!cfg.enabled || !consentOk || emptyAd) return null;
 
   // Fluid in-article ads let Google control height entirely — no reserved
   // minHeight so the page never holds empty space when Google skips the slot.

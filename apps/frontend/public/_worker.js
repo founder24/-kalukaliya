@@ -379,12 +379,32 @@ async function botRender(request, env, url) {
     if (resp.status === 200) {
       const ct = resp.headers.get("content-type") || "";
       if (ct.includes("text/html") || ct.includes("application/xhtml")) {
+        const html = await resp.text();
+        // Never turn an upstream SPA fallback into a successful crawler
+        // response. That shell looks like a soft-404 and masks missing
+        // chapter rendering behind a cacheable 200.
+        const genericShell =
+          /<title\b[^>]*>[^<]*Syrabit\.ai\s*(?:—|&mdash;)\s*Educational Browser For Assam Board Students[^<]*<\/title>/i.test(html) ||
+          /<h1\b[^>]*>\s*Syrabit\.ai\s*(?:—|&mdash;)\s*Educational Browser For Assam Board Students\s*<\/h1>/i.test(html);
+        if (genericShell) {
+          const headers = new Headers({
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Retry-After": "120",
+            "X-Source": "bot-render-generic-rejected",
+          });
+          addSecurityHeaders(headers);
+          return new Response(
+            request.method === "HEAD" ? null : "<!doctype html><title>Temporarily unavailable</title>",
+            { status: 503, headers },
+          );
+        }
         const headers = new Headers(resp.headers);
         headers.set("X-Source", "bot-render");
         headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
         headers.set("X-Robots-Tag", "all, max-snippet:-1, max-image-preview:large");
         addSecurityHeaders(headers);
-        return new Response(resp.body, { status: 200, headers });
+        return new Response(html, { status: 200, headers });
       }
     }
   } catch {
@@ -621,6 +641,12 @@ export default {
           request.method === "HEAD" &&
           (accept === "" || accept.includes("text/html") || accept.includes("*/*"));
         const isBotGet = isBot && request.method === "GET";
+        if (
+          (isGetNavigation || isHeadProbe) &&
+          !isDeclaredFrontendRoute(url.pathname)
+        ) {
+          return botNotFoundResponse(request);
+        }
         if (isGetNavigation || isHeadProbe || isBotGet) {
           return spaShellResponse(request, env, url, 404);
         }
