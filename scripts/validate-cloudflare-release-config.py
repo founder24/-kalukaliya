@@ -74,6 +74,11 @@ def main() -> int:
     for marker in (
         "rehearse_chat_latency_failure:",
         "github.event_name == 'workflow_dispatch' && inputs.rehearse_chat_latency_failure",
+        "inputs.validate_live_chat == true",
+        "inputs.validate_staff_auth == true",
+        "CUTOVER_VALIDATE_CHAT: ${{ inputs.validate_live_chat && inputs.validate_authenticated }}",
+        "VALIDATE_LIVE_CHAT: ${{ inputs.validate_live_chat }}",
+        "VALIDATE_STAFF_AUTH: ${{ inputs.validate_staff_auth }}",
         "needs: [chat-performance, live-chat-contract, disposable-staff-auth, deploy-frontend]",
         "pages_asset_smoke_outcome: ${{ steps.live-ad-smoke.outcome }}",
         "PAGES_ASSET_SMOKE_RESULT: ${{ needs.deploy-frontend.outputs.pages_asset_smoke_outcome }}",
@@ -82,8 +87,10 @@ def main() -> int:
         'echo "| Pages hashed-asset propagation | ${PAGES_ASSET_SMOKE_RESULT} |"',
         'echo "| Chat first-token latency | ${CHAT_PERFORMANCE_RESULT} |"',
         'echo "| Disposable staff access | ${STAFF_ACCESS_RESULT} |"',
-        'if [[ "$PAGES_ASSET_SMOKE_RESULT" != "success" ]]; then',
-        '&& "$PAGES_ASSET_SMOKE_RESULT" == "success" ]]',
+        'assert_optional_result "Chat first-token latency" "$VALIDATE_LIVE_CHAT" "$CHAT_PERFORMANCE_RESULT"',
+        'assert_optional_result "Live chat/content contract" "$VALIDATE_LIVE_CHAT" "$LIVE_CHAT_CONTRACT_RESULT"',
+        'assert_optional_result "Disposable staff access" "$VALIDATE_STAFF_AUTH" "$STAFF_ACCESS_RESULT"',
+        '[[ "$PAGES_ASSET_SMOKE_RESULT" == "success" ]]',
     ):
         if marker not in release:
             errors.append(

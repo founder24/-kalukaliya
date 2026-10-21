@@ -27,6 +27,16 @@ on:
         required: false
         default: false
         type: boolean
+      validate_live_chat:
+        description: 'Send anonymous production chat prompts for latency and contract checks'
+        required: false
+        default: false
+        type: boolean
+      validate_staff_auth:
+        description: 'Create and sign in with temporary production staff/admin fixtures'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -47,7 +57,7 @@ jobs:
     name: Cloudflare Native Release
     needs: dep-check
     # Reusable-workflow jobs can fail to materialize when push events pass the
-    # absent workflow_dispatch inputs through as empty strings. Coerce both
+    # absent workflow_dispatch inputs through as empty strings. Coerce all
     # values to real booleans and run after either a completed or intentionally
     # skipped dependency gate.
     if: ${{ !cancelled() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') }}
@@ -55,4 +65,6 @@ jobs:
     with:
       validate_authenticated: ${{ inputs.validate_authenticated == true }}
       validate_reset_delivery: ${{ inputs.validate_reset_delivery == true }}
+      validate_live_chat: ${{ inputs.validate_live_chat == true }}
+      validate_staff_auth: ${{ inputs.validate_staff_auth == true }}
     secrets: inherit
