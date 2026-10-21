@@ -32,9 +32,7 @@ jobs:
           # Keep the analytics credential separate from the deployment token:
           # it must include Zone Analytics Read.
           CLOUDFLARE_ANALYTICS_TOKEN: ${{ secrets.CF_ANALYTICS_TOKEN || secrets.CF_ANALYTICS_API_TOKEN || secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CF_ZONE_ID || vars.CLOUDFLARE_ZONE_ID || secrets.CF_ZONE_ID || secrets.CLOUDFLARE_ZONE_ID }}
-          CLOUDFLARE_ZONE_DISCOVERY_TOKEN: ${{ secrets.CF_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_NAME: syrabit.ai
+          CLOUDFLARE_ZONE_ID: ${{ vars.CF_ZONE_ID }}
         run: |
           set +e
           node --input-type=module <<'NODE'
@@ -48,32 +46,10 @@ jobs:
           let result;
           try {
             const token = process.env.CLOUDFLARE_ANALYTICS_TOKEN?.trim();
-            let zoneTag = process.env.CLOUDFLARE_ZONE_ID?.trim();
-            if (!zoneTag) {
-              const discoveryToken =
-                process.env.CLOUDFLARE_ZONE_DISCOVERY_TOKEN?.trim();
-              const zoneName = process.env.CLOUDFLARE_ZONE_NAME?.trim();
-              if (discoveryToken && zoneName) {
-                const zoneResponse = await fetch(
-                  `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent(zoneName)}`,
-                  {
-                    headers: { Authorization: `Bearer ${discoveryToken}` },
-                    signal: AbortSignal.timeout(15_000),
-                  },
-                );
-                const zonePayload = await zoneResponse.json();
-                if (
-                  zoneResponse.ok
-                  && zonePayload.success
-                  && zonePayload.result?.length === 1
-                ) {
-                  zoneTag = zonePayload.result[0].id;
-                }
-              }
-            }
+            const zoneTag = process.env.CLOUDFLARE_ZONE_ID?.trim();
             const missing = [
               !token && 'CF_ANALYTICS_TOKEN, CF_ANALYTICS_API_TOKEN, or CLOUDFLARE_ANALYTICS_TOKEN',
-              !zoneTag && 'a discoverable syrabit.ai zone or CF_ZONE_ID/CLOUDFLARE_ZONE_ID',
+              !zoneTag && 'the CF_ZONE_ID Actions variable',
             ].filter(Boolean);
             if (missing.length) {
               throw new Error(

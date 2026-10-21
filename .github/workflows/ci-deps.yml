@@ -1,4 +1,4 @@
-name: CI — Dependency Sync Check
+name: CI — Legacy Python Dependency Advisory
 
 on:
   pull_request:
@@ -14,8 +14,6 @@ on:
       - 'apps/backend/requirements.in'
       - 'apps/backend/requirements.txt'
   workflow_dispatch:
-  # Called as a blocking gate from deploy.yml before any deployment starts
-  workflow_call:
 
 permissions:
   contents: read

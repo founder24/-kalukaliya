@@ -1,8 +1,8 @@
 name: AHSEC Cleanup Preview
 
 # Cleanup is intentionally manual. The preview job produces reviewable evidence
-# first; the apply job is separately gated by an explicit confirmation input and
-# the ahsec-production environment.
+# first; both jobs use the protected production environment, and apply is
+# separately gated by an explicit confirmation input.
 on:
   workflow_dispatch:
     inputs:
@@ -48,6 +48,7 @@ jobs:
   preview:
     name: Generate and retain cleanup preview
     runs-on: ubuntu-latest
+    environment: production
     outputs:
       artifact_name: ahsec-cleanup-preview-${{ github.run_id }}-${{ github.run_attempt }}
     env:
@@ -147,7 +148,7 @@ jobs:
     needs: preview
     if: ${{ inputs.confirm_production_write == true }}
     runs-on: ubuntu-latest
-    environment: ahsec-production
+    environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

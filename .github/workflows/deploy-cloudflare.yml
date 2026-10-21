@@ -1,9 +1,9 @@
 name: Deploy — Cloudflare Native Only
 
 # This is the single implementation of the production Cloudflare release.
-# deploy.yml invokes it for main/tag releases; this dispatch is retained for
-# intentionally gated cutover checks. Worker secrets are provisioned through
-# Wrangler and are never read back.
+# deploy.yml invokes it for main/tag releases. Direct dispatch is supported
+# only from main or a release tag on main history, and production changes wait
+# for the GitHub production environment. Worker secrets are never read back.
 on:
   workflow_dispatch:
     inputs:
@@ -54,11 +54,56 @@ on:
         required: false
         default: false
         type: boolean
-
+    secrets:
+      # Deployment credentials are read from each job's protected environment;
+      # declarations keep the reusable-workflow contract explicit.
+      ADMIN_JWT_SECRET:
+        required: false
+      CF_ACCOUNT_ID:
+        required: false
+      CF_API_TOKEN:
+        required: false
+      EDGE_SHARED_SECRET:
+        required: false
+      INDEXNOW_API_KEY:
+        required: false
+      INDEXNOW_INTERNAL_SECRET:
+        required: false
+      JWT_SECRET:
+        required: false
+      RESET_TOKEN_SECRET:
+        required: false
+      RESEND_API_KEY:
+        required: false
+      R2_PUBLIC_URL:
+        required: false
+      RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL:
+        required: false
+      VITE_BACKEND_URL:
+        required: false
+      CUTOVER_STUDENT_TOKEN:
+        required: false
+      CUTOVER_STAFF_TOKEN:
+        required: false
+      CUTOVER_ADMIN_SESSION_TOKEN:
+        required: false
+      TRANSLATE_CRON_SECRET:
+        required: false
+      CF_ACCESS_CLIENT_ID:
+        required: false
+      CF_ACCESS_CLIENT_SECRET:
+        required: false
+      # These are resolved only from the protected cutover-reset-delivery
+      # environment on the jobs that consume them, never from the caller.
+      CUTOVER_RESET_EMAIL:
+        required: false
+      CUTOVER_RESET_LINK:
+        required: false
+      CUTOVER_RESET_PASSWORD:
+        required: false
 permissions:
   contents: read
   actions: read
-  issues: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -71,23 +116,108 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-release-ref:
+    name: Validate production release ref
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Allow main and release tags on main history
+        env:
+          RELEASE_REF: ${{ github.ref }}
+          VALIDATE_AUTHENTICATED: ${{ inputs.validate_authenticated }}
+          VALIDATE_RESET_DELIVERY: ${{ inputs.validate_reset_delivery }}
+        run: |
+          set -euo pipefail
+          if [[ "$VALIDATE_RESET_DELIVERY" == "true" && "$VALIDATE_AUTHENTICATED" != "true" ]]; then
+            echo "::error::validate_reset_delivery requires validate_authenticated=true."
+            exit 1
+          fi
+          if [[ "$RELEASE_REF" == "refs/heads/main" ]]; then
+            echo "Authorized production release ref: ${RELEASE_REF}"
+          elif [[ "$RELEASE_REF" =~ ^refs/tags/release/.+ ]] \
+            || [[ "$RELEASE_REF" =~ ^refs/tags/v[0-9].*$ ]]; then
+            git fetch --no-tags origin main:refs/remotes/origin/main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+              echo "::error::Release tag must point to a commit already merged into main."
+              exit 1
+            fi
+            echo "Authorized release tag on main history: ${RELEASE_REF}"
+          else
+            echo "::error::Production releases may run only from main or release tags on main history; received ${RELEASE_REF}."
+            exit 1
+          fi
+
+  preflight-reset-delivery-secrets:
+    name: Preflight password-reset validation secrets
+    runs-on: ubuntu-latest
+    needs: validate-release-ref
+    if: ${{ inputs.validate_reset_delivery == true }}
+    environment: cutover-reset-delivery
+    steps:
+      - name: Require disposable reset email and password
+        env:
+          CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+          CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$CUTOVER_RESET_EMAIL" ]] || missing+=(CUTOVER_RESET_EMAIL)
+          [[ -n "$CUTOVER_RESET_PASSWORD" ]] || missing+=(CUTOVER_RESET_PASSWORD)
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Password-reset validation was requested, but these cutover-reset-delivery environment secrets are missing: ${missing[*]}."
+            exit 1
+          fi
+          if [[ "${CUTOVER_RESET_EMAIL,,}" != *cutover* ]]; then
+            echo "::error::CUTOVER_RESET_EMAIL must identify a disposable fixture by containing 'cutover'."
+            exit 1
+          fi
+
   verify:
     name: Cloudflare Configuration & Quality Gates
     runs-on: ubuntu-latest
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
-      RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
-      EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
-      INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
-      R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
-      TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+    needs: [validate-release-ref, preflight-reset-delivery-secrets]
+    if: >-
+      always() &&
+      needs.validate-release-ref.result == 'success' &&
+      (needs.preflight-reset-delivery-secrets.result == 'success' ||
+       needs.preflight-reset-delivery-secrets.result == 'skipped')
+    environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Require secrets for requested authenticated validations
+        env:
+          VALIDATE_AUTHENTICATED: ${{ inputs.validate_authenticated }}
+          VALIDATE_STAFF_AUTH: ${{ inputs.validate_staff_auth }}
+          CUTOVER_STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+          CUTOVER_STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
+          CUTOVER_ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
+          TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [[ "$VALIDATE_AUTHENTICATED" == "true" ]]; then
+            for name in CUTOVER_STUDENT_TOKEN CUTOVER_STAFF_TOKEN CUTOVER_ADMIN_SESSION_TOKEN \
+              TRANSLATE_CRON_SECRET CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+              [[ -n "${!name:-}" ]] || missing+=("$name")
+            done
+          fi
+          if [[ "$VALIDATE_STAFF_AUTH" == "true" ]]; then
+            for name in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+              [[ -n "${!name:-}" ]] || missing+=("$name")
+            done
+          fi
+          if ((${#missing[@]} > 0)); then
+            printf -v missing_list '%s, ' "${missing[@]}"
+            echo "::error::Requested validation cannot run; configure these repository secrets for the reusable release workflow: ${missing_list%, }."
+            exit 1
+          fi
+          echo "All secrets required by the selected optional validations are available."
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -115,25 +245,38 @@ jobs:
         run: python3 scripts/test-refresh-token-bridge-guard.py
 
       - name: Require API Worker release secrets
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+          RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
+          EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+          INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
         run: |
           set -euo pipefail
           required=(
-            JWT_SECRET ADMIN_JWT_SECRET RESET_TOKEN_SECRET EDGE_SHARED_SECRET
-            RESEND_API_KEY INDEXNOW_API_KEY INDEXNOW_INTERNAL_SECRET
+            CF_API_TOKEN CF_ACCOUNT_ID JWT_SECRET ADMIN_JWT_SECRET
+            RESET_TOKEN_SECRET EDGE_SHARED_SECRET RESEND_API_KEY
+            INDEXNOW_API_KEY INDEXNOW_INTERNAL_SECRET
           )
           missing=()
           for name in "${required[@]}"; do
             [[ -n "${!name:-}" ]] || missing+=("$name")
           done
           if ((${#missing[@]} > 0)); then
-            echo "::error::Required Cloudflare API Worker release secrets are not supplied: ${missing[*]}"
-            echo "Refusing to deploy a partially configured API Worker."
+            echo "::error::Required Cloudflare production environment secrets are not supplied: ${missing[*]}"
+            echo "Refusing to deploy with incomplete production credentials."
             exit 1
           else
             echo "All required Cloudflare API Worker release secrets are supplied."
           fi
 
       - name: Verify IndexNow ownership file matches the release key
+        env:
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
         run: node apps/frontend/scripts/indexnow-submit.mjs --verify-key-file apps/frontend/public
 
       - name: Test and type-check API Worker
@@ -166,6 +309,7 @@ jobs:
     name: Deploy API Worker + D1
     runs-on: ubuntu-latest
     needs: verify
+    environment: production
     timeout-minutes: 30
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -344,6 +488,7 @@ jobs:
     name: Deploy Edge Worker
     runs-on: ubuntu-latest
     needs: deploy-api
+    environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -416,6 +561,7 @@ jobs:
     name: Deploy Frontend
     runs-on: ubuntu-latest
     needs: deploy-api
+    environment: production
     outputs:
       pages_asset_smoke_outcome: ${{ steps.live-ad-smoke.outcome }}
     env:
@@ -567,6 +713,7 @@ jobs:
     name: Cloudflare Native Smoke Tests
     runs-on: ubuntu-latest
     needs: [deploy-api, deploy-edge, deploy-frontend]
+    environment: production
     if: |
       always() &&
       needs.deploy-api.result == 'success' &&
@@ -752,6 +899,10 @@ jobs:
   chat-performance:
     name: Worker chat first-token performance
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      issues: write
     needs: [deploy-api, deploy-edge, deploy-frontend]
     if: |
       always() &&
@@ -960,6 +1111,7 @@ jobs:
     name: Confirm native routing
     runs-on: ubuntu-latest
     needs: smoke
+    environment: production
     env:
       API_WORKER_URL: https://syrabit-api-prod.axomxplain.workers.dev
       PUBLIC_EDGE_URL: https://api.syrabit.ai
@@ -1019,6 +1171,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: post-native-smoke
+    environment: production
     if: |
       always() &&
       inputs.validate_live_chat == true &&
@@ -1038,6 +1191,7 @@ jobs:
     name: Prove disposable staff sign-in
     runs-on: ubuntu-latest
     needs: post-native-smoke
+    environment: production
     if: |
       always() &&
       inputs.validate_staff_auth == true &&
@@ -1165,6 +1319,7 @@ jobs:
     name: Request fresh disposable password-reset email
     runs-on: ubuntu-latest
     needs: [post-native-smoke]
+    environment: cutover-reset-delivery
     if: |
       always() &&
        inputs.validate_authenticated &&
@@ -1228,6 +1383,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Confirm the newly delivered link exactly once
+        env:
+          CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+          CUTOVER_RESET_LINK: ${{ secrets.CUTOVER_RESET_LINK }}
+          CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
         run: |
           set -euo pipefail
+          missing=()
+          for name in CUTOVER_RESET_EMAIL CUTOVER_RESET_LINK CUTOVER_RESET_PASSWORD; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if ((${#missing[@]} > 0)); then
+            echo "::error::The password-reset validation is missing cutover-reset-delivery secrets: ${missing[*]}. The fresh reset link must be added after the request job sends its email."
+            exit 1
+          fi
           bash scripts/validate-cloudflare-api-cutover.sh

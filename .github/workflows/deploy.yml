@@ -12,11 +12,6 @@ on:
       - 'v[0-9]*'
   workflow_dispatch:
     inputs:
-      skip_dep_check:
-        description: 'Skip dependency sync check (emergency deploy only)'
-        required: false
-        default: false
-        type: boolean
       validate_authenticated:
         description: 'Require disposable authenticated API checks after deployment'
         required: false
@@ -41,30 +36,31 @@ on:
 permissions:
   contents: read
   actions: read
-  issues: write
 
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  dep-check:
-    name: Dependency Gate
-    if: ${{ inputs.skip_dep_check != true }}
-    uses: ./.github/workflows/ci-deps.yml
-
   cloudflare-release:
     name: Cloudflare Native Release
-    needs: dep-check
-    # Reusable-workflow jobs can fail to materialize when push events pass the
-    # absent workflow_dispatch inputs through as empty strings. Coerce all
-    # values to real booleans and run after either a completed or intentionally
-    # skipped dependency gate.
-    if: ${{ !cancelled() && (needs.dep-check.result == 'success' || needs.dep-check.result == 'skipped') }}
+    permissions:
+      contents: read
+      actions: read
+      issues: write
     uses: ./.github/workflows/deploy-cloudflare.yml
     with:
       validate_authenticated: ${{ inputs.validate_authenticated == true }}
       validate_reset_delivery: ${{ inputs.validate_reset_delivery == true }}
       validate_live_chat: ${{ inputs.validate_live_chat == true }}
       validate_staff_auth: ${{ inputs.validate_staff_auth == true }}
-    secrets: inherit
+    secrets:
+      CUTOVER_STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+      CUTOVER_STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
+      CUTOVER_ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
+      TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+      RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL: ${{ secrets.RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL }}
+      VITE_BACKEND_URL: ${{ secrets.VITE_BACKEND_URL }}

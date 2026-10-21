@@ -138,11 +138,9 @@ describe('scheduled Cloudflare audit contract', () => {
       'https://syrabit-api-prod.axomxplain.workers.dev/api/v1/admin/cron/cloudflare-analytics-result',
     );
     expect(analyticsWorkflow).toContain('secrets.CF_ANALYTICS_TOKEN');
-    expect(analyticsWorkflow).toContain('secrets.CF_API_TOKEN');
+    expect(analyticsWorkflow).not.toContain('secrets.CF_API_TOKEN');
     expect(analyticsWorkflow).toContain('vars.CF_ZONE_ID');
-    expect(analyticsWorkflow).toContain(
-      'https://api.cloudflare.com/client/v4/zones?name=',
-    );
+    expect(analyticsWorkflow).toContain('the CF_ZONE_ID Actions variable');
     expect(analyticsWorkflow).toContain('Missing Cloudflare analytics configuration');
     expect(analyticsWorkflow).not.toContain('CF-Access-Client-Id');
     expect(analyticsWorkflow).not.toContain('CF-Access-Client-Secret');
