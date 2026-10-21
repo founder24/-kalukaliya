@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 
@@ -28,6 +29,17 @@ def load_workflow(path: str) -> dict:
 RELEASE = load_workflow(".github/workflows/deploy-cloudflare.yml")
 ENTRYPOINT = load_workflow(".github/workflows/deploy.yml")
 VALIDATOR = load_workflow(".github/workflows/validate-github-actions.yml")
+PRODUCTION_RELEASE_SECRETS = {
+    "CF_API_TOKEN",
+    "CF_ACCOUNT_ID",
+    "JWT_SECRET",
+    "ADMIN_JWT_SECRET",
+    "RESET_TOKEN_SECRET",
+    "EDGE_SHARED_SECRET",
+    "RESEND_API_KEY",
+    "INDEXNOW_API_KEY",
+    "INDEXNOW_INTERNAL_SECRET",
+}
 
 
 class ProductionReleaseOptInTests(unittest.TestCase):
@@ -157,6 +169,102 @@ class ProductionReleaseOptInTests(unittest.TestCase):
         )
         self.assertIn('if [[ "$CUTOVER_VALIDATE_CHAT" == "true" ]]; then', script)
         self.assertIn('echo "Authenticated chat request skipped: CUTOVER_VALIDATE_CHAT=false."', script)
+
+    def test_production_release_refs_are_gated_before_secret_scoped_jobs(self) -> None:
+        ref_gate = RELEASE["jobs"]["validate-release-ref"]
+        self.assertEqual(
+            ref_gate["steps"][0]["uses"],
+            "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+        )
+        self.assertEqual(ref_gate["steps"][0]["with"]["fetch-depth"], 0)
+        run = ref_gate["steps"][1]["run"]
+        self.assertIn("refs/heads/main", run)
+        self.assertIn("refs/tags/release/", run)
+        self.assertIn("refs/tags/v[0-9]", run)
+        self.assertIn("git merge-base --is-ancestor", run)
+        self.assertNotIn("secrets.", str(ref_gate))
+
+        verify = RELEASE["jobs"]["verify"]
+        self.assertEqual(verify.get("needs"), "validate-release-ref")
+        self.assertEqual(verify.get("environment"), "production")
+        self.assertEqual(RELEASE["jobs"]["deploy-api"].get("needs"), "verify")
+
+    def test_release_secrets_are_environment_scoped_and_permissions_are_scoped(self) -> None:
+        self.assertNotIn("secrets", RELEASE["on"]["workflow_call"])
+        self.assertNotIn("secrets", ENTRYPOINT["jobs"]["cloudflare-release"])
+        release_text = (ROOT / ".github/workflows/deploy-cloudflare.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(release_text, r"(?m)^  verify:\n(?:.*\n){0,4}    environment: production$")
+        for job_name, job in RELEASE["jobs"].items():
+            if not re.search(r"secrets\.[A-Z0-9_]+", str(job)):
+                continue
+            expected_environment = (
+                "cutover-reset-delivery"
+                if job_name in {"request-reset-email", "validate-reset-email"}
+                else "production"
+            )
+            with self.subTest(job=job_name):
+                self.assertEqual(job.get("environment"), expected_environment)
+        preflight = next(
+            step for step in RELEASE["jobs"]["verify"]["steps"]
+            if step.get("name") == "Require API Worker release secrets"
+        )
+        required_names = {
+            "CF_API_TOKEN",
+            "CF_ACCOUNT_ID",
+            "JWT_SECRET",
+            "ADMIN_JWT_SECRET",
+            "RESET_TOKEN_SECRET",
+            "EDGE_SHARED_SECRET",
+            "RESEND_API_KEY",
+            "INDEXNOW_API_KEY",
+            "INDEXNOW_INTERNAL_SECRET",
+        }
+        self.assertLessEqual(required_names, set(preflight["env"]))
+        for name in required_names:
+            self.assertIn(name, preflight["run"])
+        self.assertIn("${missing[*]}", preflight["run"])
+        self.assertNotIn('echo "$', preflight["run"])
+        self.assertNotIn("issues", RELEASE["permissions"])
+        self.assertNotIn("issues", ENTRYPOINT["permissions"])
+        self.assertEqual(
+            RELEASE["jobs"]["chat-performance"]["permissions"]["issues"],
+            "write",
+        )
+        self.assertEqual(
+            ENTRYPOINT["jobs"]["cloudflare-release"]["permissions"]["issues"],
+            "write",
+        )
+
+    def test_production_release_secrets_are_only_read_in_production_jobs(self) -> None:
+        workflow_dir = ROOT / ".github" / "workflows"
+        paths = sorted(workflow_dir.glob("*.yml")) + sorted(workflow_dir.glob("*.yaml"))
+        for path in paths:
+            workflow = load_workflow(str(path.relative_to(ROOT)))
+            for job_name, job in workflow.get("jobs", {}).items():
+                referenced = (
+                    set(re.findall(r"secrets\.([A-Z0-9_]+)", str(job)))
+                    & PRODUCTION_RELEASE_SECRETS
+                )
+                if not referenced:
+                    continue
+                with self.subTest(workflow=path.name, job=job_name):
+                    self.assertEqual(job.get("environment"), "production")
+
+        analytics = load_workflow(".github/workflows/cloudflare-analytics-health.yml")
+        analytics_job = analytics["jobs"]["cloudflare-analytics-health"]
+        self.assertNotIn("CF_API_TOKEN", str(analytics_job))
+        self.assertEqual(
+            analytics_job["steps"][1]["env"]["CLOUDFLARE_ZONE_ID"],
+            "${{ vars.CF_ZONE_ID }}",
+        )
+
+    def test_legacy_python_dependencies_are_not_a_production_gate(self) -> None:
+        self.assertNotIn("dep-check", ENTRYPOINT["jobs"])
+        self.assertNotIn("skip_dep_check", ENTRYPOINT["on"]["workflow_dispatch"]["inputs"])
+        legacy_dependencies = load_workflow(".github/workflows/ci-deps.yml")
+        self.assertNotIn("workflow_call", legacy_dependencies["on"])
 
     def test_opt_in_guard_runs_in_unfiltered_workflow_validation(self) -> None:
         self.assertIn(
