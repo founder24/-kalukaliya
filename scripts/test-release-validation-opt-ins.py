@@ -42,6 +42,12 @@ PRODUCTION_RELEASE_SECRETS = {
     "INDEXNOW_API_KEY",
     "INDEXNOW_INTERNAL_SECRET",
 }
+RESET_DELIVERY_SECRETS = {
+    "CUTOVER_RESET_EMAIL",
+    "CUTOVER_RESET_LINK",
+    "CUTOVER_RESET_PASSWORD",
+}
+PROTECTED_ENVIRONMENT_SECRETS = PRODUCTION_RELEASE_SECRETS | RESET_DELIVERY_SECRETS
 
 
 class ProductionReleaseOptInTests(unittest.TestCase):
@@ -206,7 +212,7 @@ class ProductionReleaseOptInTests(unittest.TestCase):
         self.assertEqual(verify.get("environment"), "production")
         self.assertEqual(RELEASE["jobs"]["deploy-api"].get("needs"), "verify")
 
-    def test_release_secrets_are_environment_scoped_and_permissions_are_scoped(self) -> None:
+    def test_release_secret_pass_through_and_permissions_are_scoped(self) -> None:
         validation_secrets = {
             "CUTOVER_STUDENT_TOKEN",
             "CUTOVER_STAFF_TOKEN",
@@ -215,28 +221,19 @@ class ProductionReleaseOptInTests(unittest.TestCase):
             "CF_ACCESS_CLIENT_ID",
             "CF_ACCESS_CLIENT_SECRET",
         }
-        forwarded_secrets = validation_secrets | {
+        forwarded_secrets = validation_secrets | PROTECTED_ENVIRONMENT_SECRETS | {
             "R2_PUBLIC_URL",
             "RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL",
             "VITE_BACKEND_URL",
         }
-        environment_secrets = {
-            *PRODUCTION_RELEASE_SECRETS,
-            "CUTOVER_RESET_EMAIL",
-            "CUTOVER_RESET_LINK",
-            "CUTOVER_RESET_PASSWORD",
-        }
         call_secrets = RELEASE["on"]["workflow_call"]["secrets"]
         caller_secrets = ENTRYPOINT["jobs"]["cloudflare-release"]["secrets"]
-        self.assertEqual(set(call_secrets), forwarded_secrets | environment_secrets)
+        self.assertEqual(set(call_secrets), forwarded_secrets)
+        self.assertEqual(set(caller_secrets), forwarded_secrets)
         for name in forwarded_secrets:
             with self.subTest(secret=name):
                 self.assertIs(call_secrets[name]["required"], False)
                 self.assertEqual(caller_secrets.get(name), f"${{{{ secrets.{name} }}}}")
-        for name in environment_secrets:
-            with self.subTest(environment_secret=name):
-                self.assertIs(call_secrets[name]["required"], False)
-                self.assertNotIn(name, caller_secrets)
         self.assertNotIn("inherit", str(caller_secrets).lower())
         release_text = (ROOT / ".github/workflows/deploy-cloudflare.yml").read_text(
             encoding="utf-8"
@@ -358,12 +355,24 @@ class ProductionReleaseOptInTests(unittest.TestCase):
             for job_name, job in workflow.get("jobs", {}).items():
                 referenced = (
                     set(re.findall(r"secrets\.([A-Z0-9_]+)", str(job)))
-                    & PRODUCTION_RELEASE_SECRETS
+                    & PROTECTED_ENVIRONMENT_SECRETS
                 )
                 if not referenced:
                     continue
+                if path.name == "deploy.yml" and job_name == "cloudflare-release":
+                    self.assertEqual(
+                        job.get("uses"),
+                        "./.github/workflows/deploy-cloudflare.yml",
+                    )
+                    self.assertEqual(referenced, PROTECTED_ENVIRONMENT_SECRETS)
+                    continue
+                expected_environment = (
+                    "cutover-reset-delivery"
+                    if referenced & RESET_DELIVERY_SECRETS
+                    else "production"
+                )
                 with self.subTest(workflow=path.name, job=job_name):
-                    self.assertEqual(job.get("environment"), "production")
+                    self.assertEqual(job.get("environment"), expected_environment)
 
         analytics = load_workflow(".github/workflows/cloudflare-analytics-health.yml")
         analytics_job = analytics["jobs"]["cloudflare-analytics-health"]
