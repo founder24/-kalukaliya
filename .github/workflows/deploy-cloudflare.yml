@@ -54,6 +54,19 @@ on:
         required: false
         default: false
         type: boolean
+    secrets:
+      CUTOVER_STUDENT_TOKEN:
+        required: false
+      CUTOVER_STAFF_TOKEN:
+        required: false
+      CUTOVER_ADMIN_SESSION_TOKEN:
+        required: false
+      TRANSLATE_CRON_SECRET:
+        required: false
+      CF_ACCESS_CLIENT_ID:
+        required: false
+      CF_ACCESS_CLIENT_SECRET:
+        required: false
 permissions:
   contents: read
   actions: read
@@ -80,8 +93,14 @@ jobs:
       - name: Allow main and release tags on main history
         env:
           RELEASE_REF: ${{ github.ref }}
+          VALIDATE_AUTHENTICATED: ${{ inputs.validate_authenticated }}
+          VALIDATE_RESET_DELIVERY: ${{ inputs.validate_reset_delivery }}
         run: |
           set -euo pipefail
+          if [[ "$VALIDATE_RESET_DELIVERY" == "true" && "$VALIDATE_AUTHENTICATED" != "true" ]]; then
+            echo "::error::validate_reset_delivery requires validate_authenticated=true."
+            exit 1
+          fi
           if [[ "$RELEASE_REF" == "refs/heads/main" ]]; then
             echo "Authorized production release ref: ${RELEASE_REF}"
           elif [[ "$RELEASE_REF" =~ ^refs/tags/release/.+ ]] \
@@ -97,13 +116,74 @@ jobs:
             exit 1
           fi
 
+  preflight-reset-delivery-secrets:
+    name: Preflight password-reset validation secrets
+    runs-on: ubuntu-latest
+    needs: validate-release-ref
+    if: ${{ inputs.validate_reset_delivery == true }}
+    environment: cutover-reset-delivery
+    steps:
+      - name: Require disposable reset email and password
+        env:
+          CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+          CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "$CUTOVER_RESET_EMAIL" ]] || missing+=(CUTOVER_RESET_EMAIL)
+          [[ -n "$CUTOVER_RESET_PASSWORD" ]] || missing+=(CUTOVER_RESET_PASSWORD)
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Password-reset validation was requested, but these cutover-reset-delivery environment secrets are missing: ${missing[*]}."
+            exit 1
+          fi
+          if [[ "${CUTOVER_RESET_EMAIL,,}" != *cutover* ]]; then
+            echo "::error::CUTOVER_RESET_EMAIL must identify a disposable fixture by containing 'cutover'."
+            exit 1
+          fi
+
   verify:
     name: Cloudflare Configuration & Quality Gates
     runs-on: ubuntu-latest
-    needs: validate-release-ref
+    needs: [validate-release-ref, preflight-reset-delivery-secrets]
+    if: >-
+      always() &&
+      needs.validate-release-ref.result == 'success' &&
+      (needs.preflight-reset-delivery-secrets.result == 'success' ||
+       needs.preflight-reset-delivery-secrets.result == 'skipped')
     environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Require secrets for requested authenticated validations
+        env:
+          VALIDATE_AUTHENTICATED: ${{ inputs.validate_authenticated }}
+          VALIDATE_STAFF_AUTH: ${{ inputs.validate_staff_auth }}
+          CUTOVER_STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+          CUTOVER_STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
+          CUTOVER_ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
+          TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [[ "$VALIDATE_AUTHENTICATED" == "true" ]]; then
+            for name in CUTOVER_STUDENT_TOKEN CUTOVER_STAFF_TOKEN CUTOVER_ADMIN_SESSION_TOKEN \
+              TRANSLATE_CRON_SECRET CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+              [[ -n "${!name:-}" ]] || missing+=("$name")
+            done
+          fi
+          if [[ "$VALIDATE_STAFF_AUTH" == "true" ]]; then
+            for name in CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+              [[ -n "${!name:-}" ]] || missing+=("$name")
+            done
+          fi
+          if ((${#missing[@]} > 0)); then
+            printf -v missing_list '%s, ' "${missing[@]}"
+            echo "::error::Requested validation cannot run; configure these repository secrets for the reusable release workflow: ${missing_list%, }."
+            exit 1
+          fi
+          echo "All secrets required by the selected optional validations are available."
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -1269,6 +1349,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Confirm the newly delivered link exactly once
+        env:
+          CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+          CUTOVER_RESET_LINK: ${{ secrets.CUTOVER_RESET_LINK }}
+          CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
         run: |
           set -euo pipefail
+          missing=()
+          for name in CUTOVER_RESET_EMAIL CUTOVER_RESET_LINK CUTOVER_RESET_PASSWORD; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if ((${#missing[@]} > 0)); then
+            echo "::error::The password-reset validation is missing cutover-reset-delivery secrets: ${missing[*]}. The fresh reset link must be added after the request job sends its email."
+            exit 1
+          fi
           bash scripts/validate-cloudflare-api-cutover.sh

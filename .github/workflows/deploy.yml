@@ -54,3 +54,10 @@ jobs:
       validate_reset_delivery: ${{ inputs.validate_reset_delivery == true }}
       validate_live_chat: ${{ inputs.validate_live_chat == true }}
       validate_staff_auth: ${{ inputs.validate_staff_auth == true }}
+    secrets:
+      CUTOVER_STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
+      CUTOVER_STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
+      CUTOVER_ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}
+      TRANSLATE_CRON_SECRET: ${{ secrets.TRANSLATE_CRON_SECRET }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
