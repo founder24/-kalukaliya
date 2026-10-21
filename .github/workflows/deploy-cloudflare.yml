@@ -55,8 +55,9 @@ on:
         default: false
         type: boolean
     secrets:
-      # Deployment credentials are read from each job's protected environment;
-      # declarations keep the reusable-workflow contract explicit.
+      # The caller explicitly passes production credentials into this reusable
+      # workflow; every consuming job still uses the protected production
+      # environment before accessing them.
       ADMIN_JWT_SECRET:
         required: false
       CF_ACCOUNT_ID:
@@ -93,8 +94,8 @@ on:
         required: false
       CF_ACCESS_CLIENT_SECRET:
         required: false
-      # These are resolved only from the protected cutover-reset-delivery
-      # environment on the jobs that consume them, never from the caller.
+      # The caller must pass these names too. Their values are consumed only by
+      # jobs attached to the protected cutover-reset-delivery environment.
       CUTOVER_RESET_EMAIL:
         required: false
       CUTOVER_RESET_LINK:
