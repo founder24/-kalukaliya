@@ -207,7 +207,7 @@ class ProductionReleaseOptInTests(unittest.TestCase):
         self.assertEqual(RELEASE["jobs"]["deploy-api"].get("needs"), "verify")
 
     def test_release_secrets_are_environment_scoped_and_permissions_are_scoped(self) -> None:
-        optional_secrets = {
+        forwarded_secrets = {
             "CUTOVER_STUDENT_TOKEN",
             "CUTOVER_STAFF_TOKEN",
             "CUTOVER_ADMIN_SESSION_TOKEN",
@@ -215,13 +215,22 @@ class ProductionReleaseOptInTests(unittest.TestCase):
             "CF_ACCESS_CLIENT_ID",
             "CF_ACCESS_CLIENT_SECRET",
         }
+        environment_secrets = {
+            "CUTOVER_RESET_EMAIL",
+            "CUTOVER_RESET_LINK",
+            "CUTOVER_RESET_PASSWORD",
+        }
         call_secrets = RELEASE["on"]["workflow_call"]["secrets"]
         caller_secrets = ENTRYPOINT["jobs"]["cloudflare-release"]["secrets"]
-        self.assertEqual(set(call_secrets), optional_secrets)
-        for name in optional_secrets:
+        self.assertEqual(set(call_secrets), forwarded_secrets | environment_secrets)
+        for name in forwarded_secrets:
             with self.subTest(secret=name):
                 self.assertIs(call_secrets[name]["required"], False)
                 self.assertEqual(caller_secrets.get(name), f"${{{{ secrets.{name} }}}}")
+        for name in environment_secrets:
+            with self.subTest(environment_secret=name):
+                self.assertIs(call_secrets[name]["required"], False)
+                self.assertNotIn(name, caller_secrets)
         self.assertNotIn("inherit", str(caller_secrets).lower())
         release_text = (ROOT / ".github/workflows/deploy-cloudflare.yml").read_text(
             encoding="utf-8"
@@ -249,7 +258,7 @@ class ProductionReleaseOptInTests(unittest.TestCase):
             step for step in RELEASE["jobs"]["verify"]["steps"]
             if step.get("name") == "Require secrets for requested authenticated validations"
         )
-        for name in optional_secrets:
+        for name in forwarded_secrets:
             self.assertIn(name, preflight["env"])
         for name in (
             "CUTOVER_STUDENT_TOKEN",

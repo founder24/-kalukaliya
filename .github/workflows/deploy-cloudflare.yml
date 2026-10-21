@@ -67,6 +67,14 @@ on:
         required: false
       CF_ACCESS_CLIENT_SECRET:
         required: false
+      # These are resolved only from the protected cutover-reset-delivery
+      # environment on the jobs that consume them, never from the caller.
+      CUTOVER_RESET_EMAIL:
+        required: false
+      CUTOVER_RESET_LINK:
+        required: false
+      CUTOVER_RESET_PASSWORD:
+        required: false
 permissions:
   contents: read
   actions: read
