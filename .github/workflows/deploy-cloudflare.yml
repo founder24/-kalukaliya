@@ -55,6 +55,32 @@ on:
         default: false
         type: boolean
     secrets:
+      # Deployment credentials are read from each job's protected environment;
+      # declarations keep the reusable-workflow contract explicit.
+      ADMIN_JWT_SECRET:
+        required: false
+      CF_ACCOUNT_ID:
+        required: false
+      CF_API_TOKEN:
+        required: false
+      EDGE_SHARED_SECRET:
+        required: false
+      INDEXNOW_API_KEY:
+        required: false
+      INDEXNOW_INTERNAL_SECRET:
+        required: false
+      JWT_SECRET:
+        required: false
+      RESET_TOKEN_SECRET:
+        required: false
+      RESEND_API_KEY:
+        required: false
+      R2_PUBLIC_URL:
+        required: false
+      RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL:
+        required: false
+      VITE_BACKEND_URL:
+        required: false
       CUTOVER_STUDENT_TOKEN:
         required: false
       CUTOVER_STAFF_TOKEN:

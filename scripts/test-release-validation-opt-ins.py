@@ -207,7 +207,7 @@ class ProductionReleaseOptInTests(unittest.TestCase):
         self.assertEqual(RELEASE["jobs"]["deploy-api"].get("needs"), "verify")
 
     def test_release_secrets_are_environment_scoped_and_permissions_are_scoped(self) -> None:
-        forwarded_secrets = {
+        validation_secrets = {
             "CUTOVER_STUDENT_TOKEN",
             "CUTOVER_STAFF_TOKEN",
             "CUTOVER_ADMIN_SESSION_TOKEN",
@@ -215,7 +215,13 @@ class ProductionReleaseOptInTests(unittest.TestCase):
             "CF_ACCESS_CLIENT_ID",
             "CF_ACCESS_CLIENT_SECRET",
         }
+        forwarded_secrets = validation_secrets | {
+            "R2_PUBLIC_URL",
+            "RATE_LIMIT_CLEANUP_ALERT_WEBHOOK_URL",
+            "VITE_BACKEND_URL",
+        }
         environment_secrets = {
+            *PRODUCTION_RELEASE_SECRETS,
             "CUTOVER_RESET_EMAIL",
             "CUTOVER_RESET_LINK",
             "CUTOVER_RESET_PASSWORD",
@@ -258,16 +264,9 @@ class ProductionReleaseOptInTests(unittest.TestCase):
             step for step in RELEASE["jobs"]["verify"]["steps"]
             if step.get("name") == "Require secrets for requested authenticated validations"
         )
-        for name in forwarded_secrets:
+        for name in validation_secrets:
             self.assertIn(name, preflight["env"])
-        for name in (
-            "CUTOVER_STUDENT_TOKEN",
-            "CUTOVER_STAFF_TOKEN",
-            "CUTOVER_ADMIN_SESSION_TOKEN",
-            "TRANSLATE_CRON_SECRET",
-            "CF_ACCESS_CLIENT_ID",
-            "CF_ACCESS_CLIENT_SECRET",
-        ):
+        for name in validation_secrets:
             self.assertIn(name, preflight["run"])
 
         api_preflight = next(
