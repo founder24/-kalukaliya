@@ -57,6 +57,30 @@ describe('Pages worker route fallbacks', () => {
     expect(response.headers.get('x-source')).toBe('bot-render-not-found');
   });
 
+  it('returns 404 for a topic that is not reviewed and substantial', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      chapter_id: 'chapter-1',
+      published_topics: [{
+        topic_slug: 'short-topic',
+        title: 'Short topic',
+        definition_status: 'pending',
+        definition: 'A short definition.',
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+    const response = await pagesWorker.fetch(
+      new Request('https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/short-topic', {
+        headers: { Accept: 'text/html', 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
+      }),
+      { ASSETS: { fetch: async () => new Response('missing', { status: 404 }) } },
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('x-source')).toBe('bot-render-not-found');
+  });
+
   it('returns a real 404 for a missing subject instead of serving the SPA shell', async () => {
     const apiFetch = vi.fn(async () => new Response('{"detail":"Subject not found"}', {
       status: 404,

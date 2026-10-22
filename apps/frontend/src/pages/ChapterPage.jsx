@@ -942,12 +942,20 @@ export default function ChapterPage() {
   const activeDeepLinkTopic = topicSlugParam
     ? (publishedTopics.find((t) => (t.topic_slug || t.slug) === topicSlugParam || t.topic_slug_as === topicSlugParam) || null)
     : null;
-  const topicAlternateUrl = activeDeepLinkTopic?.definition_as
+  const activeTopicDefinitionAs = typeof activeDeepLinkTopic?.definition_as === 'string'
+    ? activeDeepLinkTopic.definition_as
+    : typeof activeDeepLinkTopic?.content_as === 'string' ? activeDeepLinkTopic.content_as : '';
+  const hasCompleteTopicAs = Boolean(
+    typeof activeDeepLinkTopic?.title_as === 'string' && activeDeepLinkTopic.title_as.trim() &&
+    typeof activeDeepLinkTopic?.topic_slug_as === 'string' && activeDeepLinkTopic.topic_slug_as.trim() &&
+    activeTopicDefinitionAs.trim().split(/\s+/).filter(Boolean).length >= 40
+  );
+  const topicAlternateUrl = hasCompleteTopicAs
     ? `https://syrabit.ai${isAssamesePath
       ? routerLocation.pathname
           .replace(/^\/as\//, "/")
           .replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug}`)
-      : `/as${routerLocation.pathname.replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug_as || activeDeepLinkTopic.topic_slug}`)}`
+      : `/as${routerLocation.pathname.replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug_as}`)}`
     }`
     : undefined;
   const readMins = data?.word_count ? Math.max(1, Math.ceil(data.word_count / 200)) : null;
@@ -1159,14 +1167,17 @@ export default function ChapterPage() {
           type="article"
           section={subjectName}
           pageType="chapter"
-          pageData={{ data: { ...data, published_topics: [activeDeepLinkTopic] }, basePath }}
+          pageData={{
+            data: { ...data, published_topics: [activeDeepLinkTopic] },
+            basePath: isAssamesePath ? asBasePath : basePath,
+          }}
           hasAssamese={Boolean(activeDeepLinkTopic.definition_as)}
           language={isAssamesePath ? "as" : "en"}
           alternateUrl={topicAlternateUrl}
         />
         <article className="mx-auto max-w-3xl">
           <nav aria-label="Breadcrumb" className="mb-6 text-sm text-muted-foreground">
-            <Link to={basePath}>{subjectName}</Link>
+            <Link to={isAssamesePath ? asBasePath : basePath}>{subjectName}</Link>
             <span className="mx-2">/</span>
             <Link to={_chapterPath}>{chapterTitle}</Link>
           </nav>
@@ -1464,6 +1475,13 @@ export default function ChapterPage() {
                             key={t.id || tSlug}
                             topic={t}
                             chapterUrl={chapterUrl}
+                            topicUrl={isAssamesePath
+                              ? (typeof t.topic_slug_as === 'string' && typeof t.title_as === 'string' && typeof t.definition_as === 'string' && t.definition_as.trim().split(/\s+/).filter(Boolean).length >= 40
+                                ? `${_chapterPath}/topic/${encodeURIComponent(t.topic_slug_as)}`
+                                : undefined)
+                              : (t.topic_slug || t.slug
+                                ? `${_chapterPath}/topic/${encodeURIComponent(t.topic_slug || t.slug)}`
+                                : undefined)}
                             fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}
                           />
                         );
@@ -1542,6 +1560,42 @@ export default function ChapterPage() {
                 </div>
               )}
             </div>
+
+            {publishedTopics.length > 0 && (
+              <nav
+                className="my-8 rounded-xl border border-border/50 p-4"
+                aria-label={contentLang === 'as' ? 'এই অধ্যায়ৰ বিষয়সমূহ' : 'Topics in this chapter'}
+                data-chapter-topic-links
+              >
+                <h2 className="mb-3 text-base font-semibold">
+                  {contentLang === 'as' ? 'এই অধ্যায়ৰ বিষয়সমূহ' : 'Topics in this chapter'}
+                </h2>
+                <ul className="flex flex-wrap gap-x-4 gap-y-2">
+                  {publishedTopics.map((topic) => {
+                    const localized = isAssamesePath;
+                    const slug = localized ? topic.topic_slug_as : (topic.topic_slug || topic.slug);
+                    const title = localized ? topic.title_as : topic.title;
+                    const definition = localized ? topic.definition_as : topic.definition;
+                    if (
+                      typeof slug !== 'string' ||
+                      typeof title !== 'string' ||
+                      !title.trim() ||
+                      (localized && (typeof definition !== 'string' || definition.trim().split(/\s+/).filter(Boolean).length < 40))
+                    ) return null;
+                    return (
+                      <li key={topic.topic_id || topic.id || slug}>
+                        <Link
+                          className="text-sm text-primary underline underline-offset-2"
+                          to={`${_chapterPath}/topic/${encodeURIComponent(slug)}`}
+                        >
+                          {title}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
+            )}
 
             {/* Topical-mapping graph — related topic links at bottom */}
             <ChapterTopicGraph

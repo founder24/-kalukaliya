@@ -13,7 +13,12 @@ const chapterRows = [{
   title: 'Newton’s Laws',
   chapter_slug: 'newtons-laws',
   notes_en: 'A complete explanation of Newton’s laws of motion for students.',
-  published_topics: '[{"topic_slug":"first-law"}]',
+  published_topics: JSON.stringify([{
+    topic_slug: 'first-law',
+    title: 'Newton’s first law',
+    definition_status: 'ok',
+    definition: Array.from({ length: 40 }, (_, i) => `principle${i}`).join(' '),
+  }]),
   updated_at: 1_735_689_600,
   created_at: 1_735_603_200,
   subject_name: 'Physics',
@@ -339,6 +344,19 @@ describe('Worker-native site-operation routes', () => {
     await expect(llms.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
   });
 
+  it('serves Content-Signal as an active directive from the API robots endpoint', async () => {
+    const response = await api.fetch(request('/api/v1/seo/robots.txt'), testEnv());
+    const body = await response.text();
+    const activeSignals = body.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^Content-Signal:/i.test(line));
+
+    expect(response.status).toBe(200);
+    expect(activeSignals).toEqual([
+      'Content-Signal: search=yes, ai-input=yes, ai-train=no',
+    ]);
+  });
+
   it('emits canonical, unique sitemap URLs and omits empty topic maps', async () => {
     const duplicateRows = [
       ...chapterRows,
@@ -389,20 +407,54 @@ describe('Worker-native site-operation routes', () => {
     expect(await emptyTopicIndex.text()).not.toContain('sitemap-topics.xml');
   });
 
+  it('sitemaps only reviewed, substantial, explicitly slugged, unique English topics', async () => {
+    const substantial = Array.from({ length: 40 }, (_, i) => `concept${i}`).join(' ');
+    const row = {
+      ...chapterRows[0]!,
+      published_topics: JSON.stringify([
+        { topic_slug: 'valid-topic', title: 'Valid topic', definition_status: 'ok', definition: substantial },
+        { topic_slug: 'duplicate-topic', title: 'Duplicate topic', definition_status: 'ok', definition: substantial },
+        { topic_slug: 'short-topic', title: 'Short topic', definition_status: 'ok', definition: 'Only a few words.' },
+        { topic_slug: 'pending-topic', title: 'Pending topic', definition_status: 'pending', definition: substantial },
+        { title: 'Slug missing', definition_status: 'ok', definition: substantial },
+      ]),
+    };
+    const env = {
+      ...testEnv(),
+      DB: { prepare: () => ({ all: async () => ({ results: [row] }) }) },
+    } as unknown as Env;
+    const response = await api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env);
+    const xml = await response.text();
+
+    expect(xml).toContain('/topic/valid-topic');
+    expect(xml).not.toContain('/topic/duplicate-topic');
+    expect(xml).not.toContain('/topic/short-topic');
+    expect(xml).not.toContain('/topic/pending-topic');
+    expect(xml).not.toContain('/topic/Slug');
+    expect((xml.match(/<loc>/g) ?? []).length).toBe(1);
+  });
+
   it('includes only complete 40-word Assamese topic translations in the sitemap', async () => {
     const longDefinition = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+    const shortTranslationSource = Array.from({ length: 40 }, (_, i) => `other${i}`).join(' ');
+    const missingTranslationSource = Array.from({ length: 40 }, (_, i) => `third${i}`).join(' ');
     const row = {
       ...chapterRows[0]!,
       published_topics: JSON.stringify([
         {
           topic_slug: 'first-law',
-          status: 'published',
+          title: 'First law',
+          definition_status: 'ok',
+          definition: longDefinition,
           title_as: 'প্ৰথম নিয়ম',
           topic_slug_as: 'প্ৰথম-নিয়ম',
           definition_as: longDefinition,
         },
         {
           topic_slug: 'short-topic',
+          title: 'Short topic',
+          definition_status: 'ok',
+          definition: shortTranslationSource,
           status: 'published',
           title_as: 'চুটি বিষয়',
           topic_slug_as: 'short-assamese',
@@ -410,6 +462,9 @@ describe('Worker-native site-operation routes', () => {
         },
         {
           topic_slug: 'missing-slug',
+          title: 'Missing Assamese slug',
+          definition_status: 'ok',
+          definition: missingTranslationSource,
           status: 'published',
           title_as: 'শ্লাগ নাই',
           definition_as: longDefinition,

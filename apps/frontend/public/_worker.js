@@ -328,6 +328,25 @@ function parseStudyRoute(pathname) {
   return { board, classSlug, streamSlug, subjectSlug, chapterSlug, topicSlug, isAssamese };
 }
 
+function topicWordCount(value) {
+  return typeof value === "string" ? value.trim().split(/\s+/).filter(Boolean).length : 0;
+}
+
+function isIndexableTopic(topic, isAssamese) {
+  if (!topic || topic.definition_status !== "ok") return false;
+  const englishSlug = topic.topic_slug || topic.slug;
+  const englishTitle = topic.title || topic.name;
+  const englishDefinition = topic.definition || topic.content;
+  if (!englishSlug || !englishTitle || topicWordCount(englishDefinition) < 40) return false;
+  if (!isAssamese) return true;
+  const definitionAs = topic.definition_as || topic.content_as;
+  return Boolean(
+    typeof topic.title_as === "string" && topic.title_as.trim() &&
+    typeof topic.topic_slug_as === "string" && topic.topic_slug_as.trim() &&
+    topicWordCount(definitionAs) >= 40,
+  );
+}
+
 async function resolveStudyRoute(request, env, parsed) {
   const backend = (env && env.API_BACKEND_URL) || DEFAULT_BACKEND;
   if (parsed.type === "subject") {
@@ -368,12 +387,10 @@ async function resolveStudyRoute(request, env, parsed) {
         ? payload.published_topics
         : [];
       const topicExists = topics.some((topic) =>
-        topic && (
-          topic.topic_slug === parsed.topicSlug ||
-          topic.slug === parsed.topicSlug ||
-          topic.topic_slug_as === parsed.topicSlug
-        ) &&
-        (!topic.definition_status || topic.definition_status === "ok" || topic.status === "published")
+        isIndexableTopic(topic, parsed.isAssamese) &&
+        (parsed.isAssamese
+          ? topic.topic_slug_as === parsed.topicSlug
+          : (topic.topic_slug || topic.slug) === parsed.topicSlug)
       );
       if (!topicExists) return { kind: "not-found" };
     }

@@ -159,6 +159,7 @@ function validateRenderedPage({ distDir, filename, loc }) {
   const canonicalHref = canonicalTag ? attribute(canonicalTag, "href") : null;
   const expectedCanonical = `${pageUrl.origin}${route}`;
   const expectedMarkerPath = route;
+  const isTopicPage = /\/topic\/[^/]+$/i.test(route);
 
   if (!title) issues.push(`${loc}: rendered title is missing`);
   if (GENERIC_SHELL.test(title)) issues.push(`${loc}: rendered title is the generic SPA shell`);
@@ -188,6 +189,31 @@ function validateRenderedPage({ distDir, filename, loc }) {
   const hydrationKind = isSubjectSitemap ? "subject" : "chapter";
   if (!new RegExp(`\\bdata-hydrate=["']${hydrationKind}["']`, "i").test(html)) {
     issues.push(`${loc}: prerendered ${hydrationKind} hydration marker is missing`);
+  }
+  if (isTopicPage) {
+    const topicTitle = h1;
+    const htmlLang = html.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1]?.toLowerCase();
+    const expectedLang = route.startsWith("/as/") ? "as" : "en";
+    if (htmlLang !== expectedLang) {
+      issues.push(`${loc}: topic language must be ${expectedLang} (got ${htmlLang || "missing"})`);
+    }
+    if (!topicTitle || !title.startsWith(topicTitle)) {
+      issues.push(`${loc}: topic title and H1 do not identify the same topic`);
+    }
+    const visibleText = textContent(rootContent || "");
+    if (visibleText.split(/\s+/).filter(Boolean).length < 40) {
+      issues.push(`${loc}: topic page does not contain substantial rendered content (minimum 40 words)`);
+    }
+    const chapterPath = route.replace(/\/topic\/[^/]+$/i, "");
+    const chapterLink = [...(rootContent || "").matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>/gi)]
+      .some((match) => {
+        try {
+          return normalizedPathname(new URL(match[1], pageUrl.origin).pathname) === chapterPath;
+        } catch {
+          return false;
+        }
+      });
+    if (!chapterLink) issues.push(`${loc}: topic page does not link to its parent chapter`);
   }
 
   return issues;

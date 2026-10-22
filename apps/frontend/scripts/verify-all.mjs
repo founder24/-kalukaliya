@@ -141,11 +141,13 @@ const robotsPath = path.join(distDir, "robots.txt");
 if (!fs.existsSync(robotsPath)) {
   fail("missing static robots.txt fallback");
 } else if (
-  !fs
-    .readFileSync(robotsPath, "utf-8")
-    .includes("Content-Signal: search=yes, ai-input=yes, ai-train=no")
+  fs.readFileSync(robotsPath, "utf-8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^Content-Signal:/i.test(line))
+    .join("\n") !== "Content-Signal: search=yes, ai-input=yes, ai-train=no"
 ) {
-  fail("robots.txt must publish the documented Content-Signal policy");
+  fail("robots.txt must contain one active Content-Signal directive with the documented policy");
 }
 
 const apiCatalogPath = path.join(distDir, ".well-known", "api-catalog");

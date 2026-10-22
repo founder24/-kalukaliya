@@ -6,6 +6,7 @@
  */
 
 import { Hono } from 'hono';
+import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
 import type { Env } from '../types';
 
 export const seoRouter = new Hono<{ Bindings: Env }>();
@@ -52,34 +53,15 @@ function topicEntries(rows: ContentUrl[]): string[] {
   const entries = new Map<string, string>();
   for (const row of rows) {
     try {
-      const topics = JSON.parse(row.publishedTopics ?? '[]') as Array<{
-        slug?: string;
-        topic_slug?: string;
-        title_as?: string;
-        topic_slug_as?: string;
-        definition_as?: string;
-        status?: string;
-        definition_status?: string;
-      }>;
+      const topics = indexablePublishedTopics(JSON.parse(row.publishedTopics ?? '[]'));
       for (const topic of topics) {
-        const slug = topic.topic_slug ?? topic.slug;
-        if (!slug) continue;
+        const slug = String(topic.topic_slug);
         const location = `${contentUrl(row)}/topic/${encodeURIComponent(slug)}`;
         if (!entries.has(location)) {
           entries.set(location, urlEntry(location, date(row.updatedAt), '0.6'));
         }
-        const titleAs = topic.title_as?.trim() ?? '';
-        const slugAs = topic.topic_slug_as?.trim() ?? '';
-        const definitionAs = topic.definition_as?.trim() ?? '';
-        const isReviewed = topic.status === 'published'
-          || topic.definition_status === 'ok'
-          || topic.definition_status === 'approved';
-        if (
-          isReviewed &&
-          titleAs &&
-          slugAs &&
-          definitionAs.split(/\s+/).filter(Boolean).length >= 40
-        ) {
+        if (completeAssameseTopic(topic)) {
+          const slugAs = String(topic.topic_slug_as).trim();
           const localizedLocation = `${SITE_URL}/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}/topic/${encodeURIComponent(slugAs)}`;
           if (!entries.has(localizedLocation)) {
             entries.set(localizedLocation, urlEntry(localizedLocation, date(row.updatedAt), '0.6'));
@@ -216,7 +198,7 @@ Crawl-delay: 0
 # search=yes: content is intended for search indexing
 # ai-input=yes: content may be used as grounding for AI-generated answers
 # ai-train=no: content must NOT be used for model training
-# Content-Signal: search=yes, ai-input=yes, ai-train=no
+Content-Signal: search=yes, ai-input=yes, ai-train=no
 
 # --- AI training crawlers: explicitly disallowed. ---
 User-agent: GPTBot
