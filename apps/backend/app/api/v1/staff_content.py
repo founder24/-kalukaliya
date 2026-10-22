@@ -337,6 +337,9 @@ async def staff_create_chapter(
                 topic_slug=topic_slug,
                 definition=raw_topic.get("definition"),
                 definition_status=raw_topic.get("definition_status", "pending"),
+                title_as=(raw_topic.get("title_as") or "").strip() or None,
+                definition_as=raw_topic.get("definition_as"),
+                topic_slug_as=(raw_topic.get("topic_slug_as") or "").strip() or None,
             ))
 
     now = datetime.now(timezone.utc)
@@ -630,6 +633,9 @@ async def staff_update_chapter(
                     topic_slug=slug,
                     definition=raw.get("definition"),
                     definition_status=raw.get("definition_status", "pending"),
+                    title_as=(raw.get("title_as") or "").strip() or None,
+                    definition_as=raw.get("definition_as"),
+                    topic_slug_as=(raw.get("topic_slug_as") or "").strip() or None,
                 )
             )
         chapter.published_topics = valid_topics

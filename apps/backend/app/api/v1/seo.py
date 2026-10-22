@@ -9,12 +9,14 @@ import logging
 import re as _re
 import time
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter
 from fastapi.responses import Response
 
 from app.models.knowledge import KnowledgeObject
 from app.models.content import Board, Class, Stream, Subject, Chapter as ContentChapter
+from app.services.topic_publication import indexable_topics, is_indexable_assamese_topic
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +49,31 @@ def _slugify_seo(text: str) -> str:
     """Convert text to a URL-safe slug (mirrors public_content._slugify)."""
     return _re.sub(r"-+", "-", _re.sub(r"[^a-z0-9]+", "-", text.lower())).strip("-")
 
-
 async def _build_chapter_url_map() -> dict:
-    """Load all published chapters with their full path context.
+    """Load content-bearing chapters with their full path context.
 
     Hierarchy: Chapter.subject_id → Subject.stream_id → Stream.class_id
                → Class.board_id → Board
 
     Returns dict of chapter_id (str) → (canonical_url: str, chapter: ContentChapter).
-    Only chapters where notes_generated=True are included.
+    Match the public chapter API's notes_generated semantics: include legacy
+    chapters when user-facing notes exist even if the legacy flag is false.
     """
+    public_content_filter = {
+        "$or": [
+            {"notes_generated": True},
+            *[
+                {field: {"$exists": True, "$nin": [None, ""]}}
+                for field in ("notes_en", "content_en", "notes_as", "content_as")
+            ],
+        ]
+    }
     boards, classes, streams, subjects, chapters = await asyncio.gather(
         Board.find().to_list(length=None),
         Class.find().to_list(length=None),
         Stream.find().to_list(length=None),
         Subject.find().to_list(length=None),
-        ContentChapter.find({"notes_generated": True}).to_list(length=None),
+        ContentChapter.find(public_content_filter).to_list(length=None),
     )
     board_map = {str(b.id): b for b in boards}
     class_map = {str(c.id): c for c in classes}
@@ -454,7 +465,7 @@ async def sitemap_topics():
         urls = []
 
         for _ch_id, (ch_url, ch) in chapter_map.items():
-            for topic in (ch.published_topics or []):
+            for topic in indexable_topics(ch.published_topics):
                 topic_slug = getattr(topic, "topic_slug", None) or ""
                 if not topic_slug:
                     continue
@@ -472,6 +483,21 @@ async def sitemap_topics():
                     f"    <priority>0.6</priority>\n"
                     f"  </url>"
                 )
+                if is_indexable_assamese_topic(topic):
+                    topic_slug_as = getattr(topic, "topic_slug_as", None) or ""
+                    as_loc = (
+                        f"{BASE_URL}/as{ch_url.removeprefix(BASE_URL)}"
+                        f"/topic/{quote(topic_slug_as, safe='-')}"
+                    )
+                    if as_loc not in seen_urls:
+                        seen_urls.add(as_loc)
+                        urls.append(
+                            f"  <url>\n"
+                            f"    <loc>{as_loc}</loc>{lastmod}\n"
+                            f"    <changefreq>weekly</changefreq>\n"
+                            f"    <priority>0.6</priority>\n"
+                            f"  </url>"
+                        )
 
         xml_content = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'

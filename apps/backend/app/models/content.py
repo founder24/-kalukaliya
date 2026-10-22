@@ -81,6 +81,9 @@ class Topic(BaseModel):
     topic_slug: str
     definition_status: str = "pending"
     wikidata_uri: Optional[str] = None
+    title_as: Optional[str] = None
+    definition_as: Optional[str] = None
+    topic_slug_as: Optional[str] = None
 
 
 class Chapter(Document):
