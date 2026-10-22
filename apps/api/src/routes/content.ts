@@ -375,6 +375,17 @@ contentRouter.get('/subjects/:subjectId/topic-index', async (c) => {
       const slug = String(topic.topic_slug);
       const topicId = String(topic.topic_id ?? topic.id ?? slug);
       const chapterUrlAs = `/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}`;
+      if (topic.language === 'Assamese') {
+        return {
+          topic_id: topicId,
+          language: 'Assamese',
+          title_as: topic.title,
+          topic_slug_as: slug,
+          definition_as: topic.definition,
+          chapter_url_as: chapterUrlAs,
+          deep_link_path_as: `${chapterUrlAs}/topic/${encodeURIComponent(slug)}`,
+        };
+      }
       return {
         topic_id: topicId,
         topic_slug: slug,
