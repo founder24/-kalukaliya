@@ -1216,10 +1216,14 @@ async function main() {
           const locales = [
             { path: `${chapterUrl}/topic/${topic.topic_slug}`, title: topic.title, definition: topic.definition },
           ];
-          if (topic.title_as && topic.definition_as && topic.definition_as.trim().split(/\s+/).length >= 40) {
+          if (
+            topic.title_as?.trim() &&
+            topic.topic_slug_as?.trim() &&
+            topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40
+          ) {
             locales.push({
-              path: `/as${chapterUrl}/topic/${topic.topic_slug_as || topic.topic_slug}`,
-              title: topic.title_as || topic.title,
+              path: `/as${chapterUrl}/topic/${topic.topic_slug_as}`,
+              title: topic.title_as,
               definition: topic.definition_as,
             });
           }
@@ -1240,8 +1244,8 @@ async function main() {
                   language: localized.path.startsWith("/as/") ? "as" : "en",
                   alternateUrl: localized.path.startsWith("/as/")
                     ? `https://syrabit.ai${localized.path.slice(3)}`
-                    : (topic.title_as && topic.definition_as && topic.topic_slug
-                      ? `https://syrabit.ai/as${chapterUrl}/topic/${topic.topic_slug_as || topic.topic_slug}`
+                    : (topic.title_as?.trim() && topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40 && topic.topic_slug_as?.trim()
+                      ? `https://syrabit.ai/as${chapterUrl}/topic/${topic.topic_slug_as}`
                       : null),
                 },
               });

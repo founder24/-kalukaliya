@@ -7,7 +7,7 @@ import { SITEMAP_ENDPOINTS } from "../../scripts/generate-static-data.mjs";
 
 const tempDirs = [];
 
-function createDist({ genericShell = false, omitPage = false } = {}) {
+function createDist({ genericShell = false, omitPage = false, malformedTopic = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "syrabit-sitemap-html-"));
   tempDirs.push(root);
   fs.writeFileSync(
@@ -49,11 +49,16 @@ function createDist({ genericShell = false, omitPage = false } = {}) {
     <body><noscript><h1>${shellTitle}</h1></noscript>
       <div id="root" data-hydrate="chapter"><main><h1>${genericShell ? shellTitle : "Laws of Motion"}</h1></main></div>
     </body></html>`;
-  const topicHtml = `<html><head><title>Inertia — Laws of Motion | Physics Notes</title>
+  const topicBody = malformedTopic
+    ? `<h1>Inertia</h1><p>Short.</p>`
+    : `<h1>Inertia</h1>
+        <p>Inertia is the property of matter by which an object resists a change in its state of rest or motion. The amount of inertia depends on the mass of the object. A heavier object has greater inertia than a lighter object. This concept explains why force is needed to change motion.</p>
+        <a href="/ahsec/hs-1st-year/physics/laws-of-motion">Read the chapter</a>`;
+  const topicHtml = `<html lang="${malformedTopic ? 'as' : 'en'}"><head><title>Inertia — Laws of Motion | Physics Notes</title>
     <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia">
     <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"></head>
     <body><noscript><h1>${shellTitle}</h1></noscript>
-      <div id="root" data-hydrate="chapter"><main><h1>Inertia</h1></main></div>
+      <div id="root" data-hydrate="chapter"><main>${topicBody}</main></div>
     </body></html>`;
 
   fs.mkdirSync(path.join(root, "ahsec/hs-1st-year/physics"), { recursive: true });
@@ -123,5 +128,15 @@ describe("sitemap rendered HTML release check", () => {
     expect(
       result.errors.some((error) => error.includes("generic SPA shell")),
     ).toBe(true);
+  });
+
+  it("fails when a topic snapshot is thin, mislabeled, or lacks its parent chapter link", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({ malformedTopic: true }),
+    });
+
+    expect(result.errors.some((error) => error.includes("topic language"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("substantial rendered content"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("parent chapter"))).toBe(true);
   });
 });
