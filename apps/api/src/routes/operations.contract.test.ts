@@ -434,6 +434,29 @@ describe('Worker-native site-operation routes', () => {
     expect((xml.match(/<loc>/g) ?? []).length).toBe(1);
   });
 
+  it('publishes standalone Assamese topics only under the /as/ canonical route', async () => {
+    const definition = Array.from({ length: 40 }, (_, i) => `assamese${i}`).join(' ');
+    const row = {
+      ...chapterRows[0]!,
+      published_topics: JSON.stringify([{
+        language: 'Assamese',
+        topic_slug: 'অসমীয়া-বিষয়',
+        title: 'অসমীয়া বিষয়',
+        definition,
+        title_as: 'অসমীয়া বিষয়',
+        topic_slug_as: 'অসমীয়া-বিষয়',
+        definition_as: definition,
+        definition_status: 'ok',
+      }]),
+    };
+    const env = { ...testEnv(), DB: { prepare: () => ({ all: async () => ({ results: [row] }) }) } } as unknown as Env;
+    const response = await api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env);
+    const xml = await response.text();
+    expect(xml).toContain(`/as/ahsec/class-12/physics/newtons-laws/topic/${encodeURIComponent('অসমীয়া-বিষয়')}`);
+    expect(xml).not.toContain('<loc>https://syrabit.ai/ahsec/class-12/physics/newtons-laws/topic/');
+    expect((xml.match(/<loc>/g) ?? []).length).toBe(1);
+  });
+
   it('includes only complete 40-word Assamese topic translations in the sitemap', async () => {
     const longDefinition = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
     const shortTranslationSource = Array.from({ length: 40 }, (_, i) => `other${i}`).join(' ');

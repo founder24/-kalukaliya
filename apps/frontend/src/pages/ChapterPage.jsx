@@ -940,7 +940,9 @@ export default function ChapterPage() {
   // Look up the active topic doc for the deep-link route so we can
   // shape topic-specific title/description without an extra fetch.
   const activeDeepLinkTopic = topicSlugParam
-    ? (publishedTopics.find((t) => (t.topic_slug || t.slug) === topicSlugParam || t.topic_slug_as === topicSlugParam) || null)
+    ? (publishedTopics.find((t) => isAssamesePath
+      ? (t.topic_slug_as === topicSlugParam || (t.language === 'Assamese' && t.topic_slug === topicSlugParam))
+      : (t.language !== 'Assamese' && (t.topic_slug || t.slug) === topicSlugParam)) || null)
     : null;
   const activeTopicDefinitionAs = typeof activeDeepLinkTopic?.definition_as === 'string'
     ? activeDeepLinkTopic.definition_as
@@ -1571,7 +1573,9 @@ export default function ChapterPage() {
                   {contentLang === 'as' ? 'এই অধ্যায়ৰ বিষয়সমূহ' : 'Topics in this chapter'}
                 </h2>
                 <ul className="flex flex-wrap gap-x-4 gap-y-2">
-                  {publishedTopics.map((topic) => {
+                  {publishedTopics
+                    .filter((topic) => isAssamesePath || topic.language !== 'Assamese')
+                    .map((topic) => {
                     const localized = isAssamesePath;
                     const slug = localized ? topic.topic_slug_as : (topic.topic_slug || topic.slug);
                     const title = localized ? topic.title_as : topic.title;
