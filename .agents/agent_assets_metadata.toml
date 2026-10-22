@@ -105,3 +105,17 @@ mtime_ms = 1792700596563
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/dbcee620-1fde-44b4-8822-71b6c7f53d0c/6a850325-0098-4ea0-adc1-1c85cf051052"
 storage_version_token = "1792700648625657"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "xB5Bcg6mAN7G-64WHKWZl"
+uri = "file://generated-artifacts/topic-candidates-reviewed-draft.csv"
+type = "table"
+title = "Reviewed topic candidates (English and Assamese)"
+description = "710 source-backed draft topic rows across 98 chapters. Each row includes language, chapter lineage, a 40–150 word definition, and pending status. These are review candidates, not approved or published content."
+logical_id = "7bc8331a-25d9-44bb-b0ff-a1b882c27d17"
+content_hash = "sha256:0fbbbe8475c10d854339dabfd93aed0d625a01ab6b5638ef62ec9c3c34a52d61"
+size = 592161
+mtime_ms = 1792702000236
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/7bc8331a-25d9-44bb-b0ff-a1b882c27d17/38f99a8d-785a-4c4c-b040-3de50f91bfe8"
+storage_version_token = "1792702113284971"
+content_type = "text/csv"
