@@ -57,11 +57,12 @@ function topicEntries(rows: ContentUrl[]): string[] {
       for (const topic of topics) {
         const slug = String(topic.topic_slug);
         const location = `${contentUrl(row)}/topic/${encodeURIComponent(slug)}`;
-        if (!entries.has(location)) {
+        const assameseOnly = topic.language === 'Assamese';
+        if (!assameseOnly && !entries.has(location)) {
           entries.set(location, urlEntry(location, date(row.updatedAt), '0.6'));
         }
-        if (completeAssameseTopic(topic)) {
-          const slugAs = String(topic.topic_slug_as).trim();
+        if (assameseOnly || completeAssameseTopic(topic)) {
+          const slugAs = String(topic.topic_slug_as ?? slug).trim();
           const localizedLocation = `${SITE_URL}/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}/topic/${encodeURIComponent(slugAs)}`;
           if (!entries.has(localizedLocation)) {
             entries.set(localizedLocation, urlEntry(localizedLocation, date(row.updatedAt), '0.6'));
