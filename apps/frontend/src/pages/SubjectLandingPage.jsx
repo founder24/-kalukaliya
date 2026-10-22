@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useLocation, Link } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import {
   BookOpen, ChevronRight, ChevronDown, ExternalLink, Home, Sparkles,
@@ -18,6 +18,8 @@ import { siblingsAsRelated } from '@/utils/siblingChapter';
 
 export default function SubjectLandingPage() {
   const { board, classSlug, subjectSlug } = useParams();
+  const location = useLocation();
+  const isAssamese = location.pathname.startsWith('/as/');
   const [searchQuery, setSearchQuery] = useState('');
   const { contentLang } = useContentLang();
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useLocation, Link, useSearchParams } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import TopicAnswerCard from '@/components/chapter/TopicAnswerCard';
@@ -239,6 +239,7 @@ function readChapterPreload(board, classSlug, subjectSlug, chapterSlug) {
 
 export default function ChapterPage() {
   const params = useParams();
+  const routerLocation = useLocation();
   const board = params.board;
   const classSlug = params.classSlug;
   const hasStreamInUrl = !!(params.streamSlug && params.chapterSlug);
