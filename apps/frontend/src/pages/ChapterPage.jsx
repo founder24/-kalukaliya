@@ -255,13 +255,22 @@ export default function ChapterPage() {
   // chapter URL with the topic anchor, and shapes the SEO title /
   // description around the topic for AI-citation surfaces.
   const topicSlugParam = (() => {
-    const slug = params.topicSlug || null;
+    const slug =
+      params.topicSlug ||
+      routerLocation.pathname.match(/\/topic\/([^/]+)$/)?.[1] ||
+      null;
     if (!slug) return null;
-    try {
-      return decodeURIComponent(slug);
-    } catch {
-      return slug;
+    let normalizedSlug = slug;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const decoded = decodeURIComponent(normalizedSlug);
+        if (decoded === normalizedSlug) break;
+        normalizedSlug = decoded;
+      } catch {
+        break;
+      }
     }
+    return normalizedSlug;
   })();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialChapterData = useMemo(
