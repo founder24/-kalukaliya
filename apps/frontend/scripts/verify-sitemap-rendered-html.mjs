@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { decodeHtmlEntities } from "./_html-text.mjs";
+import { decodeSitemapPath } from "./_topic-sitemap-path.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIST_DIR = path.resolve(__dirname, "..", "dist");
@@ -20,7 +21,7 @@ function sitemapLocs(xml) {
 
 function normalizedPathname(pathname) {
   if (!pathname || pathname === "/") return "/";
-  return pathname.replace(/\/+$/, "");
+  return decodeSitemapPath(pathname).replace(/\/+$/, "");
 }
 
 function attribute(tag, name) {
