@@ -254,7 +254,15 @@ export default function ChapterPage() {
   // route also overrides PageMeta's canonical to point back at the
   // chapter URL with the topic anchor, and shapes the SEO title /
   // description around the topic for AI-citation surfaces.
-  const topicSlugParam = params.topicSlug || null;
+  const topicSlugParam = (() => {
+    const slug = params.topicSlug || null;
+    if (!slug) return null;
+    try {
+      return decodeURIComponent(slug);
+    } catch {
+      return slug;
+    }
+  })();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialChapterData = useMemo(
     () => readChapterPreload(board, classSlug, subjectSlug, chapterSlug),
