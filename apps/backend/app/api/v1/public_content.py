@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.config import settings
 from app.models.content import Board, Chapter, Class, Stream, Subject, QuestionPaper
+from app.services.topic_publication import flex_id_query_values, indexable_topics
 
 logger = logging.getLogger(__name__)
 
@@ -619,6 +620,31 @@ async def resolve_subject(
         raise HTTPException(status_code=500, detail="Failed to resolve subject")
 
 
+@router.get("/subjects/{subject_id}/topic-index")
+async def get_public_topic_index(subject_id: str):
+    """Public, reviewed topic index used by subject landing pages."""
+    chapters = await Chapter.find({
+        "subject_id": {"$in": flex_id_query_values(subject_id)}
+    }).to_list(length=None)
+    topics = []
+    for chapter in chapters:
+        for topic in indexable_topics(chapter.published_topics):
+            topics.append({
+                "chapter_id": str(chapter.id),
+                "chapter_title": chapter.title,
+                "chapter_number": chapter.chapter_number,
+                "chapter_slug": chapter.slug,
+                "topic_id": topic.id,
+                "title": topic.title,
+                "title_as": topic.title_as,
+                "definition": topic.definition,
+                "definition_as": topic.definition_as,
+                "topic_slug": topic.topic_slug,
+                "topic_slug_as": topic.topic_slug_as,
+            })
+    return {"subject_id": subject_id, "topics": topics, "total_topics": len(topics)}
+
+
 @router.get("/subjects/{subject_id}")
 async def get_subject_by_id(
     subject_id: str,
@@ -1015,23 +1041,68 @@ async def get_faq_jsonld(chapter_id: str):
 
 
 @router.get("/chapters/{chapter_id}/published-topics")
-async def get_published_topics(chapter_id: str):
+async def get_published_topics(chapter_id: str, lang: str = Query("en", pattern="^(en|as)$")):
     """Get published topics for a chapter (no auth required)."""
     chapter = await Chapter.get(PydanticObjectId(chapter_id))
     if not chapter:
         raise HTTPException(status_code=404, detail="Chapter not found")
 
+    topics = indexable_topics(chapter.published_topics)
+    if lang == "as":
+        topics = [
+            topic for topic in topics
+            if topic.title_as
+            and len(" ".join((getattr(topic, "definition_as", "") or "").split()).split()) >= 40
+        ]
     return {
         "chapter_id": chapter_id,
-        "topics": [t.model_dump() for t in chapter.published_topics],
-        "total": len(chapter.published_topics),
+        "topics": [
+            {
+                **t.model_dump(),
+                **(
+                    {"title": t.title_as, "definition": t.definition_as, "topic_slug": t.topic_slug_as or t.topic_slug}
+                    if lang == "as" else {}
+                ),
+            }
+            for t in topics
+        ],
+        "total": len(topics),
     }
 
 
 @router.get("/chapters/{chapter_id}/topics-published")
-async def get_topics_published(chapter_id: str):
+async def get_topics_published(chapter_id: str, lang: str = Query("en", pattern="^(en|as)$")):
     """Alias for published-topics — frontend compatibility route."""
-    return await get_published_topics(chapter_id)
+    return await get_published_topics(chapter_id, lang=lang)
+
+
+@router.get("/chapters/{chapter_id}/topics/{topic_slug}")
+async def get_public_topic(
+    chapter_id: str,
+    topic_slug: str,
+    lang: str = Query("en", pattern="^(en|as)$"),
+):
+    """Resolve one reviewed, standalone topic for canonical topic pages."""
+    try:
+        chapter = await Chapter.get(PydanticObjectId(chapter_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    for topic in indexable_topics(chapter.published_topics):
+        slug = (getattr(topic, "topic_slug_as", None) or topic.topic_slug) if lang == "as" else topic.topic_slug
+        definition = topic.definition_as if lang == "as" else topic.definition
+        if slug == topic_slug and (
+            lang == "en"
+            or (topic.title_as and len((definition or "").split()) >= 40)
+        ):
+            return {
+                **topic.model_dump(),
+                "title": topic.title_as if lang == "as" else topic.title,
+                "definition": definition,
+                "topic_slug": slug,
+            }
+    raise HTTPException(status_code=404, detail="Topic not found")
 
 
 @router.get("/chapters/{chapter_id}/topics-related")

@@ -23,6 +23,7 @@ from app.models.user import User
 from app.services.ai.note_quality import ModelPreambleError
 from app.services.content_generation import content_generation_service
 from app.services.content_publisher import content_publisher_service
+from app.services.topic_publication import flex_id_query_values, indexable_topics
 
 logger = logging.getLogger(__name__)
 
@@ -1215,6 +1216,9 @@ class TopicCreate(BaseModel):
     title: str
     definition: Optional[str] = None
     topic_slug: Optional[str] = None
+    title_as: Optional[str] = None
+    definition_as: Optional[str] = None
+    topic_slug_as: Optional[str] = None
 
 
 class TopicUpdate(BaseModel):
@@ -1222,6 +1226,44 @@ class TopicUpdate(BaseModel):
     definition: Optional[str] = None
     topic_slug: Optional[str] = None
     definition_status: Optional[str] = None
+    title_as: Optional[str] = None
+    definition_as: Optional[str] = None
+    topic_slug_as: Optional[str] = None
+
+
+@router.get("/seo/topics")
+async def list_seo_topics(request: Request):
+    """List all topics for editing, including incomplete language drafts."""
+    chapters = await Chapter.find_all().to_list(length=None)
+    subjects = await Subject.find_all().to_list(length=None)
+    streams = await Stream.find_all().to_list(length=None)
+    classes = await Class.find_all().to_list(length=None)
+    boards = await Board.find_all().to_list(length=None)
+    subject_by_id = {str(row.id): row for row in subjects}
+    stream_by_id = {str(row.id): row for row in streams}
+    class_by_id = {str(row.id): row for row in classes}
+    board_by_id = {str(row.id): row for row in boards}
+
+    result = []
+    for chapter in chapters:
+        subject = subject_by_id.get(str(chapter.subject_id))
+        stream = stream_by_id.get(str(subject.stream_id)) if subject else None
+        class_row = class_by_id.get(str(stream.class_id)) if stream else None
+        board = board_by_id.get(str(class_row.board_id)) if class_row else None
+        for topic in chapter.published_topics or []:
+            result.append({
+                **topic.model_dump(),
+                "slug": topic.topic_slug,
+                "chapter_id": str(chapter.id),
+                "chapter_title": chapter.title,
+                "chapter_slug": chapter.slug,
+                "subject_id": str(chapter.subject_id),
+                "subject_name": subject.name if subject else "",
+                "subject_slug": subject.slug if subject else "",
+                "class_slug": class_row.slug if class_row else "",
+                "board_slug": board.slug if board else "",
+            })
+    return result
 
 
 class ContentUpdate(BaseModel):
@@ -1840,7 +1882,14 @@ async def add_topic(request: Request, chapter_id: str, body: TopicCreate):
         raise HTTPException(status_code=404, detail="Chapter not found")
 
     topic_slug = body.topic_slug or _slugify(body.title)
-    topic = Topic(title=body.title, definition=body.definition, topic_slug=topic_slug)
+    topic = Topic(
+        title=body.title,
+        definition=body.definition,
+        topic_slug=topic_slug,
+        title_as=body.title_as,
+        definition_as=body.definition_as,
+        topic_slug_as=body.topic_slug_as,
+    )
     chapter.published_topics.append(topic)
     chapter.updated_at = datetime.now(timezone.utc)
     await chapter.save()
@@ -1882,6 +1931,12 @@ async def update_topic(request: Request, topic_id: str, body: TopicUpdate):
                 topic.topic_slug = body.topic_slug
             if body.definition_status is not None:
                 topic.definition_status = body.definition_status
+            if body.title_as is not None:
+                topic.title_as = body.title_as
+            if body.definition_as is not None:
+                topic.definition_as = body.definition_as
+            if body.topic_slug_as is not None:
+                topic.topic_slug_as = body.topic_slug_as
             break
 
     chapter.updated_at = datetime.now(timezone.utc)
@@ -1968,26 +2023,35 @@ async def get_topic_index(request: Request, subject_id: str):
     """Get a consolidated topic index for all chapters in a subject."""
 
     chapters = await Chapter.find(
-        {"subject_id": PydanticObjectId(subject_id)}
+        {"subject_id": {"$in": flex_id_query_values(subject_id)}}
     ).to_list(length=None)
 
     index = []
     for ch in chapters:
-        for topic in ch.published_topics:
+        for topic in indexable_topics(ch.published_topics):
             index.append(
                 {
                     "chapter_id": str(ch.id),
                     "chapter_title": ch.title,
                     "chapter_number": ch.chapter_number,
+                    "chapter_slug": ch.slug,
                     "topic_id": topic.id,
                     "title": topic.title,
+                    "title_as": topic.title_as,
                     "definition": topic.definition,
+                    "definition_as": topic.definition_as,
                     "topic_slug": topic.topic_slug,
+                    "topic_slug_as": topic.topic_slug_as,
                     "definition_status": topic.definition_status,
                 }
             )
 
-    return {"subject_id": subject_id, "topics": index, "total": len(index)}
+    return {
+        "subject_id": subject_id,
+        "topics": index,
+        "total": len(index),
+        "total_topics": len(index),
+    }
 
 
 # ----------------------------

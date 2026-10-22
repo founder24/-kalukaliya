@@ -21,8 +21,28 @@
 import { Link } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 
-export default function SubjectTopicIndex({ index }) {
-  const chapters = Array.isArray(index?.chapters) ? index.chapters : [];
+export default function SubjectTopicIndex({ index, chapterBasePath = '', isAssamese = false }) {
+  const chapters = Array.isArray(index?.chapters) ? index.chapters : (() => {
+    const grouped = new Map();
+    for (const topic of index?.topics || []) {
+      const key = topic.chapter_id;
+      if (!key || !topic.chapter_slug) continue;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          chapter_id: key,
+          chapter_title: topic.chapter_title,
+          chapter_url: `${chapterBasePath}/${topic.chapter_slug}`,
+          topics: [],
+        });
+      }
+      grouped.get(key).topics.push({
+        ...topic,
+        title: isAssamese ? (topic.title_as || topic.title) : topic.title,
+        deep_link_path: `${chapterBasePath}/${topic.chapter_slug}/topic/${isAssamese ? (topic.topic_slug_as || topic.topic_slug) : topic.topic_slug}`,
+      });
+    }
+    return [...grouped.values()];
+  })();
   const total = Number(index?.total_topics || 0);
   if (chapters.length === 0 || total === 0) return null;
 

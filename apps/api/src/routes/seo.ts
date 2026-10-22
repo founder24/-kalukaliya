@@ -52,13 +52,38 @@ function topicEntries(rows: ContentUrl[]): string[] {
   const entries = new Map<string, string>();
   for (const row of rows) {
     try {
-      const topics = JSON.parse(row.publishedTopics ?? '[]') as Array<{ slug?: string; topic_slug?: string }>;
+      const topics = JSON.parse(row.publishedTopics ?? '[]') as Array<{
+        slug?: string;
+        topic_slug?: string;
+        title_as?: string;
+        topic_slug_as?: string;
+        definition_as?: string;
+        status?: string;
+        definition_status?: string;
+      }>;
       for (const topic of topics) {
         const slug = topic.topic_slug ?? topic.slug;
         if (!slug) continue;
         const location = `${contentUrl(row)}/topic/${encodeURIComponent(slug)}`;
         if (!entries.has(location)) {
           entries.set(location, urlEntry(location, date(row.updatedAt), '0.6'));
+        }
+        const titleAs = topic.title_as?.trim() ?? '';
+        const slugAs = topic.topic_slug_as?.trim() ?? '';
+        const definitionAs = topic.definition_as?.trim() ?? '';
+        const isReviewed = topic.status === 'published'
+          || topic.definition_status === 'ok'
+          || topic.definition_status === 'approved';
+        if (
+          isReviewed &&
+          titleAs &&
+          slugAs &&
+          definitionAs.split(/\s+/).filter(Boolean).length >= 40
+        ) {
+          const localizedLocation = `${SITE_URL}/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}/topic/${encodeURIComponent(slugAs)}`;
+          if (!entries.has(localizedLocation)) {
+            entries.set(localizedLocation, urlEntry(localizedLocation, date(row.updatedAt), '0.6'));
+          }
         }
       }
     } catch {

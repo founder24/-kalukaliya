@@ -388,4 +388,44 @@ describe('Worker-native site-operation routes', () => {
     );
     expect(await emptyTopicIndex.text()).not.toContain('sitemap-topics.xml');
   });
+
+  it('includes only complete 40-word Assamese topic translations in the sitemap', async () => {
+    const longDefinition = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+    const row = {
+      ...chapterRows[0]!,
+      published_topics: JSON.stringify([
+        {
+          topic_slug: 'first-law',
+          status: 'published',
+          title_as: 'প্ৰথম নিয়ম',
+          topic_slug_as: 'প্ৰথম-নিয়ম',
+          definition_as: longDefinition,
+        },
+        {
+          topic_slug: 'short-topic',
+          status: 'published',
+          title_as: 'চুটি বিষয়',
+          topic_slug_as: 'short-assamese',
+          definition_as: 'Too short',
+        },
+        {
+          topic_slug: 'missing-slug',
+          status: 'published',
+          title_as: 'শ্লাগ নাই',
+          definition_as: longDefinition,
+        },
+      ]),
+    };
+    const env = {
+      ...testEnv(),
+      DB: { prepare: () => ({ all: async () => ({ results: [row] }) }) },
+    } as unknown as Env;
+    const response = await api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env);
+    const xml = await response.text();
+
+    expect(xml).toContain(`/as/ahsec/class-12/physics/newtons-laws/topic/${encodeURIComponent('প্ৰথম-নিয়ম')}`);
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/newtons-laws/topic/short-assamese');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/newtons-laws/topic/missing-slug');
+    expect((xml.match(/<loc>/g) ?? []).length).toBe(4);
+  });
 });

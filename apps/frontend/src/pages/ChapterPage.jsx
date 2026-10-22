@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useLocation, Link, useSearchParams } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import TopicAnswerCard from '@/components/chapter/TopicAnswerCard';
@@ -239,6 +239,7 @@ function readChapterPreload(board, classSlug, subjectSlug, chapterSlug) {
 
 export default function ChapterPage() {
   const params = useParams();
+  const routerLocation = useLocation();
   const board = params.board;
   const classSlug = params.classSlug;
   const hasStreamInUrl = !!(params.streamSlug && params.chapterSlug);
@@ -934,13 +935,21 @@ export default function ChapterPage() {
       : `${basePath}/${chapterSlug}`);
   const chapterUrl = `https://syrabit.ai${_chapterPath}`;
   const canonical = topicSlugParam
-    ? `${chapterUrl}#topic-${topicSlugParam}`
+    ? `https://syrabit.ai${routerLocation.pathname}`
     : chapterUrl;
   // Look up the active topic doc for the deep-link route so we can
   // shape topic-specific title/description without an extra fetch.
   const activeDeepLinkTopic = topicSlugParam
-    ? (publishedTopics.find((t) => (t.topic_slug || t.slug) === topicSlugParam) || null)
+    ? (publishedTopics.find((t) => (t.topic_slug || t.slug) === topicSlugParam || t.topic_slug_as === topicSlugParam) || null)
     : null;
+  const topicAlternateUrl = activeDeepLinkTopic?.definition_as
+    ? `https://syrabit.ai${isAssamesePath
+      ? routerLocation.pathname
+          .replace(/^\/as\//, "/")
+          .replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug}`)
+      : `/as${routerLocation.pathname.replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug_as || activeDeepLinkTopic.topic_slug}`)}`
+    }`
+    : undefined;
   const readMins = data?.word_count ? Math.max(1, Math.ceil(data.word_count / 200)) : null;
 
   const handleShare = useCallback(() => {
@@ -1133,6 +1142,47 @@ export default function ChapterPage() {
   const seoDesc = _bingDescTerms.length > 0 && _baseDesc.length < 180
     ? `${_baseDesc} Covers ${_bingDescTerms.join(', ')}.`.slice(0, 300)
     : _baseDesc;
+
+  if (topicSlugParam && activeDeepLinkTopic) {
+    const topicTitle = isAssamesePath
+      ? (activeDeepLinkTopic.title_as || activeDeepLinkTopic.title)
+      : activeDeepLinkTopic.title;
+    const topicDefinition = isAssamesePath
+      ? (activeDeepLinkTopic.definition_as || activeDeepLinkTopic.definition)
+      : activeDeepLinkTopic.definition;
+    return (
+      <main className="min-h-screen bg-background text-foreground px-4 py-8">
+        <PageMeta
+          title={`${topicTitle} — ${chapterTitle}`}
+          description={(topicDefinition || seoDesc).slice(0, 280)}
+          url={canonical}
+          type="article"
+          section={subjectName}
+          pageType="chapter"
+          pageData={{ data: { ...data, published_topics: [activeDeepLinkTopic] }, basePath }}
+          hasAssamese={Boolean(activeDeepLinkTopic.definition_as)}
+          language={isAssamesePath ? "as" : "en"}
+          alternateUrl={topicAlternateUrl}
+        />
+        <article className="mx-auto max-w-3xl">
+          <nav aria-label="Breadcrumb" className="mb-6 text-sm text-muted-foreground">
+            <Link to={basePath}>{subjectName}</Link>
+            <span className="mx-2">/</span>
+            <Link to={_chapterPath}>{chapterTitle}</Link>
+          </nav>
+          <h1 className="mb-5 text-3xl font-bold">{topicTitle}</h1>
+          <section className="prose dark:prose-invert max-w-none" aria-label={topicTitle}>
+            <p>{topicDefinition}</p>
+          </section>
+          <p className="mt-8">
+            <Link className="text-primary underline" to={_chapterPath}>
+              {isAssamesePath ? 'অধ্যায়ৰ সম্পূৰ্ণ টোকা পঢ়ক' : `Read the complete ${chapterTitle} chapter notes`}
+            </Link>
+          </p>
+        </article>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
