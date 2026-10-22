@@ -40,6 +40,15 @@ function textContent(fragment) {
     .trim();
 }
 
+function renderedRootContent(html) {
+  const rootOpen = html.match(/<div\b(?=[^>]*\bid\s*=\s*(["'])root\1)[^>]*>/i);
+  if (!rootOpen || rootOpen.index == null) return null;
+
+  const contentStart = rootOpen.index + rootOpen[0].length;
+  const bodyEnd = html.toLowerCase().lastIndexOf("</body>");
+  return html.slice(contentStart, bodyEnd >= contentStart ? bodyEnd : undefined);
+}
+
 function expectedOutputPath(distDir, pathname) {
   const normalized = normalizedPathname(pathname);
   const segments = normalized.split("/").filter(Boolean);
@@ -131,7 +140,10 @@ function validateRenderedPage({ distDir, filename, loc }) {
 
   const html = fs.readFileSync(outputPath, "utf8");
   const title = textContent((html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "");
-  const h1 = textContent((html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "");
+  const rootContent = renderedRootContent(html);
+  const h1 = textContent(
+    ((rootContent || "").match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || "",
+  );
   const tags = [...html.matchAll(/<(?:meta|link)\b[^>]*>/gi)].map((match) => match[0]);
   const marker = tags.find(
     (tag) =>
@@ -150,6 +162,7 @@ function validateRenderedPage({ distDir, filename, loc }) {
 
   if (!title) issues.push(`${loc}: rendered title is missing`);
   if (GENERIC_SHELL.test(title)) issues.push(`${loc}: rendered title is the generic SPA shell`);
+  if (!rootContent) issues.push(`${loc}: prerendered app root is missing`);
   if (!h1) issues.push(`${loc}: rendered H1 is missing`);
   if (GENERIC_SHELL.test(h1)) issues.push(`${loc}: rendered H1 is the generic SPA shell`);
   if (!markerPath || normalizedPathname(markerPath) !== expectedMarkerPath) {

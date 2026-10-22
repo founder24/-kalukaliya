@@ -33,21 +33,28 @@ function createDist({ genericShell = false, omitPage = false } = {}) {
   );
   fs.writeFileSync(path.join(root, "sitemap-static.xml"), "<urlset></urlset>");
 
-  const shellTitle = genericShell
-    ? "Syrabit.ai — Educational Browser For Assam Board Students"
+  const shellTitle = "Syrabit.ai — Educational Browser For Assam Board Students";
+  const chapterTitle = genericShell
+    ? shellTitle
     : "Laws of Motion — Physics | AHSEC Notes";
   const subjectHtml = `<html><head><title>Physics — AHSEC Notes</title>
     <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics">
     <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics"></head>
-    <body><main data-hydrate="subject"><h1>Physics</h1></main></body></html>`;
-  const chapterHtml = `<html><head><title>${shellTitle}</title>
+    <body><noscript><h1>${shellTitle}</h1></noscript>
+      <div id="root" data-hydrate="subject"><main><h1>Physics</h1></main></div>
+    </body></html>`;
+  const chapterHtml = `<html><head><title>${chapterTitle}</title>
     <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion">
     <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion"></head>
-    <body><main data-hydrate="chapter"><h1>${genericShell ? shellTitle : "Laws of Motion"}</h1></main></body></html>`;
+    <body><noscript><h1>${shellTitle}</h1></noscript>
+      <div id="root" data-hydrate="chapter"><main><h1>${genericShell ? shellTitle : "Laws of Motion"}</h1></main></div>
+    </body></html>`;
   const topicHtml = `<html><head><title>Inertia — Laws of Motion | Physics Notes</title>
     <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia">
     <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"></head>
-    <body><main data-hydrate="chapter"><h1>Inertia</h1></main></body></html>`;
+    <body><noscript><h1>${shellTitle}</h1></noscript>
+      <div id="root" data-hydrate="chapter"><main><h1>Inertia</h1></main></div>
+    </body></html>`;
 
   fs.mkdirSync(path.join(root, "ahsec/hs-1st-year/physics"), { recursive: true });
   fs.writeFileSync(path.join(root, "ahsec/hs-1st-year/physics/index.html"), subjectHtml);
@@ -89,6 +96,12 @@ describe("sitemap rendered HTML release check", () => {
     const result = verifySitemapRenderedHtml({ distDir: createDist() });
 
     expect(result.checked).toBe(3);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("ignores the generic no-script fallback H1 outside the prerendered app root", () => {
+    const result = verifySitemapRenderedHtml({ distDir: createDist() });
+
     expect(result.errors).toEqual([]);
   });
 
