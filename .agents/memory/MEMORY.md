@@ -96,6 +96,7 @@
 - [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes
 - [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials
 - [Cloudflare release provenance](cloudflare-release-provenance.md) — release builds must keep generated curriculum, review cache, and browser output out of tracked source
+- [Cloudflare Agent Readiness policy](cloudflare-agent-readiness-policy.md) — advertise only working services; leave unsupported agent protocols unscored rather than fabricate discovery metadata
 - [Production AdSense verification](production-ads-verification.md) — a live Google loader is not enough; verify compiled slot IDs, DOM metadata, fills, and stale hashed assets separately
 - [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
