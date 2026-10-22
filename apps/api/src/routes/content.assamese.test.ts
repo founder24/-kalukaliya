@@ -287,7 +287,7 @@ describe('Assamese public content metadata', () => {
       topics: [
         {
           topic_slug: 'energy',
-          deep_link_path: '/ahsec/class-12/science/index-subject/indexed-topics/topic/energy',
+          deep_link_path: '/ahsec/class-12/index-subject/indexed-topics/topic/energy',
         },
         { topic_slug: 'named-topic' },
       ],
