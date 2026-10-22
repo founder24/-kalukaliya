@@ -1,0 +1,25 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://api.syrabit.ai",
+      "service-desc": [
+        {
+          "href": "https://syrabit.ai/.well-known/openapi.json",
+          "type": "application/json"
+        }
+      ],
+      "service-doc": [
+        {
+          "href": "https://syrabit.ai/llms.txt",
+          "type": "text/plain"
+        }
+      ],
+      "status": [
+        {
+          "href": "https://api.syrabit.ai/health",
+          "type": "application/json"
+        }
+      ]
+    }
+  ]
+}
