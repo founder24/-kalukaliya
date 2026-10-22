@@ -195,6 +195,12 @@ async function main() {
       budgetMs: 30_000,
     }),
   );
+  await record(
+    "topic-sitemap-paths",
+    node(path.join(__dirname, "test-topic-sitemap-path.mjs"), [], {
+      budgetMs: 30_000,
+    }),
+  );
 
   // 3. Client + SSR builds in parallel. They write to dist/ and
   //    dist-ssr/ respectively, no shared output.
