@@ -933,6 +933,9 @@ export default function ChapterPage() {
     : (_chapterStreamSlug
       ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${chapterSlug}`
       : `${basePath}/${chapterSlug}`);
+  const _topicParentPath = topicSlugParam
+    ? routerLocation.pathname.replace(/\/topic\/[^/]+$/, "")
+    : _chapterPath;
   const chapterUrl = `https://syrabit.ai${_chapterPath}`;
   const canonical = topicSlugParam
     ? `https://syrabit.ai${routerLocation.pathname}`
@@ -1181,14 +1184,14 @@ export default function ChapterPage() {
           <nav aria-label="Breadcrumb" className="mb-6 text-sm text-muted-foreground">
             <Link to={isAssamesePath ? asBasePath : basePath}>{subjectName}</Link>
             <span className="mx-2">/</span>
-            <Link to={_chapterPath}>{chapterTitle}</Link>
+            <Link to={_topicParentPath}>{chapterTitle}</Link>
           </nav>
           <h1 className="mb-5 text-3xl font-bold">{topicTitle}</h1>
           <section className="prose dark:prose-invert max-w-none" aria-label={topicTitle}>
             <p>{topicDefinition}</p>
           </section>
           <p className="mt-8">
-            <Link className="text-primary underline" to={_chapterPath}>
+            <Link className="text-primary underline" to={_topicParentPath}>
               {isAssamesePath ? 'অধ্যায়ৰ সম্পূৰ্ণ টোকা পঢ়ক' : `Read the complete ${chapterTitle} chapter notes`}
             </Link>
           </p>
