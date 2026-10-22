@@ -22,6 +22,13 @@ async def client():
 
 
 @pytest.mark.anyio
+async def test_robots_txt_publishes_content_signals(client: AsyncClient):
+    resp = await client.get("/api/v1/seo/robots.txt")
+    assert resp.status_code == 200
+    assert "Content-Signal: search=yes, ai-input=yes, ai-train=no" in resp.text
+
+
+@pytest.mark.anyio
 async def test_sitemap_index_returns_xml(client: AsyncClient):
     resp = await client.get("/api/v1/seo/sitemap.xml")
     assert resp.status_code == 200

@@ -13,6 +13,7 @@
 
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath, pathToFileURL } from "url";
 import { spawn } from "child_process";
 import {
@@ -133,6 +134,99 @@ if (!fs.existsSync(aiPluginSchemaPath)) {
     }
   } catch (err) {
     fail(`/.well-known/openapi.json: invalid JSON (${err.message})`);
+  }
+}
+
+const robotsPath = path.join(distDir, "robots.txt");
+if (!fs.existsSync(robotsPath)) {
+  fail("missing static robots.txt fallback");
+} else if (
+  !fs
+    .readFileSync(robotsPath, "utf-8")
+    .includes("Content-Signal: search=yes, ai-input=yes, ai-train=no")
+) {
+  fail("robots.txt must publish the documented Content-Signal policy");
+}
+
+const apiCatalogPath = path.join(distDir, ".well-known", "api-catalog");
+if (!fs.existsSync(apiCatalogPath)) {
+  fail("missing static /.well-known/api-catalog");
+} else {
+  try {
+    const catalog = JSON.parse(fs.readFileSync(apiCatalogPath, "utf-8"));
+    const api = catalog.linkset?.find((entry) => entry.anchor === AI_PLUGIN_METADATA.api_url);
+    if (!api) fail("/.well-known/api-catalog: public API anchor is missing");
+    for (const rel of ["service-desc", "service-doc", "status"]) {
+      if (!api?.[rel]?.some((link) => typeof link.href === "string" && link.href.startsWith("https://"))) {
+        fail(`/.well-known/api-catalog: ${rel} link is missing`);
+      }
+    }
+  } catch (err) {
+    fail(`/.well-known/api-catalog: invalid JSON (${err.message})`);
+  }
+}
+
+const headersPath = path.join(distDir, "_headers");
+if (!fs.existsSync(headersPath)) {
+  fail("missing Cloudflare Pages _headers file");
+} else {
+  const headers = fs.readFileSync(headersPath, "utf-8");
+  if (!headers.includes('rel="api-catalog"') || !headers.includes('rel="service-desc"')) {
+    fail("_headers must advertise the API catalog and OpenAPI description");
+  }
+  if (!headers.includes("Content-Type: application/linkset+json")) {
+    fail("_headers must serve the API catalog with application/linkset+json");
+  }
+}
+
+const aiCatalogPath = path.join(distDir, ".well-known", "ai-catalog.json");
+if (!fs.existsSync(aiCatalogPath)) {
+  fail("missing static /.well-known/ai-catalog.json");
+} else {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(aiCatalogPath, "utf-8"));
+    if (typeof manifest.specVersion !== "string" || !Array.isArray(manifest.entries) || !manifest.entries.length) {
+      fail("/.well-known/ai-catalog.json: specVersion and entries are required");
+    }
+    for (const entry of manifest.entries) {
+      if (!entry.identifier || !entry.displayName || !entry.type) {
+        fail("/.well-known/ai-catalog.json: every entry needs identifier, displayName, and type");
+      }
+      if (Boolean(entry.url) === Boolean(entry.data)) {
+        fail("/.well-known/ai-catalog.json: each entry must have exactly one of url or data");
+      }
+      if (!Array.isArray(entry.representativeQueries) || entry.representativeQueries.length < 2 || entry.representativeQueries.length > 5) {
+        fail("/.well-known/ai-catalog.json: entries need 2–5 representative queries");
+      }
+    }
+  } catch (err) {
+    fail(`/.well-known/ai-catalog.json: invalid JSON (${err.message})`);
+  }
+}
+
+const agentSkillsIndexPath = path.join(distDir, ".well-known", "agent-skills", "index.json");
+if (!fs.existsSync(agentSkillsIndexPath)) {
+  fail("missing static /.well-known/agent-skills/index.json");
+} else {
+  try {
+    const index = JSON.parse(fs.readFileSync(agentSkillsIndexPath, "utf-8"));
+    if (index.$schema !== "https://schemas.agentskills.io/discovery/0.2.0/schema.json" || !Array.isArray(index.skills) || !index.skills.length) {
+      fail("/.well-known/agent-skills/index.json: schema and skills are required");
+    }
+    for (const skill of index.skills) {
+      const relativeUrl = new URL(skill.url).pathname.replace(/^\//, "");
+      const skillPath = path.join(distDir, relativeUrl);
+      if (skill.type !== "skill-md" || !skill.name || !fs.existsSync(skillPath)) {
+        fail("/.well-known/agent-skills/index.json: each skill must reference a static SKILL.md");
+        continue;
+      }
+      const digest = crypto.createHash("sha256").update(fs.readFileSync(skillPath)).digest("hex");
+      if (skill.digest !== `sha256:${digest}`) {
+        fail(`/well-known/agent-skills/index.json: digest mismatch for ${skill.name}`);
+      }
+    }
+  } catch (err) {
+    fail(`/.well-known/agent-skills/index.json: invalid JSON (${err.message})`);
   }
 }
 

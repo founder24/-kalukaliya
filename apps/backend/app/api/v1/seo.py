@@ -255,7 +255,7 @@ Crawl-delay: 0
 # search=yes: content is intended for search indexing
 # ai-input=yes: content may be used as grounding for AI-generated answers
 # ai-train=no: content must NOT be used for model training
-# Content-Signal: search=yes, ai-input=yes, ai-train=no
+Content-Signal: search=yes, ai-input=yes, ai-train=no
 
 # --- AI training crawlers: explicitly disallowed. ---
 User-agent: GPTBot
