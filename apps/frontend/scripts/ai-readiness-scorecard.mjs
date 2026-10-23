@@ -238,7 +238,10 @@ function crawlerEvidenceSubscores(evidence) {
 }
 
 function textFromHtml(value) {
-  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return decodeXml(value.replace(/&#(?:0*39|x0*27);/gi, "'"))
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function readJsonLdNodes(html) {
@@ -312,7 +315,13 @@ export function buildReadinessReport({ distDir = DEFAULT_DIST_DIR, robotsPath, e
   const answerQuestions = answerUrls.map((url) => {
     const file = safePageFile(absoluteDist, new URL(url).pathname);
     const html = file && fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-    const title = textFromHtml(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "") || "topic";
+    // The first H1 can belong to the shared site shell. Topic prerenders expose
+    // the route-specific title in <title> as "topic — chapter"; prefer that
+    // source so the fixed AEO prompts actually ask about the curriculum topic.
+    const documentTitle = textFromHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
+    const title = documentTitle.split(/\s+[—–|]\s+/, 1)[0].trim()
+      || textFromHtml(html.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? "")
+      || "topic";
     return {
       url,
       question: `What should a student know about ${title}?`,
