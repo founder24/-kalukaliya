@@ -112,3 +112,4 @@
 - [Chat transcript access audit](chat-transcript-access-audit.md) — audit authorized staff transcript reads with actor, session, and time only; never copy message content into the event.
 - [braces advisory mitigation](braces-advisory-mitigation.md) — GHSA-vfj7-8cjw-p6xm has no upstream fixed release; local parser depth patch is protective but version-based scans still flag it.
 - [Worker chat media models](worker-chat-media-models.md) — Current OCR/TTS binding contracts differ from the legacy backend client; verify Cloudflare's model catalog before changing them.
+- [Tollbit crawler integration](tollbit-crawler-integration.md) — Use verified Tollbit-supported ingestion/configuration, not a raw User-Agent proxy; validate the supplied bot list before use.
