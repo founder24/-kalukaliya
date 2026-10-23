@@ -203,4 +203,44 @@ describe('Pages worker route fallbacks', () => {
     expect(response.headers.get('location')).toBe('/ahsec/class-12/physics/official-chapter');
     expect(response.headers.get('x-source')).toBe('verified-prerender-canonical');
   });
+
+  it('serves an Assamese prerender when its raw Unicode path matches the encoded request', async () => {
+    const topicSlug = 'সাৰ্থক-সংখ্যা';
+    const route = '/as/ahsec/hs-1st-year/physics/units-and-measurements/topic';
+    const encodedPath = `${route}/${encodeURIComponent(topicSlug)}`;
+    const rawUnicodePath = `${route}/${topicSlug}`;
+    const html = `<!doctype html><html lang="as"><head>
+      <link rel="canonical" href="https://syrabit.ai${encodedPath}" />
+      <meta name="syrabit-prerender-path" content="${rawUnicodePath}" />
+      <title>সাৰ্থক সংখ্যা</title></head><body><h1>সাৰ্থক সংখ্যা</h1></body></html>`;
+    const fallbackFetch = vi.fn(async () => new Response(
+      '<!doctype html><title>Syrabit.ai — Educational Browser For Assam Board Students</title>',
+      { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+    ));
+    vi.stubGlobal('fetch', fallbackFetch);
+
+    const response = await pagesWorker.fetch(
+      new Request(`https://syrabit.ai${encodedPath}`, {
+        headers: {
+          Accept: 'text/html',
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
+        },
+      }),
+      {
+        ASSETS: {
+          fetch: async (request) => new URL(request.url).pathname.endsWith('/index.html')
+            ? new Response(html, {
+              status: 200,
+              headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            })
+            : new Response('missing', { status: 404 }),
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-source')).toBe('prerender');
+    expect(await response.text()).toContain('<h1>সাৰ্থক সংখ্যা</h1>');
+    expect(fallbackFetch).not.toHaveBeenCalled();
+  });
 });
