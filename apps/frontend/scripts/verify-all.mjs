@@ -25,7 +25,9 @@ import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
 import {
   collectPrerenderOutputPaths,
   readChapterSitemapPaths,
+  readTopicSitemapPaths,
   validateChapterOutputCoverage,
+  validateTopicOutputCoverage,
 } from "./_prerender-output-coverage.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -493,6 +495,21 @@ const chapterCoverage = validateChapterOutputCoverage({
 });
 const chaptersOnDisk = chapterCoverage.chaptersOnDisk;
 failures.push(...chapterCoverage.failures);
+const topicSitemapPath = path.join(distDir, "sitemap-topics.xml");
+let expectedTopicPaths = null;
+if (fs.existsSync(topicSitemapPath)) {
+  expectedTopicPaths = readTopicSitemapPaths(
+    fs.readFileSync(topicSitemapPath, "utf-8"),
+  );
+} else if (strictReleaseBuild) {
+  fail("required topic sitemap missing: dist/sitemap-topics.xml");
+}
+const topicCoverage = validateTopicOutputCoverage({
+  pages,
+  expectedPaths: expectedTopicPaths,
+  strict: strictReleaseBuild,
+});
+failures.push(...topicCoverage.failures);
 if (manifestSubjects > 0 && subjectsOnDisk === 0) {
   fail(`manifest claimed ${manifestSubjects} subjects written but 0 found on disk`);
 }

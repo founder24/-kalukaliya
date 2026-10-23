@@ -21,7 +21,9 @@ import {
 import {
   collectPrerenderOutputPaths,
   readChapterSitemapPaths,
+  readTopicSitemapPaths,
   validateChapterOutputCoverage,
+  validateTopicOutputCoverage,
 } from "../../scripts/_prerender-output-coverage.mjs";
 
 describe("release verifier syntax", () => {
@@ -314,6 +316,9 @@ describe("chapter output coverage", () => {
     expect(collectPrerenderOutputPaths(pages).chapters).toEqual(
       new Set([chapter]),
     );
+    expect(collectPrerenderOutputPaths(pages).topics).toEqual(
+      new Set([topic]),
+    );
     expect(
       validateChapterOutputCoverage({
         pages,
@@ -322,6 +327,15 @@ describe("chapter output coverage", () => {
         strict: true,
       }),
     ).toEqual({ chaptersOnDisk: 1, failures: [] });
+    expect(
+      validateTopicOutputCoverage({
+        pages,
+        expectedPaths: readTopicSitemapPaths(
+          `<urlset><url><loc>https://syrabit.ai${topic}</loc></url></urlset>`,
+        ),
+        strict: true,
+      }),
+    ).toEqual({ topicsOnDisk: 1, failures: [] });
   });
 
   it.each([
@@ -366,6 +380,46 @@ describe("chapter output coverage", () => {
     expect(result.failures.join("\n")).toContain(
       "chapter output paths differ from sitemap",
     );
+  });
+
+  it("rejects an unpublished topic snapshot outside the topic sitemap", () => {
+    const stale = `${chapter}/topic/unpublished-topic`;
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+    const expectedPaths = readTopicSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${topic}</loc></url></urlset>`,
+    );
+
+    const result = validateTopicOutputCoverage({
+      pages,
+      expectedPaths,
+      strict: true,
+    });
+
+    expect(result.topicsOnDisk).toBe(2);
+    expect(result.failures).toEqual([
+      `topic output paths differ from sitemap: missing=0; unexpected=1 (${stale})`,
+    ]);
+  });
+
+  it("reports topic pages missing from the topic sitemap output", () => {
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+
+    const result = validateTopicOutputCoverage({
+      pages,
+      expectedPaths: new Set([topic, `${chapter}/topic/another-topic`]),
+      strict: true,
+    });
+
+    expect(result.failures).toEqual([
+      `topic output paths differ from sitemap: missing=1 (${chapter}/topic/another-topic); unexpected=0`,
+    ]);
   });
 });
 
