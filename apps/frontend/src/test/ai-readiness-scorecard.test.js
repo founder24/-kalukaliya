@@ -31,7 +31,7 @@ function createDist() {
   ].join(" ");
   fs.writeFileSync(
     path.join(output, "index.html"),
-    `<!doctype html><html lang="en"><head><title>Inertia — Laws of Motion</title><link rel="canonical" href="${url}"></head><body><div id="root" data-hydrate="chapter"><main><h1>Inertia</h1><p>${body}</p><a href="/ahsec/hs-1st-year/physics/laws-of-motion">Read the chapter</a></main></div><script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@graph": [{ "@type": "LearningResource", "name": "Inertia" }] })}</script></body></html>`,
+    `<!doctype html><html lang="en"><head><title>Inertia — Laws of Motion</title><meta name="description" content="Study inertia in AHSEC Class 11 Physics."><link rel="canonical" href="${url}"><meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"></head><body><div id="root" data-hydrate="chapter"><main><h1>Inertia</h1><p>${body}</p><a href="/ahsec/hs-1st-year/physics/laws-of-motion">Read the chapter</a></main></div><script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@graph": [{ "@type": "LearningResource", "name": "Inertia" }] })}</script></body></html>`,
   );
   return root;
 }
@@ -73,9 +73,56 @@ describe("AI readiness scorecard", () => {
     expect(report.inventory.excluded).toBeNull();
     expect(report.categories.technicalSeo.subscores.indexability.points).toBe(12);
     expect(report.categories.technicalSeo.subscores.metadata.points).toBe(10);
+    expect(report.categories.aeo.subscores.structuredMarkup.points).toBe(5);
     expect(report.categories.crawler.subscores.policyAlignment.status).toBe("scored");
     expect(report.categories.geo.status).toBe("n/a");
     expect(report.score).toMatchObject({ status: "n/a", points: null, maximum: 100 });
     expect(report.editorialSample).toHaveLength(1);
+    expect(report.answerQuestions).toHaveLength(1);
+  });
+
+  it("accepts complete rubric-versioned evidence and can produce 100/100", () => {
+    const distDir = createDist();
+    const baseline = buildReadinessReport({ distDir });
+    const evidence = {
+      rubricVersion: "1.0.0",
+      pageExperience: {
+        source: "test field data",
+        window: "2026-10-01/2026-10-22",
+        sampleSize: 100,
+        lcpP75Ms: 2400,
+        inpP75Ms: 190,
+        clsP75: 0.08,
+      },
+      geoReviews: baseline.editorialSample.map((url) => ({
+        url,
+        reviewers: 2,
+        reconciled: true,
+        curriculumContext: true,
+        sourceGrounding: true,
+        languageQuality: true,
+      })),
+      aeoReviews: baseline.answerQuestions.map(({ url }) => ({
+        url,
+        reviewers: 2,
+        reconciled: true,
+        directAnswer: true,
+        answerExtraction: true,
+      })),
+      crawler: {
+        tollbitPolicyVerified: true,
+        source: "verified test fixture",
+        window: "2026-10-01/2026-10-22",
+        sampledRequests: 10,
+        verifiedAgentRequests: 10,
+        datasetComplete: true,
+        responseContentEvidence: true,
+        delivery: { finalHtml2xx: 10, contentVerified: 10 },
+      },
+    };
+
+    const report = buildReadinessReport({ distDir, evidence });
+
+    expect(report.score).toMatchObject({ status: "scored", points: 100, maximum: 100 });
   });
 });
