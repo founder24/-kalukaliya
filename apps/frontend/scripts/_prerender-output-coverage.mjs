@@ -72,7 +72,9 @@ export function validateChapterOutputCoverage({
     );
   }
 
-  if (strict && expectedPaths) {
+  if (strict && !expectedPaths) {
+    failures.push("required chapter sitemap missing: dist/sitemap-chapters.xml");
+  } else if (strict) {
     const missing = [...expectedPaths].filter((route) => !chapters.has(route));
     const unexpected = [...chapters].filter((route) => !expectedPaths.has(route));
     if (missing.length || unexpected.length) {

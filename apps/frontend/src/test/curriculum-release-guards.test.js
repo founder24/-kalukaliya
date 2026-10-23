@@ -382,6 +382,34 @@ describe("chapter output coverage", () => {
     );
   });
 
+  it("fails strict release coverage when the chapter sitemap is missing", () => {
+    const result = validateChapterOutputCoverage({
+      pages: [
+        { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      ],
+      expectedPaths: null,
+      manifestCount: 1,
+      strict: true,
+    });
+
+    expect(result.failures).toContain(
+      "required chapter sitemap missing: dist/sitemap-chapters.xml",
+    );
+  });
+
+  it("keeps missing chapter sitemap coverage optional outside strict releases", () => {
+    const result = validateChapterOutputCoverage({
+      pages: [
+        { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      ],
+      expectedPaths: null,
+      manifestCount: 1,
+      strict: false,
+    });
+
+    expect(result.failures).toEqual([]);
+  });
+
   it("rejects an unpublished topic snapshot outside the topic sitemap", () => {
     const stale = `${chapter}/topic/unpublished-topic`;
     const pages = [
