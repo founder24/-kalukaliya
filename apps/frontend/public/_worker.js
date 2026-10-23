@@ -278,6 +278,14 @@ function normalizedPathname(pathname) {
   return pathname.replace(/\/+$/, "");
 }
 
+function normalizedDecodedPathname(pathname) {
+  try {
+    return normalizedPathname(decodeURI(pathname || "/"));
+  } catch {
+    return normalizedPathname(pathname);
+  }
+}
+
 function decodePathSegment(segment) {
   try {
     return decodeURIComponent(segment);
@@ -458,7 +466,7 @@ async function assetMatchesRequestedPrerender(response, pathname) {
     for (const tag of metas) {
       if (!/\bname\s*=\s*["']syrabit-prerender-path["']/i.test(tag)) continue;
       const outputPath = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
-      return normalizedPathname(outputPath) === normalizedPathname(pathname);
+      return normalizedDecodedPathname(outputPath) === normalizedDecodedPathname(pathname);
     }
   } catch {
     // Treat unreadable HTML as an asset miss and use backend bot rendering.
