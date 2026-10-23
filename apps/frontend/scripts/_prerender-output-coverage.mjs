@@ -53,8 +53,41 @@ export function readChapterSitemapPaths(xml) {
   );
 }
 
+export function readSubjectSitemapPaths(xml) {
+  return readSitemapPaths(
+    xml,
+    (route) => route.split("/").filter(Boolean).length === 3,
+  );
+}
+
 export function readTopicSitemapPaths(xml) {
   return readSitemapPaths(xml, (route) => route.split("/").includes("topic"));
+}
+
+export function validateSubjectOutputCoverage({
+  pages,
+  expectedPaths,
+  strict = false,
+}) {
+  const { subjects } = collectPrerenderOutputPaths(pages);
+  const failures = [];
+
+  if (strict && !expectedPaths) {
+    failures.push("required subject sitemap missing: dist/sitemap-subjects.xml");
+  } else if (strict) {
+    const missing = [...expectedPaths].filter((route) => !subjects.has(route));
+    const unexpected = [...subjects].filter((route) => !expectedPaths.has(route));
+    if (missing.length || unexpected.length) {
+      failures.push(
+        `subject output paths differ from sitemap: missing=${missing.length}` +
+          `${missing.length ? ` (${missing.slice(0, 5).join(", ")})` : ""}; ` +
+          `unexpected=${unexpected.length}` +
+          `${unexpected.length ? ` (${unexpected.slice(0, 5).join(", ")})` : ""}`,
+      );
+    }
+  }
+
+  return { subjectsOnDisk: subjects.size, failures };
 }
 
 export function validateChapterOutputCoverage({

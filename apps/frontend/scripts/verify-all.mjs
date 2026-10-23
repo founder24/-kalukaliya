@@ -25,8 +25,10 @@ import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
 import {
   collectPrerenderOutputPaths,
   readChapterSitemapPaths,
+  readSubjectSitemapPaths,
   readTopicSitemapPaths,
   validateChapterOutputCoverage,
+  validateSubjectOutputCoverage,
   validateTopicOutputCoverage,
 } from "./_prerender-output-coverage.mjs";
 
@@ -480,6 +482,19 @@ if (fs.existsSync(manifestPath)) {
 // topic pages share that component but are tracked separately in the manifest.
 const { subjects: subjectOutputPaths } = collectPrerenderOutputPaths(pages);
 const subjectsOnDisk = subjectOutputPaths.size;
+const subjectSitemapPath = path.join(distDir, "sitemap-subjects.xml");
+let expectedSubjectPaths = null;
+if (fs.existsSync(subjectSitemapPath)) {
+  expectedSubjectPaths = readSubjectSitemapPaths(
+    fs.readFileSync(subjectSitemapPath, "utf-8"),
+  );
+}
+const subjectCoverage = validateSubjectOutputCoverage({
+  pages,
+  expectedPaths: expectedSubjectPaths,
+  strict: strictReleaseBuild,
+});
+failures.push(...subjectCoverage.failures);
 let expectedChapterPaths = null;
 const chapterSitemapPath = path.join(distDir, "sitemap-chapters.xml");
 if (fs.existsSync(chapterSitemapPath)) {

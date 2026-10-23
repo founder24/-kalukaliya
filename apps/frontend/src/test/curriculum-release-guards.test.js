@@ -21,8 +21,10 @@ import {
 import {
   collectPrerenderOutputPaths,
   readChapterSitemapPaths,
+  readSubjectSitemapPaths,
   readTopicSitemapPaths,
   validateChapterOutputCoverage,
+  validateSubjectOutputCoverage,
   validateTopicOutputCoverage,
 } from "../../scripts/_prerender-output-coverage.mjs";
 
@@ -448,6 +450,75 @@ describe("chapter output coverage", () => {
     expect(result.failures).toEqual([
       `topic output paths differ from sitemap: missing=1 (${chapter}/topic/another-topic); unexpected=0`,
     ]);
+  });
+});
+
+describe("subject output coverage", () => {
+  const subject = "/ahsec/hs-1st-year/physics";
+  const stale = "/ahsec/hs-2nd-year/chemistry";
+  const pages = [
+    { rel: `${subject.slice(1)}/index.html`, body: '<div data-hydrate="subject">' },
+  ];
+
+  it("compares exact subject routes with the sitemap in strict releases", () => {
+    const expectedPaths = readSubjectSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${subject}</loc></url></urlset>`,
+    );
+
+    expect(expectedPaths).toEqual(new Set([subject]));
+    expect(
+      validateSubjectOutputCoverage({ pages, expectedPaths, strict: true }),
+    ).toEqual({ subjectsOnDisk: 1, failures: [] });
+  });
+
+  it("rejects subject routes missing from the sitemap or output", () => {
+    const missingOutput = validateSubjectOutputCoverage({
+      pages: [],
+      expectedPaths: new Set([subject]),
+      strict: true,
+    });
+    const unexpectedOutput = validateSubjectOutputCoverage({
+      pages: [
+        ...pages,
+        { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="subject">' },
+      ],
+      expectedPaths: new Set([subject]),
+      strict: true,
+    });
+
+    expect(missingOutput.failures).toEqual([
+      `subject output paths differ from sitemap: missing=1 (${subject}); unexpected=0`,
+    ]);
+    expect(unexpectedOutput.failures).toEqual([
+      `subject output paths differ from sitemap: missing=0; unexpected=1 (${stale})`,
+    ]);
+  });
+
+  it("requires the subject sitemap only for strict releases", () => {
+    expect(
+      validateSubjectOutputCoverage({
+        pages,
+        expectedPaths: null,
+        strict: true,
+      }).failures,
+    ).toEqual(["required subject sitemap missing: dist/sitemap-subjects.xml"]);
+    expect(
+      validateSubjectOutputCoverage({
+        pages,
+        expectedPaths: null,
+        strict: false,
+      }).failures,
+    ).toEqual([]);
+  });
+
+  it("keeps non-strict subject route mismatches non-blocking", () => {
+    expect(
+      validateSubjectOutputCoverage({
+        pages,
+        expectedPaths: new Set([stale]),
+        strict: false,
+      }),
+    ).toEqual({ subjectsOnDisk: 1, failures: [] });
   });
 });
 
