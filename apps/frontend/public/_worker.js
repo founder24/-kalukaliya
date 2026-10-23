@@ -278,6 +278,14 @@ function normalizedPathname(pathname) {
   return pathname.replace(/\/+$/, "");
 }
 
+function decodePathSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 const EXACT_FRONTEND_ROUTES = new Set([
   "/", "/home", "/terms", "/privacy", "/about", "/technology",
   "/status", "/exam-routine", "/payment/success", "/payment/cancel", "/login",
@@ -304,7 +312,10 @@ function isDeclaredFrontendRoute(pathname) {
 }
 
 function parseStudyRoute(pathname) {
-  const parts = normalizedPathname(pathname).split("/").filter(Boolean);
+  const parts = normalizedPathname(pathname)
+    .split("/")
+    .filter(Boolean)
+    .map(decodePathSegment);
   const isAssamese = parts[0] === "as";
   if (isAssamese) parts.shift();
 

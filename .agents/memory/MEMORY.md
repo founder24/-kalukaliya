@@ -94,6 +94,7 @@
 - [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — avoid the read-only Nix Python site; use user-scoped installs or isolated uv, with test tools kept out of runtime deps.
 - [Referral settlement controls](referral-settlement-controls.md) — fund and settle only frozen mature-claim statements with private payout evidence and immutable pause cutoffs
 - [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes
+- [Assamese assistant voice](assamese-assistant-voice.md) — Syrabit speaks as “মই” and addresses students as “আপুনি”.
 - [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials
 - [Cloudflare release provenance](cloudflare-release-provenance.md) — release builds must keep generated curriculum, review cache, and browser output out of tracked source
 - [Cloudflare Agent Readiness policy](cloudflare-agent-readiness-policy.md) — advertise only working services; leave unsupported agent protocols unscored rather than fabricate discovery metadata
