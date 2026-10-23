@@ -147,3 +147,17 @@ mtime_ms = 1792775517400
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/c5b06150-d734-4c9b-894e-7d93d675a6af/52b7932e-eada-4cea-91f0-2fd01435e520"
 storage_version_token = "1792775617903755"
 content_type = "text/csv"
+
+[[outputs]]
+id = "psbIK8eILoyGPlQqpXCk4"
+uri = "file://.agents/outputs/syrabit-2026-10-23T155537Z-165537Z-ray-content-metadata.csv"
+type = "table"
+title = "Ray-ID response metadata — 65 requests"
+description = "Cloudflare request metadata for all 65 Ray IDs: response content type, origin status, cache/request source, latency, and verification category. Bodies were not retained, so content classification remains unavailable."
+logical_id = "bd886233-4641-437d-ac79-afadc3f513b4"
+content_hash = "sha256:cdf26471edb0efc940f3170de59a58a48ccebbb4b28b7214f8e18aae083c95b4"
+size = 24857
+mtime_ms = 1792775958900
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/bd886233-4641-437d-ac79-afadc3f513b4/8499afab-93e2-4784-a34b-be4b806d8d8f"
+storage_version_token = "1792776261979925"
+content_type = "text/csv"
