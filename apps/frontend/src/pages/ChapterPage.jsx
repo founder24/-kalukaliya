@@ -254,7 +254,24 @@ export default function ChapterPage() {
   // route also overrides PageMeta's canonical to point back at the
   // chapter URL with the topic anchor, and shapes the SEO title /
   // description around the topic for AI-citation surfaces.
-  const topicSlugParam = params.topicSlug || null;
+  const topicSlugParam = (() => {
+    const slug =
+      params.topicSlug ||
+      routerLocation.pathname.match(/\/topic\/([^/]+)$/)?.[1] ||
+      null;
+    if (!slug) return null;
+    let normalizedSlug = slug;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const decoded = decodeURIComponent(normalizedSlug);
+        if (decoded === normalizedSlug) break;
+        normalizedSlug = decoded;
+      } catch {
+        break;
+      }
+    }
+    return normalizedSlug;
+  })();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialChapterData = useMemo(
     () => readChapterPreload(board, classSlug, subjectSlug, chapterSlug),
@@ -300,8 +317,9 @@ export default function ChapterPage() {
   const [contentMode, setContentMode] = useState(
     ['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes',
   );
-  const isAssamesePath = typeof window !== 'undefined'
-    && (window.location.pathname || '').startsWith('/as/');
+  // Use the router location rather than window.location so SSR and
+  // prerendering select the same localized topic record as the browser.
+  const isAssamesePath = routerLocation.pathname.startsWith('/as/');
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
@@ -933,6 +951,9 @@ export default function ChapterPage() {
     : (_chapterStreamSlug
       ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${chapterSlug}`
       : `${basePath}/${chapterSlug}`);
+  const _topicParentPath = topicSlugParam
+    ? routerLocation.pathname.replace(/\/topic\/[^/]+$/, "")
+    : _chapterPath;
   const chapterUrl = `https://syrabit.ai${_chapterPath}`;
   const canonical = topicSlugParam
     ? `https://syrabit.ai${routerLocation.pathname}`
@@ -1181,14 +1202,14 @@ export default function ChapterPage() {
           <nav aria-label="Breadcrumb" className="mb-6 text-sm text-muted-foreground">
             <Link to={isAssamesePath ? asBasePath : basePath}>{subjectName}</Link>
             <span className="mx-2">/</span>
-            <Link to={_chapterPath}>{chapterTitle}</Link>
+            <Link to={_topicParentPath}>{chapterTitle}</Link>
           </nav>
           <h1 className="mb-5 text-3xl font-bold">{topicTitle}</h1>
           <section className="prose dark:prose-invert max-w-none" aria-label={topicTitle}>
             <p>{topicDefinition}</p>
           </section>
           <p className="mt-8">
-            <Link className="text-primary underline" to={_chapterPath}>
+            <Link className="text-primary underline" to={_topicParentPath}>
               {isAssamesePath ? 'অধ্যায়ৰ সম্পূৰ্ণ টোকা পঢ়ক' : `Read the complete ${chapterTitle} chapter notes`}
             </Link>
           </p>

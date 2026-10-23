@@ -54,6 +54,7 @@ import {
   chapterLookupRecovery,
   selectChapterCandidates,
 } from "./_prerender-chapter-policy.mjs";
+import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -1228,7 +1229,11 @@ async function main() {
             });
           }
           for (const localized of locales) {
-            if (!publishedTopicPaths.has(localized.path)) continue;
+            if (
+              !publishedTopicPaths.has(
+                canonicalTopicSitemapPath(localized.path),
+              )
+            ) continue;
             try {
               const topicTitle = localized.title || topic.title;
               const topicHtml = await renderOne(renderRoute, htmlTemplate, {
