@@ -26,3 +26,10 @@ All 548 chapters had these fields zeroed in one DB update (Aug 2026):
 - Any future ingestion run will not touch Q&A or published_topics
 - To re-enable: un-comment the `generate_qa_from_notes()` call and restore the `qa_sections`/`published_topics` writes in `save_chapter_content()`
 - The `_QA_FROM_NOTES_SYSTEM_EN/AS` prompts and `generate_qa_from_notes()` function are still in the file and work — just not called
+
+## Official question-paper provenance
+Subject-level PYQ records hosted by a college digital library are not, by host or label alone, verified AHSEC/ASSEB-issued sources and are not chapter-level Q&A. Do not infer chapter attribution from a subject-level paper.
+
+**Why:** Chapter Questions are manually managed and need an auditable board/year/class source plus a reviewed chapter mapping; otherwise a paper can be misattributed as chapter content.
+
+**How to apply:** Verify the paper itself identifies the board, year, class, and subject. Keep unverified copies at subject level; only import chapter questions after reviewing their chapter mapping.

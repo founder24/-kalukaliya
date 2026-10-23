@@ -20,6 +20,7 @@ def make_args(**overrides):
         "limit": 2,
         "restart": False,
         "skip_index": True,
+        "only_empty": False,
         "clean_preambles": False,
     }
     values.update(overrides)
@@ -171,6 +172,7 @@ def test_production_approval_records_scope_without_credentials(monkeypatch, tmp_
             "limit": 2,
             "restart": False,
             "skip_index": True,
+                "only_empty": False,
             "clean_preambles": False,
         },
     }
@@ -392,6 +394,174 @@ def test_normal_import_approves_and_generates_without_cleanup_preview(
     )
     assert progress[-1]["status"] == "completed"
     assert not (tmp_path / importer.CLEANUP_PREVIEW_FILENAME).exists()
+
+
+def test_only_empty_import_filters_existing_notes_and_rag_content(
+    monkeypatch, tmp_path
+):
+    args = make_args(
+        limit=5,
+        delay=0,
+        only_empty=True,
+        skip_index=True,
+        clean_preambles=False,
+    )
+    populated = {
+        "id": "chapter-populated",
+        "subject_id": "subject-1",
+        "class_name": "HS 1st Year",
+        "subject_name": "Chemistry",
+        "subject_slug": "chemistry",
+        "title": "Already written",
+        "chapter_number": 1,
+        "notes_en": "Existing notes",
+        "rag_text": "Existing notes",
+        "rag_sections_en": "[]",
+    }
+    rag_conflict = {
+        **populated,
+        "id": "chapter-rag-conflict",
+        "title": "RAG-only content",
+        "chapter_number": 2,
+        "notes_en": "",
+        "rag_text": "Existing indexed content",
+    }
+    rag_document_conflict = {
+        **populated,
+        "id": "chapter-rag-document-conflict",
+        "title": "RAG document only",
+        "chapter_number": 3,
+        "notes_en": "",
+        "rag_text": "",
+        "has_notes_rag_document": 1,
+    }
+    rag_chunks_conflict = {
+        **populated,
+        "id": "chapter-rag-chunks-conflict",
+        "title": "RAG chunks only",
+        "chapter_number": 3,
+        "notes_en": "",
+        "rag_text": "",
+        "has_notes_rag_chunks": 1,
+    }
+    empty = {
+        **populated,
+        "id": "chapter-empty",
+        "title": "Target chapter",
+        "chapter_number": 4,
+        "notes_en": "",
+        "rag_text": "",
+        "rag_sections_en": "[]",
+    }
+    source = {
+        "title": "Target chapter",
+        "effective_number": 4,
+        "body_text": "Official textbook content " * 30,
+        "source_pdf_url": "https://example.test/target.pdf",
+    }
+    generated_notes = "## Target chapter\n\n" + ("Generated study notes. " * 60)
+
+    class FakeClient:
+        def __init__(self):
+            self.generated = []
+            self.executed = []
+
+        def generate(self, system_prompt, user_message, *, chapter_id=None):
+            self.generated.append(chapter_id)
+            return generated_notes
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+            return 1
+
+    client = FakeClient()
+    monkeypatch.setattr(importer, "parse_args", lambda: args)
+    monkeypatch.setattr(importer, "CloudflareClient", lambda: client)
+    monkeypatch.setattr(
+        importer,
+        "fetch_chapters",
+        lambda _client: [
+            populated,
+            rag_conflict,
+            rag_document_conflict,
+            rag_chunks_conflict,
+            empty,
+        ],
+    )
+
+    async def matching_sources(_args):
+        return {("11", "chemistry"): [source]}
+
+    monkeypatch.setattr(importer, "extract_sources", matching_sources)
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "PROGRESS_FILE", tmp_path / "progress.jsonl")
+    monkeypatch.setattr(importer, "APPROVAL_FILE", tmp_path / "approvals.jsonl")
+    monkeypatch.setattr(importer, "BACKUP_FILE", tmp_path / "notes-backup.jsonl")
+
+    assert asyncio.run(importer.main()) == 0
+    assert client.generated == ["chapter-empty"]
+    assert len(client.executed) == 2
+    assert client.executed[0][1][-1] == "chapter-empty"
+    assert "FROM chunks ck" in client.executed[0][0]
+    assert "ck.source_type = 'notes'" in client.executed[0][0]
+    assert "ck.medium = 'english'" in client.executed[0][0]
+    assert (
+        "WHERE LENGTH(TRIM(COALESCE(rag_documents.content, ''))) = 0"
+        in client.executed[1][0]
+    )
+    approval = read_jsonl(tmp_path / "approvals.jsonl")[0]
+    assert approval["scope"]["only_empty"] is True
+    backup = read_jsonl(tmp_path / "notes-backup.jsonl")
+    assert [row["chapter_id"] for row in backup] == ["chapter-empty"]
+
+
+def test_only_empty_conditional_write_skips_index_if_content_appears(
+    monkeypatch, tmp_path
+):
+    chapter = {
+        "id": "chapter-raced",
+        "subject_id": "subject-1",
+        "notes_en": "",
+        "rag_text": "",
+        "rag_sections_en": "[]",
+    }
+
+    class RaceClient:
+        def __init__(self):
+            self.executed = []
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+            return 0
+
+        def vector_delete(self, _vector_ids):
+            raise AssertionError("an empty-only race must not replace the index")
+
+    client = RaceClient()
+    monkeypatch.setattr(importer, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(importer, "BACKUP_FILE", tmp_path / "notes-backup.jsonl")
+
+    result = importer.replace_notes_and_index(
+        client,
+        chapter,
+        "## Target chapter\n\n" + ("Generated study notes. " * 60),
+        [{"heading": "Target chapter", "content": "Generated study notes."}],
+        "https://example.test/target.pdf",
+        index=True,
+        only_if_empty=True,
+    )
+
+    assert result is None
+    assert len(client.executed) == 1
+    sql = client.executed[0][0]
+    assert "TRIM(notes_en) = ''" in sql
+    assert "TRIM(rag_text) = ''" in sql
+    assert "LOWER(TRIM(rag_sections_en)) IN ('', '[]', 'null')" in sql
+    assert "NOT EXISTS" in sql
+    assert "ahsec-notes-en:' || chapters.id" in sql
+    assert "FROM chunks ck" in sql
+    assert "ck.source_type = 'notes'" in sql
+    assert "ck.medium = 'english'" in sql
 
 
 def test_normal_import_replaces_index_and_chunk_mappings_without_cleanup_preview(
