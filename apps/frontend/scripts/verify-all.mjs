@@ -22,6 +22,7 @@ import {
   validatePrerenderManifest,
 } from "./release-guards.mjs";
 import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
+import { countPrerenderHydrationKinds } from "./_prerender-hydration-counts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -469,13 +470,10 @@ if (fs.existsSync(manifestPath)) {
   warnings.push(...manifestResult.warnings);
 }
 
-// Count prerendered pages on disk for reporting.
-let subjectsOnDisk = 0;
-let chaptersOnDisk = 0;
-for (const page of pages) {
-  if (/data-hydrate="subject"/.test(page.body)) subjectsOnDisk++;
-  if (/data-hydrate="chapter"/.test(page.body)) chaptersOnDisk++;
-}
+// Topic pages also hydrate with ChapterPage, but are tracked separately
+// from chapter routes in the prerender manifest.
+const { subjects: subjectsOnDisk, chapters: chaptersOnDisk } =
+  countPrerenderHydrationKinds(pages);
 if (manifestSubjects > 0 && subjectsOnDisk === 0) {
   fail(`manifest claimed ${manifestSubjects} subjects written but 0 found on disk`);
 }
