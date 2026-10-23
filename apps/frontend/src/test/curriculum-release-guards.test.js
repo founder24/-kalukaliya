@@ -18,6 +18,11 @@ import {
   chapterLookupRecovery,
   selectChapterCandidates,
 } from "../../scripts/_prerender-chapter-policy.mjs";
+import {
+  collectPrerenderOutputPaths,
+  readChapterSitemapPaths,
+  validateChapterOutputCoverage,
+} from "../../scripts/_prerender-output-coverage.mjs";
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
@@ -290,6 +295,54 @@ describe("published chapter prerender coverage", () => {
     expect(
       chapterLookupRecovery(`${subjectUrl}/draft`, new Set(), true, true),
     ).toBe("use-static-fallback");
+  });
+});
+
+describe("chapter output coverage", () => {
+  const chapter = "/ahsec/hs-1st-year/physics/laws-of-motion";
+  const topic = `${chapter}/topic/inertia`;
+
+  it("counts chapter routes separately from topic pages using the same hydrate marker", () => {
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+    const expectedPaths = readChapterSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${chapter}</loc></url></urlset>`,
+    );
+
+    expect(collectPrerenderOutputPaths(pages).chapters).toEqual(
+      new Set([chapter]),
+    );
+    expect(
+      validateChapterOutputCoverage({
+        pages,
+        expectedPaths,
+        manifestCount: 1,
+        strict: true,
+      }),
+    ).toEqual({ chaptersOnDisk: 1, failures: [] });
+  });
+
+  it("rejects stale chapter snapshots outside the chapter sitemap", () => {
+    const stale = "/ahsec/hs-1st-year/physics/old-chapter";
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+
+    const result = validateChapterOutputCoverage({
+      pages,
+      expectedPaths: new Set([chapter]),
+      manifestCount: 1,
+      strict: true,
+    });
+
+    expect(result.chaptersOnDisk).toBe(2);
+    expect(result.failures.join("\n")).toContain(
+      "chapter output paths differ from sitemap",
+    );
   });
 });
 

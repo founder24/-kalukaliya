@@ -22,6 +22,11 @@ import {
   validatePrerenderManifest,
 } from "./release-guards.mjs";
 import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
+import {
+  collectPrerenderOutputPaths,
+  readChapterSitemapPaths,
+  validateChapterOutputCoverage,
+} from "./_prerender-output-coverage.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -469,13 +474,25 @@ if (fs.existsSync(manifestPath)) {
   warnings.push(...manifestResult.warnings);
 }
 
-// Count prerendered pages on disk for reporting.
-let subjectsOnDisk = 0;
-let chaptersOnDisk = 0;
-for (const page of pages) {
-  if (/data-hydrate="subject"/.test(page.body)) subjectsOnDisk++;
-  if (/data-hydrate="chapter"/.test(page.body)) chaptersOnDisk++;
+// Count chapter routes rather than every page hydrated by ChapterPage:
+// topic pages share that component but are tracked separately in the manifest.
+const { subjects: subjectOutputPaths } = collectPrerenderOutputPaths(pages);
+const subjectsOnDisk = subjectOutputPaths.size;
+let expectedChapterPaths = null;
+const chapterSitemapPath = path.join(distDir, "sitemap-chapters.xml");
+if (fs.existsSync(chapterSitemapPath)) {
+  expectedChapterPaths = readChapterSitemapPaths(
+    fs.readFileSync(chapterSitemapPath, "utf-8"),
+  );
 }
+const chapterCoverage = validateChapterOutputCoverage({
+  pages,
+  expectedPaths: expectedChapterPaths,
+  manifestCount: manifestChapters,
+  strict: strictReleaseBuild,
+});
+const chaptersOnDisk = chapterCoverage.chaptersOnDisk;
+failures.push(...chapterCoverage.failures);
 if (manifestSubjects > 0 && subjectsOnDisk === 0) {
   fail(`manifest claimed ${manifestSubjects} subjects written but 0 found on disk`);
 }
@@ -484,7 +501,7 @@ if (manifestChapters > 0 && chaptersOnDisk === 0) {
 }
 if (
   strictReleaseBuild &&
-  (subjectsOnDisk !== manifestSubjects || chaptersOnDisk !== manifestChapters)
+  subjectsOnDisk !== manifestSubjects
 ) {
   fail(
     `prerender output is incomplete: manifest subjects=${manifestSubjects}, ` +
