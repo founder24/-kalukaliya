@@ -321,8 +321,9 @@ export default function ChapterPage() {
   const [contentMode, setContentMode] = useState(
     ['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes',
   );
-  const isAssamesePath = typeof window !== 'undefined'
-    && (window.location.pathname || '').startsWith('/as/');
+  // Use the router location rather than window.location so SSR and
+  // prerendering select the same localized topic record as the browser.
+  const isAssamesePath = routerLocation.pathname.startsWith('/as/');
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
