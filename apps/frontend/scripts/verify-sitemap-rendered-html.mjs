@@ -6,6 +6,7 @@ import { decodeSitemapPath } from "./_topic-sitemap-path.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIST_DIR = path.resolve(__dirname, "..", "dist");
+const CANONICAL_SITE_ORIGIN = "https://syrabit.ai";
 const GENERIC_SHELL =
   /Syrabit\.ai\s*(?:—|&mdash;)\s*Educational Browser For Assam Board Students/i;
 
@@ -120,6 +121,11 @@ function validateRenderedPage({ distDir, filename, loc }) {
   if (!/^https?:$/.test(pageUrl.protocol)) {
     return [`${filename}: unsupported page URL protocol: ${loc}`];
   }
+  if (pageUrl.origin !== CANONICAL_SITE_ORIGIN) {
+    issues.push(
+      `${loc}: sitemap page URL origin is not canonical (expected ${CANONICAL_SITE_ORIGIN}, got ${pageUrl.origin})`,
+    );
+  }
   if (pageUrl.search || pageUrl.hash) {
     issues.push(`${loc}: sitemap page URLs must not include a query or fragment`);
   }
@@ -154,7 +160,7 @@ function validateRenderedPage({ distDir, filename, loc }) {
       (attribute(tag, "rel") || "").toLowerCase() === "canonical",
   );
   const canonicalHref = canonicalTag ? attribute(canonicalTag, "href") : null;
-  const expectedCanonical = `${pageUrl.origin}${route}`;
+  const expectedCanonical = `${CANONICAL_SITE_ORIGIN}${route}`;
   const expectedMarkerPath = route;
   const isTopicPage = /\/topic\/[^/]+$/i.test(route);
 
@@ -231,7 +237,10 @@ export function verifySitemapRenderedHtml({ distDir = DEFAULT_DIST_DIR } = {}) {
       errors.push(`${page.filename}: invalid page URL: ${page.loc}`);
       continue;
     }
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      errors.push(`${page.filename}: duplicate curriculum sitemap URL: ${page.loc}`);
+      continue;
+    }
     seen.add(key);
     checked++;
     errors.push(...validateRenderedPage({ ...page, distDir: path.resolve(distDir) }));

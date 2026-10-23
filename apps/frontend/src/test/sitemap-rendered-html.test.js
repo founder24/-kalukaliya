@@ -12,6 +12,8 @@ function createDist({
   omitPage = false,
   malformedTopic = false,
   chapterRoute = "/ahsec/hs-1st-year/physics/laws-of-motion",
+  subjectOrigin = "https://syrabit.ai",
+  duplicateTopicLoc = null,
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "syrabit-sitemap-html-"));
   tempDirs.push(root);
@@ -26,7 +28,7 @@ function createDist({
   );
   fs.writeFileSync(
     path.join(root, "sitemap-subjects.xml"),
-    `<urlset><url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics</loc></url></urlset>`,
+    `<urlset><url><loc>${subjectOrigin}/ahsec/hs-1st-year/physics</loc></url></urlset>`,
   );
   fs.writeFileSync(
     path.join(root, "sitemap-chapters.xml"),
@@ -34,7 +36,10 @@ function createDist({
   );
   fs.writeFileSync(
     path.join(root, "sitemap-topics.xml"),
-    `<urlset><url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia</loc></url></urlset>`,
+    `<urlset>
+      <url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia</loc></url>
+      ${duplicateTopicLoc ? `<url><loc>${duplicateTopicLoc}</loc></url>` : ""}
+    </urlset>`,
   );
   fs.writeFileSync(path.join(root, "sitemap-static.xml"), "<urlset></urlset>");
 
@@ -106,6 +111,32 @@ describe("sitemap rendered HTML release check", () => {
 
     expect(result.checked).toBe(3);
     expect(result.errors).toEqual([]);
+  });
+
+  it("rejects a subject sitemap URL on a non-canonical host", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({ subjectOrigin: "https://alternate.example" }),
+    });
+
+    expect(
+      result.errors.some((error) =>
+        error.includes("sitemap page URL origin is not canonical"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects duplicate curriculum URLs across content sitemaps", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({
+        duplicateTopicLoc: "https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion",
+      }),
+    });
+
+    expect(
+      result.errors.some((error) =>
+        error.includes("duplicate curriculum sitemap URL"),
+      ),
+    ).toBe(true);
   });
 
   it.each([
