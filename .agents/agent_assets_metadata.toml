@@ -119,3 +119,31 @@ mtime_ms = 1792702000236
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/7bc8331a-25d9-44bb-b0ff-a1b882c27d17/38f99a8d-785a-4c4c-b040-3de50f91bfe8"
 storage_version_token = "1792702113284971"
 content_type = "text/csv"
+
+[[outputs]]
+id = "TfDwoE6YBQq1Yo1CBOfyx"
+uri = "file://.agents/outputs/syrabit-2026-10-23T155537Z-165537Z-request-groups.csv"
+type = "table"
+title = "Cloudflare request groups — 60-minute audit"
+description = "750 grouped request records for the screenshot’s exact UTC hour, with status, path, Cloudflare bot category, User-Agent, counts, timestamps, and a response Ray ID where present."
+logical_id = "210242cf-c8bf-44b6-a0aa-aaae729de239"
+content_hash = "sha256:e4a8a5d9acb0ae5b5705ced81d8e892f399514c8ad5cba71aba06a5799081435"
+size = 159632
+mtime_ms = 1792775517152
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/210242cf-c8bf-44b6-a0aa-aaae729de239/26adf6a6-ceee-460c-831a-f85c5f55bd3e"
+storage_version_token = "1792775616604640"
+content_type = "text/csv"
+
+[[outputs]]
+id = "VhNSabUQkt1NBguYWH7fZ"
+uri = "file://.agents/outputs/syrabit-2026-10-23T155537Z-165537Z-sensitive-200-204.csv"
+type = "table"
+title = "Sensitive-looking paths returning 200/204"
+description = "65 returned request records for sensitive-looking paths with successful HTTP statuses. These do not prove data exposure; response bodies were unavailable."
+logical_id = "c5b06150-d734-4c9b-894e-7d93d675a6af"
+content_hash = "sha256:079cb72f376a0de5ec2af0369c108e20a6e9b19b92853b49eb41e492517e5a9e"
+size = 11141
+mtime_ms = 1792775517400
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/c5b06150-d734-4c9b-894e-7d93d675a6af/52b7932e-eada-4cea-91f0-2fd01435e520"
+storage_version_token = "1792775617903755"
+content_type = "text/csv"
