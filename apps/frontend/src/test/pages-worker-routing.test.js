@@ -81,6 +81,51 @@ describe('Pages worker route fallbacks', () => {
     expect(response.headers.get('x-source')).toBe('bot-render-not-found');
   });
 
+  it('resolves a percent-encoded Assamese topic slug against its published slug', async () => {
+    const topicSlug = 'সাৰ্থক-সংখ্যা';
+    const definitionAs = Array(45).fill('অসমীয়া').join(' ');
+    const backendFetch = vi.fn(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/v1/content/chapter-by-slug-as/')) {
+        return new Response(JSON.stringify({
+          chapter_id: 'chapter-1',
+          published_topics: [{
+            title: 'Significant Figures',
+            topic_slug: 'significant-figures',
+            definition: Array(45).fill('definition').join(' '),
+            title_as: 'সাৰ্থক সংখ্যা',
+            topic_slug_as: topicSlug,
+            definition_as: definitionAs,
+            definition_status: 'ok',
+          }],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(
+        '<!doctype html><html lang="as"><head><title>সাৰ্থক সংখ্যা</title></head><body><h1>সাৰ্থক সংখ্যা</h1></body></html>',
+        { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+      );
+    });
+    vi.stubGlobal('fetch', backendFetch);
+
+    const path = `/as/ahsec/hs-1st-year/physics/units-and-measurements/topic/${encodeURIComponent(topicSlug)}`;
+    const response = await pagesWorker.fetch(
+      new Request(`https://syrabit.ai${path}`, {
+        headers: { Accept: 'text/html', 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
+      }),
+      { ASSETS: { fetch: async () => new Response('missing', { status: 404 }) } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-source')).toBe('bot-render');
+    expect(String(backendFetch.mock.calls[0][0])).toContain(
+      '/api/v1/content/chapter-by-slug-as/ahsec/hs-1st-year/physics/units-and-measurements',
+    );
+    expect(await response.text()).toContain('<h1>সাৰ্থক সংখ্যা</h1>');
+  });
+
   it('returns a real 404 for a missing subject instead of serving the SPA shell', async () => {
     const apiFetch = vi.fn(async () => new Response('{"detail":"Subject not found"}', {
       status: 404,
