@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { decodeHtmlEntities } from "./_html-text.mjs";
-import { decodeSitemapPath } from "./_topic-sitemap-path.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIST_DIR = path.resolve(__dirname, "..", "dist");
@@ -11,7 +9,12 @@ const GENERIC_SHELL =
   /Syrabit\.ai\s*(?:—|&mdash;)\s*Educational Browser For Assam Board Students/i;
 
 function decodeXml(value) {
-  return decodeHtmlEntities(value);
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 function sitemapLocs(xml) {
@@ -22,7 +25,7 @@ function sitemapLocs(xml) {
 
 function normalizedPathname(pathname) {
   if (!pathname || pathname === "/") return "/";
-  return decodeSitemapPath(pathname).replace(/\/+$/, "");
+  return pathname.replace(/\/+$/, "");
 }
 
 function attribute(tag, name) {
