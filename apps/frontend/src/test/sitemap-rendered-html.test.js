@@ -7,7 +7,12 @@ import { SITEMAP_ENDPOINTS } from "../../scripts/generate-static-data.mjs";
 
 const tempDirs = [];
 
-function createDist({ genericShell = false, omitPage = false, malformedTopic = false } = {}) {
+function createDist({
+  genericShell = false,
+  omitPage = false,
+  malformedTopic = false,
+  chapterRoute = "/ahsec/hs-1st-year/physics/laws-of-motion",
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "syrabit-sitemap-html-"));
   tempDirs.push(root);
   fs.writeFileSync(
@@ -25,7 +30,7 @@ function createDist({ genericShell = false, omitPage = false, malformedTopic = f
   );
   fs.writeFileSync(
     path.join(root, "sitemap-chapters.xml"),
-    `<urlset><url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion</loc></url></urlset>`,
+    `<urlset><url><loc>https://syrabit.ai${encodeURI(chapterRoute)}</loc></url></urlset>`,
   );
   fs.writeFileSync(
     path.join(root, "sitemap-topics.xml"),
@@ -44,8 +49,8 @@ function createDist({ genericShell = false, omitPage = false, malformedTopic = f
       <div id="root" data-hydrate="subject"><main><h1>Physics</h1></main></div>
     </body></html>`;
   const chapterHtml = `<html><head><title>${chapterTitle}</title>
-    <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion">
-    <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion"></head>
+    <link rel="canonical" href="https://syrabit.ai${encodeURI(chapterRoute)}">
+    <meta name="syrabit-prerender-path" content="${chapterRoute}"></head>
     <body><noscript><h1>${shellTitle}</h1></noscript>
       <div id="root" data-hydrate="chapter"><main><h1>${genericShell ? shellTitle : "Laws of Motion"}</h1></main></div>
     </body></html>`;
@@ -64,11 +69,10 @@ function createDist({ genericShell = false, omitPage = false, malformedTopic = f
   fs.mkdirSync(path.join(root, "ahsec/hs-1st-year/physics"), { recursive: true });
   fs.writeFileSync(path.join(root, "ahsec/hs-1st-year/physics/index.html"), subjectHtml);
   if (!omitPage) {
-    fs.mkdirSync(path.join(root, "ahsec/hs-1st-year/physics/laws-of-motion"), {
-      recursive: true,
-    });
+    const chapterOutputDir = path.join(root, ...chapterRoute.split("/").filter(Boolean));
+    fs.mkdirSync(chapterOutputDir, { recursive: true });
     fs.writeFileSync(
-      path.join(root, "ahsec/hs-1st-year/physics/laws-of-motion/index.html"),
+      path.join(chapterOutputDir, "index.html"),
       chapterHtml,
     );
   }
@@ -99,6 +103,18 @@ describe("sitemap rendered HTML release check", () => {
 
   it("accepts subject and chapter pages with route-specific prerendered content", () => {
     const result = verifySitemapRenderedHtml({ distDir: createDist() });
+
+    expect(result.checked).toBe(3);
+    expect(result.errors).toEqual([]);
+  });
+
+  it.each([
+    ["spaces", "/ahsec/hs-1st-year/physics/laws of motion"],
+    ["non-ASCII characters", "/ahsec/hs-1st-year/physics/গতিৰ নিয়ম"],
+  ])("resolves percent-encoded sitemap routes containing %s to normalized output files", (_label, chapterRoute) => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({ chapterRoute }),
+    });
 
     expect(result.checked).toBe(3);
     expect(result.errors).toEqual([]);

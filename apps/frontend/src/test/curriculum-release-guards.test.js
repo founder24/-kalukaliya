@@ -324,6 +324,29 @@ describe("chapter output coverage", () => {
     ).toEqual({ chaptersOnDisk: 1, failures: [] });
   });
 
+  it.each([
+    ["spaces", "/ahsec/hs-1st-year/physics/laws of motion"],
+    ["non-ASCII characters", "/ahsec/hs-1st-year/physics/গতিৰ নিয়ম"],
+  ])("matches sitemap and generated output routes containing %s", (_label, route) => {
+    const pages = [
+      { rel: `${route.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+    const expectedPaths = readChapterSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${encodeURI(route)}</loc></url></urlset>`,
+    );
+
+    expect(expectedPaths).toEqual(new Set([route]));
+    expect(collectPrerenderOutputPaths(pages).chapters).toEqual(expectedPaths);
+    expect(
+      validateChapterOutputCoverage({
+        pages,
+        expectedPaths,
+        manifestCount: 1,
+        strict: true,
+      }),
+    ).toEqual({ chaptersOnDisk: 1, failures: [] });
+  });
+
   it("rejects stale chapter snapshots outside the chapter sitemap", () => {
     const stale = "/ahsec/hs-1st-year/physics/old-chapter";
     const pages = [
