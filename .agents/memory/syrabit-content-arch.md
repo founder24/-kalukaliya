@@ -44,8 +44,8 @@ For library content, AEC courses are subject cards under Degree → semester →
 **How to apply:** Place each syllabus AEC card under its correct semester and existing degree stream, while leaving the profile selector taxonomy unchanged.
 
 ## Curriculum content rollout sequence
-The intended upload order is: create the subject card; upload the English syllabus first and derive topic-wise chapter-page metadata from it; add individual PYQs as standalone pages; then add topic-wise PYQs to each chapter’s Questions section, English followed by Assamese; finally add topic-wise Notes content, English followed by Assamese. Chapters may be processed in parallel, while each chapter follows the English-then-Assamese order.
+The intended upload order is: create the subject card; upload the English syllabus first and derive topic-wise chapter-page metadata from it; add individual PYQs; then add chapter-wise Questions and Notes content, English followed by Assamese per chapter. The individual PYQ pages, chapter Notes pages, and chapter Questions pages are three independently indexable content families. A later spoon-feeding pipeline compiles each topic’s Notes first, then its PYQs, and publishes topic-level child pages under the chapter Notes and Questions sections. Answers in topic-level PYQs must be derived only from that topic’s Notes.
 
-**Why:** The user specified a staged bilingual workflow that uses the English syllabus as the source for chapter and topic metadata and separates standalone PYQ pages from chapter-level Questions and Notes.
+**Why:** The user specified a staged bilingual workflow with three independently indexed content families, followed by topic-level child pages whose PYQ answers are grounded in the matching Notes.
 
-**How to apply:** Preserve this order in content-ingestion and staff upload flows. Treat only standalone PYQ routes as individual indexable pages; embedded chapter questions and notes remain part of their chapter page unless a separate route is intentionally created.
+**How to apply:** Preserve this order in content-ingestion and staff upload flows. Keep individual PYQ, chapter Notes, and chapter Questions routes independently publishable and crawlable; generate topic children only after both source sections are available, compiling Notes before Questions and never sourcing answers from outside the matching Notes.
