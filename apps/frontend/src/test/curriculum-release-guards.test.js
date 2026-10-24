@@ -16,6 +16,7 @@ import {
 } from "../../scripts/generate-static-data.mjs";
 import {
   chapterLookupRecovery,
+  enumerateSitemapSubjectRoutes,
   selectChapterCandidates,
 } from "../../scripts/_prerender-chapter-policy.mjs";
 import {
@@ -27,6 +28,66 @@ import {
   validateSubjectOutputCoverage,
   validateTopicOutputCoverage,
 } from "../../scripts/_prerender-output-coverage.mjs";
+
+describe("sitemap subject route resolution", () => {
+  it("keeps the stream-specific subject selected by the published chapter paths", () => {
+    const routes = [
+      {
+        board: "ahsec",
+        classSlug: "hs-2nd-year",
+        streamSlug: "arts",
+        subjectSlug: "economics",
+        subject: { id: "arts-economics" },
+      },
+      {
+        board: "ahsec",
+        classSlug: "hs-2nd-year",
+        streamSlug: "commerce",
+        subjectSlug: "economics",
+        subject: { id: "commerce-economics" },
+      },
+    ];
+    const chapterPaths = new Set([
+      "/ahsec/hs-2nd-year/economics/government-budget-and-the-economy",
+      "/ahsec/hs-2nd-year/economics/indian-economic-development",
+      "/ahsec/hs-2nd-year/economics/introductory-macroeconomics",
+    ]);
+    const chapters = [
+      { subject_id: "arts-economics", slug: "indian-economic-development" },
+      { subject_id: "commerce-economics", slug: "government-budget-and-the-economy" },
+      { subject_id: "commerce-economics", slug: "introductory-macroeconomics" },
+    ];
+
+    expect(enumerateSitemapSubjectRoutes(chapterPaths, routes, chapters)).toEqual([
+      {
+        ...routes[1],
+        board: "ahsec",
+        classSlug: "hs-2nd-year",
+        subjectSlug: "economics",
+      },
+    ]);
+  });
+
+  it("fails rather than guessing when duplicate stream subjects match the sitemap equally", () => {
+    const routes = ["arts", "commerce"].map((streamSlug) => ({
+      board: "ahsec",
+      classSlug: "hs-2nd-year",
+      streamSlug,
+      subjectSlug: "economics",
+      subject: { id: `${streamSlug}-economics` },
+    }));
+    const chapterPaths = new Set([
+      "/ahsec/hs-2nd-year/economics/government-budget-and-the-economy",
+    ]);
+    const chapters = routes.map((route) => ({
+      subject_id: route.subject.id,
+      slug: "government-budget-and-the-economy",
+    }));
+
+    expect(() => enumerateSitemapSubjectRoutes(chapterPaths, routes, chapters))
+      .toThrow(/ambiguous stream for published subject/);
+  });
+});
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
