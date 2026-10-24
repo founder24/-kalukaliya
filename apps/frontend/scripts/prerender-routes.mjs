@@ -52,6 +52,7 @@ import { injectPrerenderPath } from "./_prerender-marker.mjs";
 import { createJsonRequestPool } from "./_prerender-request-pool.mjs";
 import {
   chapterLookupRecovery,
+  enumerateSitemapSubjectRoutes,
   selectChapterCandidates,
 } from "./_prerender-chapter-policy.mjs";
 import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
@@ -634,27 +635,6 @@ function readPublishedTopicPaths() {
   return paths;
 }
 
-function enumerateSitemapSubjectRoutes(chapterPaths, bundleRoutes) {
-  const fallbackSubjects = new Map(
-    bundleRoutes.map((route) => [subjectPath(route), route.subject]),
-  );
-  const routes = new Map();
-  for (const chapterPath of chapterPaths) {
-    const [board, classSlug, subjectSlug] = chapterPath.split("/").filter(Boolean);
-    const url = `/${board}/${classSlug}/${subjectSlug}`;
-    if (!routes.has(url)) {
-      routes.set(url, {
-        board,
-        classSlug,
-        subjectSlug,
-        // resolve-subject is authoritative; this is only an offline fallback.
-        subject: fallbackSubjects.get(url) || {},
-      });
-    }
-  }
-  return [...routes.values()];
-}
-
 function subjectPath(route) {
   return `/${route.board}/${route.classSlug}/${route.subjectSlug}`;
 }
@@ -776,6 +756,7 @@ async function main() {
   const sitemapSubjectRoutes = enumerateSitemapSubjectRoutes(
     publishedChapterPaths,
     allSubjectRoutes,
+    staticBundle.chapters || [],
   );
   if (STRICT_CURRICULUM_BUILD && (allSubjectRoutes.length === 0 || sitemapSubjectRoutes.length === 0)) {
     throw new Error(
@@ -900,7 +881,7 @@ async function main() {
       budgetExceeded = true;
       return;
     }
-    const { board, classSlug, subjectSlug, subject } = route;
+    const { board, classSlug, streamSlug, subjectSlug, subject } = route;
     const url = `/${board}/${classSlug}/${subjectSlug}`;
     const canonical = `https://syrabit.ai${url}`;
 
@@ -1082,8 +1063,11 @@ async function main() {
 
       let chapterPayload;
       try {
+        const chapterLookupPath = streamSlug
+          ? `${board}/${classSlug}/${streamSlug}/${subjectSlug}/${chapterSlug}`
+          : `${board}/${classSlug}/${subjectSlug}/${chapterSlug}`;
         chapterPayload = await fetchJson(
-          `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapter-by-slug/${board}/${classSlug}/${subjectSlug}/${chapterSlug}`,
+          `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapter-by-slug/${chapterLookupPath}`,
         );
       } catch (err) {
         // A published sitemap chapter can outlive the detailed API record
