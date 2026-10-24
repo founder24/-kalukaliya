@@ -449,13 +449,9 @@ describe('Worker-native site-operation routes', () => {
         definition_status: 'ok',
       }]),
     };
-    const env = {
-      ...testEnv(),
-      DB: { prepare: () => ({ all: async () => ({ results: [row] }) }) },
-    } as unknown as Env;
+    const env = { ...testEnv(), DB: { prepare: () => ({ all: async () => ({ results: [row] }) }) } } as unknown as Env;
     const response = await api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env);
     const xml = await response.text();
-
     expect(xml).toContain(`/as/ahsec/class-12/physics/newtons-laws/topic/${encodeURIComponent('অসমীয়া-বিষয়')}`);
     expect(xml).not.toContain('<loc>https://syrabit.ai/ahsec/class-12/physics/newtons-laws/topic/');
     expect((xml.match(/<loc>/g) ?? []).length).toBe(1);

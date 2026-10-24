@@ -270,11 +270,7 @@ export default function ChapterPage() {
         break;
       }
     }
-    try {
-      return normalizedSlug;
-    } catch {
-      return normalizedSlug;
-    }
+    return normalizedSlug;
   })();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialChapterData = useMemo(

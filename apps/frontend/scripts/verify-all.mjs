@@ -23,7 +23,6 @@ import {
 } from "./release-guards.mjs";
 import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
 import {
-  collectPrerenderOutputPaths,
   readChapterSitemapPaths,
   readSubjectSitemapPaths,
   readTopicSitemapPaths,
@@ -31,6 +30,7 @@ import {
   validateSubjectOutputCoverage,
   validateTopicOutputCoverage,
 } from "./_prerender-output-coverage.mjs";
+import { countPrerenderHydrationKinds } from "./_prerender-hydration-counts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -478,10 +478,10 @@ if (fs.existsSync(manifestPath)) {
   warnings.push(...manifestResult.warnings);
 }
 
-// Count chapter routes rather than every page hydrated by ChapterPage:
-// topic pages share that component but are tracked separately in the manifest.
-const { subjects: subjectOutputPaths } = collectPrerenderOutputPaths(pages);
-const subjectsOnDisk = subjectOutputPaths.size;
+// Count subject and chapter routes separately from topic pages, which also
+// hydrate with ChapterPage.
+const { subjects: subjectsOnDisk, chapters: chaptersOnDisk } =
+  countPrerenderHydrationKinds(pages);
 const subjectSitemapPath = path.join(distDir, "sitemap-subjects.xml");
 let expectedSubjectPaths = null;
 if (fs.existsSync(subjectSitemapPath)) {
@@ -508,7 +508,6 @@ const chapterCoverage = validateChapterOutputCoverage({
   manifestCount: manifestChapters,
   strict: strictReleaseBuild,
 });
-const chaptersOnDisk = chapterCoverage.chaptersOnDisk;
 failures.push(...chapterCoverage.failures);
 const topicSitemapPath = path.join(distDir, "sitemap-topics.xml");
 let expectedTopicPaths = null;
