@@ -18,7 +18,7 @@ SET published_topics = json_set(
       AND json_extract(topic.value, '$.language') = 'English'
     LIMIT 1
   ) || '].definition',
-  'A scalar quantity has magnitude only and is specified by a number and its unit; it has no associated direction. Distance, mass, temperature, and time are examples. Scalars combine according to ordinary algebra. A vector quantity has both magnitude and direction and follows the triangle law (equivalently, the parallelogram law) of addition. Displacement, velocity, acceleration, and force are examples. A vector is written in bold, such as 𝐯, or with an arrow, such as v⃗; its magnitude is written |𝐯|. Source: NCERT, Physics Part I, Class XI, Chapter 3, section 3.2, “Scalars and Vectors.”'
+  'A scalar quantity has magnitude only and is specified by a number and its unit. It has no associated direction. Distance, mass, temperature, and time are examples. Scalars combine according to ordinary algebra. A vector quantity has both magnitude and direction and follows the triangle law (equivalently, the parallelogram law) of addition. Displacement, velocity, acceleration, and force are examples. A vector is written in bold, such as 𝐯, or with an arrow, such as v⃗. Its magnitude is written |𝐯|. Source: NCERT, Physics Part I, Class XI, Chapter 3, section 3.2, “Scalars and Vectors.”'
 ),
 updated_at = unixepoch()
 WHERE chapter.id = '6a19e0d84d8e6ddb2deb7d07'
@@ -58,7 +58,7 @@ WHERE chapter.id = '6a19e0f44d8e6ddb2deb7d6f'
   );
 
 -- Remove the Nigeria/federalism topic from the Nationalism chapter. The
--- source confirms that this example belongs in a Federalism chapter; this
+-- source confirms that this example belongs in a Federalism chapter and this
 -- migration does not invent or create an unverified replacement chapter.
 UPDATE chapters AS chapter
 SET published_topics = json_remove(

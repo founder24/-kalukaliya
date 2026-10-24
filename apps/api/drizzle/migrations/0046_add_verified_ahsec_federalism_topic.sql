@@ -10,7 +10,7 @@
 --
 -- The existing HS 1st Year Political Science subject has no Federalism
 -- chapter record. Create the verified route without altering Nationalism.
--- This migration is not applied here; release publication remains separate.
+-- This migration is not applied here. Release publication remains separate.
 
 INSERT INTO chapters (
   id, subject_id, title, slug, chapter_number, status, content_type, published_topics
