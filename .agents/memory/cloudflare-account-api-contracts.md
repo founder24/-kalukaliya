@@ -59,3 +59,16 @@ when authentication, account, and index are valid.
 
 **How to apply:** Use the underscore paths in direct REST clients, and validate
 the endpoint contract with an empty ID list before beginning a bulk mutation.
+
+R2 location hints are best-effort placement preferences, not residency
+guarantees. Persistent Logpush-to-R2 jobs require durable R2 destination
+credentials; temporary R2 credentials expire within seven days.
+
+**Why:** The Cloudflare API integration can create buckets and temporary
+credentials, but it does not expose the dashboard's automatic R2 Logpush setup
+or a persistent R2 token-creation flow.
+
+**How to apply:** Use Cloudflare Dashboard's automatic R2 destination setup for
+ongoing Logpush, and confirm the bucket's actual location before sending request
+logs. Do not use seven-day credentials for a persistent job or claim a location
+hint guarantees data residency.
