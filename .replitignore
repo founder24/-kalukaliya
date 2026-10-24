@@ -3,3 +3,6 @@
 
 # No need to store the pnpm store twice.
 .local
+
+# Generated review exports are not part of app builds or deployments.
+/generated-artifacts/

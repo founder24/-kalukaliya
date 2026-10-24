@@ -22,6 +22,14 @@ import {
   validatePrerenderManifest,
 } from "./release-guards.mjs";
 import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
+import {
+  readChapterSitemapPaths,
+  readSubjectSitemapPaths,
+  readTopicSitemapPaths,
+  validateChapterOutputCoverage,
+  validateSubjectOutputCoverage,
+  validateTopicOutputCoverage,
+} from "./_prerender-output-coverage.mjs";
 import { countPrerenderHydrationKinds } from "./_prerender-hydration-counts.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -470,10 +478,52 @@ if (fs.existsSync(manifestPath)) {
   warnings.push(...manifestResult.warnings);
 }
 
-// Topic pages also hydrate with ChapterPage, but are tracked separately
-// from chapter routes in the prerender manifest.
+// Count subject and chapter routes separately from topic pages, which also
+// hydrate with ChapterPage.
 const { subjects: subjectsOnDisk, chapters: chaptersOnDisk } =
   countPrerenderHydrationKinds(pages);
+const subjectSitemapPath = path.join(distDir, "sitemap-subjects.xml");
+let expectedSubjectPaths = null;
+if (fs.existsSync(subjectSitemapPath)) {
+  expectedSubjectPaths = readSubjectSitemapPaths(
+    fs.readFileSync(subjectSitemapPath, "utf-8"),
+  );
+}
+const subjectCoverage = validateSubjectOutputCoverage({
+  pages,
+  expectedPaths: expectedSubjectPaths,
+  strict: strictReleaseBuild,
+});
+failures.push(...subjectCoverage.failures);
+let expectedChapterPaths = null;
+const chapterSitemapPath = path.join(distDir, "sitemap-chapters.xml");
+if (fs.existsSync(chapterSitemapPath)) {
+  expectedChapterPaths = readChapterSitemapPaths(
+    fs.readFileSync(chapterSitemapPath, "utf-8"),
+  );
+}
+const chapterCoverage = validateChapterOutputCoverage({
+  pages,
+  expectedPaths: expectedChapterPaths,
+  manifestCount: manifestChapters,
+  strict: strictReleaseBuild,
+});
+failures.push(...chapterCoverage.failures);
+const topicSitemapPath = path.join(distDir, "sitemap-topics.xml");
+let expectedTopicPaths = null;
+if (fs.existsSync(topicSitemapPath)) {
+  expectedTopicPaths = readTopicSitemapPaths(
+    fs.readFileSync(topicSitemapPath, "utf-8"),
+  );
+} else if (strictReleaseBuild) {
+  fail("required topic sitemap missing: dist/sitemap-topics.xml");
+}
+const topicCoverage = validateTopicOutputCoverage({
+  pages,
+  expectedPaths: expectedTopicPaths,
+  strict: strictReleaseBuild,
+});
+failures.push(...topicCoverage.failures);
 if (manifestSubjects > 0 && subjectsOnDisk === 0) {
   fail(`manifest claimed ${manifestSubjects} subjects written but 0 found on disk`);
 }
@@ -482,7 +532,7 @@ if (manifestChapters > 0 && chaptersOnDisk === 0) {
 }
 if (
   strictReleaseBuild &&
-  (subjectsOnDisk !== manifestSubjects || chaptersOnDisk !== manifestChapters)
+  subjectsOnDisk !== manifestSubjects
 ) {
   fail(
     `prerender output is incomplete: manifest subjects=${manifestSubjects}, ` +

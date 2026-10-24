@@ -243,4 +243,33 @@ describe('Pages worker route fallbacks', () => {
     expect(await response.text()).toContain('<h1>সাৰ্থক সংখ্যা</h1>');
     expect(fallbackFetch).not.toHaveBeenCalled();
   });
+
+  it('redirects decomposed Assamese topic paths to their NFC canonical URL', async () => {
+    const topicSlugNfc = 'ভৌতিক';
+    const topicSlugNfd = topicSlugNfc.normalize('NFD');
+    expect(topicSlugNfd).not.toBe(topicSlugNfc);
+
+    const route = '/as/ahsec/hs-1st-year/physics/units-and-measurements/topic';
+    const nfdPath = `${route}/${encodeURIComponent(topicSlugNfd)}`;
+    const nfcPath = `${route}/${encodeURIComponent(topicSlugNfc)}`;
+    const assetFetch = vi.fn();
+    const backendFetch = vi.fn();
+    vi.stubGlobal('fetch', backendFetch);
+
+    const response = await pagesWorker.fetch(
+      new Request(`https://syrabit.ai${nfdPath}?source=unicode-check`, {
+        headers: {
+          Accept: 'text/html',
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
+        },
+      }),
+      { ASSETS: { fetch: assetFetch } },
+    );
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe(`${nfcPath}?source=unicode-check`);
+    expect(response.headers.get('x-source')).toBe('unicode-nfc-canonical');
+    expect(assetFetch).not.toHaveBeenCalled();
+    expect(backendFetch).not.toHaveBeenCalled();
+  });
 });

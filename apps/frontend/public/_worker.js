@@ -286,6 +286,33 @@ function normalizedDecodedPathname(pathname) {
   }
 }
 
+function unicodeNfcRedirect(request, url) {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+
+  let decodedPathname;
+  try {
+    decodedPathname = decodeURI(url.pathname);
+  } catch {
+    return null;
+  }
+
+  const nfcPathname = decodedPathname.normalize("NFC");
+  if (nfcPathname === decodedPathname) return null;
+
+  const canonicalUrl = new URL(url);
+  canonicalUrl.pathname = nfcPathname;
+  const location = `${canonicalUrl.pathname}${canonicalUrl.search}`;
+  if (location === `${url.pathname}${url.search}`) return null;
+
+  const headers = new Headers({
+    Location: location,
+    "Cache-Control": "public, max-age=3600, s-maxage=86400",
+    "X-Source": "unicode-nfc-canonical",
+  });
+  addSecurityHeaders(headers);
+  return new Response(null, { status: 301, headers });
+}
+
 function decodePathSegment(segment) {
   try {
     return decodeURIComponent(segment);
@@ -639,6 +666,9 @@ function minimalRedirectResponse() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const unicodeRedirect = unicodeNfcRedirect(request, url);
+    if (unicodeRedirect) return unicodeRedirect;
+
     const ua = request.headers.get("User-Agent") || "";
     const isBot = SEARCH_BOT_UA.test(ua);
     const studyRoute = parseStudyRoute(url.pathname);

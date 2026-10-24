@@ -55,6 +55,8 @@ import {
   selectChapterCandidates,
 } from "./_prerender-chapter-policy.mjs";
 import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
+import { injectJsonLdIntoHead, topicPageSchema } from "../src/lib/jsonld.js";
+import { assertGovernmentSpendingMultiplierDefinition } from "./_government-spending-multiplier.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -1236,6 +1238,22 @@ async function main() {
             ) continue;
             try {
               const topicTitle = localized.title || topic.title;
+              if (topic.topic_slug === "government-spending-multiplier") {
+                assertGovernmentSpendingMultiplierDefinition(localized.definition);
+              }
+              const topicLanguage = localized.path.startsWith("/as/") ? "as" : "en";
+              const topicSchema = topicPageSchema({
+                topic: { title: topicTitle, description: localized.definition },
+                chapter: {
+                  subject_name: subjName,
+                  board_name: bName,
+                  class_name: cName,
+                  chapter_title: chapterTitle,
+                },
+                language: topicLanguage,
+                url: `https://syrabit.ai${localized.path}`,
+                parentUrl: `https://syrabit.ai${localized.path.replace(/\/topic\/[^/]+$/, "")}`,
+              });
               const topicHtml = await renderOne(renderRoute, htmlTemplate, {
                 url: localized.path,
                 seed: { chapterPreload: preload },
@@ -1246,7 +1264,7 @@ async function main() {
                   description: (localized.definition || topicTitle).slice(0, 280),
                   canonical: `https://syrabit.ai${localized.path}`,
                   ogImageAlt: `${topicTitle} — ${chapterTitle} | Syrabit.ai`,
-                  language: localized.path.startsWith("/as/") ? "as" : "en",
+                  language: topicLanguage,
                   alternateUrl: localized.path.startsWith("/as/")
                     ? `https://syrabit.ai${localized.path.slice(3)}`
                     : (topic.title_as?.trim() && topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40 && topic.topic_slug_as?.trim()
@@ -1254,7 +1272,7 @@ async function main() {
                       : null),
                 },
               });
-              writeRoute(localized.path, topicHtml);
+              writeRoute(localized.path, injectJsonLdIntoHead(topicHtml, topicSchema));
               topicOutputPaths.add(localized.path);
             } catch (topicErr) {
               console.warn(`[prerender-routes] topic render failed for ${localized.path}: ${topicErr.message}`);
