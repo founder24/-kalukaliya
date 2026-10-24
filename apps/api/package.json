@@ -30,7 +30,7 @@
     "@types/bcryptjs": "^3.0.0",
     "drizzle-kit": "^0.31.11",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11",
+    "vitest": "^4.1.12",
     "wrangler": "^4.139.0"
   }
 }
