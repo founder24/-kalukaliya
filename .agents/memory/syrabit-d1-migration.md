@@ -20,6 +20,12 @@ Staging D1 can lag production's migration ledger. Inspect each environment's led
 
 **How to apply:** Check staging and production migration lists independently, review all pending scripts, then apply them in sequence before deploying Worker code.
 
+- In this monorepo, invoke Wrangler through `pnpm --filter syrabit-api exec`; bare `pnpm exec` can resolve an unrelated global Wrangler v1 instead of the workspace Wrangler v4.
+
+**Why:** A root-level migration-list attempt selected the deprecated global CLI and rejected the `d1` command.
+
+**How to apply:** From the repo root, use the `syrabit-api` package filter for Wrangler migration status and apply commands.
+
 ## D1-backed routes (all student-facing + payment flows)
 - auth, chat, content (boards/classes/streams/subjects/chapters), users/profile
 - subscription (plans, status, create-order, cancel)
