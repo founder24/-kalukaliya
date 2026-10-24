@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
+import path from "node:path";
 import {
   assertGovernmentSpendingMultiplierDefinition,
 } from "../../scripts/_government-spending-multiplier.mjs";
 
-const migrationPath = new URL(
-  "../../../api/drizzle/migrations/0044_correct_government_spending_multiplier.sql",
-  import.meta.url,
+const migrationPath = path.resolve(
+  process.cwd(),
+  "../api/drizzle/migrations/0044_correct_government_spending_multiplier.sql",
 );
 
 describe("government-spending multiplier lesson", () => {
