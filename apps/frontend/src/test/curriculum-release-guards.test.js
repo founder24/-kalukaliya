@@ -18,6 +18,15 @@ import {
   chapterLookupRecovery,
   selectChapterCandidates,
 } from "../../scripts/_prerender-chapter-policy.mjs";
+import {
+  collectPrerenderOutputPaths,
+  readChapterSitemapPaths,
+  readSubjectSitemapPaths,
+  readTopicSitemapPaths,
+  validateChapterOutputCoverage,
+  validateSubjectOutputCoverage,
+  validateTopicOutputCoverage,
+} from "../../scripts/_prerender-output-coverage.mjs";
 
 describe("release verifier syntax", () => {
   it("parses without duplicate declarations", () => {
@@ -290,6 +299,226 @@ describe("published chapter prerender coverage", () => {
     expect(
       chapterLookupRecovery(`${subjectUrl}/draft`, new Set(), true, true),
     ).toBe("use-static-fallback");
+  });
+});
+
+describe("chapter output coverage", () => {
+  const chapter = "/ahsec/hs-1st-year/physics/laws-of-motion";
+  const topic = `${chapter}/topic/inertia`;
+
+  it("counts chapter routes separately from topic pages using the same hydrate marker", () => {
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+    const expectedPaths = readChapterSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${chapter}</loc></url></urlset>`,
+    );
+
+    expect(collectPrerenderOutputPaths(pages).chapters).toEqual(
+      new Set([chapter]),
+    );
+    expect(collectPrerenderOutputPaths(pages).topics).toEqual(
+      new Set([topic]),
+    );
+    expect(
+      validateChapterOutputCoverage({
+        pages,
+        expectedPaths,
+        manifestCount: 1,
+        strict: true,
+      }),
+    ).toEqual({ chaptersOnDisk: 1, failures: [] });
+    expect(
+      validateTopicOutputCoverage({
+        pages,
+        expectedPaths: readTopicSitemapPaths(
+          `<urlset><url><loc>https://syrabit.ai${topic}</loc></url></urlset>`,
+        ),
+        strict: true,
+      }),
+    ).toEqual({ topicsOnDisk: 1, failures: [] });
+  });
+
+  it.each([
+    ["spaces", "/ahsec/hs-1st-year/physics/laws of motion"],
+    ["non-ASCII characters", "/ahsec/hs-1st-year/physics/গতিৰ নিয়ম"],
+  ])("matches sitemap and generated output routes containing %s", (_label, route) => {
+    const pages = [
+      { rel: `${route.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+    const expectedPaths = readChapterSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${encodeURI(route)}</loc></url></urlset>`,
+    );
+
+    expect(expectedPaths).toEqual(new Set([route]));
+    expect(collectPrerenderOutputPaths(pages).chapters).toEqual(expectedPaths);
+    expect(
+      validateChapterOutputCoverage({
+        pages,
+        expectedPaths,
+        manifestCount: 1,
+        strict: true,
+      }),
+    ).toEqual({ chaptersOnDisk: 1, failures: [] });
+  });
+
+  it("rejects stale chapter snapshots outside the chapter sitemap", () => {
+    const stale = "/ahsec/hs-1st-year/physics/old-chapter";
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+
+    const result = validateChapterOutputCoverage({
+      pages,
+      expectedPaths: new Set([chapter]),
+      manifestCount: 1,
+      strict: true,
+    });
+
+    expect(result.chaptersOnDisk).toBe(2);
+    expect(result.failures.join("\n")).toContain(
+      "chapter output paths differ from sitemap",
+    );
+  });
+
+  it("fails strict release coverage when the chapter sitemap is missing", () => {
+    const result = validateChapterOutputCoverage({
+      pages: [
+        { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      ],
+      expectedPaths: null,
+      manifestCount: 1,
+      strict: true,
+    });
+
+    expect(result.failures).toContain(
+      "required chapter sitemap missing: dist/sitemap-chapters.xml",
+    );
+  });
+
+  it("keeps missing chapter sitemap coverage optional outside strict releases", () => {
+    const result = validateChapterOutputCoverage({
+      pages: [
+        { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      ],
+      expectedPaths: null,
+      manifestCount: 1,
+      strict: false,
+    });
+
+    expect(result.failures).toEqual([]);
+  });
+
+  it("rejects an unpublished topic snapshot outside the topic sitemap", () => {
+    const stale = `${chapter}/topic/unpublished-topic`;
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+    const expectedPaths = readTopicSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${topic}</loc></url></urlset>`,
+    );
+
+    const result = validateTopicOutputCoverage({
+      pages,
+      expectedPaths,
+      strict: true,
+    });
+
+    expect(result.topicsOnDisk).toBe(2);
+    expect(result.failures).toEqual([
+      `topic output paths differ from sitemap: missing=0; unexpected=1 (${stale})`,
+    ]);
+  });
+
+  it("reports topic pages missing from the topic sitemap output", () => {
+    const pages = [
+      { rel: `${chapter.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+      { rel: `${topic.slice(1)}/index.html`, body: '<div data-hydrate="chapter">' },
+    ];
+
+    const result = validateTopicOutputCoverage({
+      pages,
+      expectedPaths: new Set([topic, `${chapter}/topic/another-topic`]),
+      strict: true,
+    });
+
+    expect(result.failures).toEqual([
+      `topic output paths differ from sitemap: missing=1 (${chapter}/topic/another-topic); unexpected=0`,
+    ]);
+  });
+});
+
+describe("subject output coverage", () => {
+  const subject = "/ahsec/hs-1st-year/physics";
+  const stale = "/ahsec/hs-2nd-year/chemistry";
+  const pages = [
+    { rel: `${subject.slice(1)}/index.html`, body: '<div data-hydrate="subject">' },
+  ];
+
+  it("compares exact subject routes with the sitemap in strict releases", () => {
+    const expectedPaths = readSubjectSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${subject}</loc></url></urlset>`,
+    );
+
+    expect(expectedPaths).toEqual(new Set([subject]));
+    expect(
+      validateSubjectOutputCoverage({ pages, expectedPaths, strict: true }),
+    ).toEqual({ subjectsOnDisk: 1, failures: [] });
+  });
+
+  it("rejects subject routes missing from the sitemap or output", () => {
+    const missingOutput = validateSubjectOutputCoverage({
+      pages: [],
+      expectedPaths: new Set([subject]),
+      strict: true,
+    });
+    const unexpectedOutput = validateSubjectOutputCoverage({
+      pages: [
+        ...pages,
+        { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="subject">' },
+      ],
+      expectedPaths: new Set([subject]),
+      strict: true,
+    });
+
+    expect(missingOutput.failures).toEqual([
+      `subject output paths differ from sitemap: missing=1 (${subject}); unexpected=0`,
+    ]);
+    expect(unexpectedOutput.failures).toEqual([
+      `subject output paths differ from sitemap: missing=0; unexpected=1 (${stale})`,
+    ]);
+  });
+
+  it("requires the subject sitemap only for strict releases", () => {
+    expect(
+      validateSubjectOutputCoverage({
+        pages,
+        expectedPaths: null,
+        strict: true,
+      }).failures,
+    ).toEqual(["required subject sitemap missing: dist/sitemap-subjects.xml"]);
+    expect(
+      validateSubjectOutputCoverage({
+        pages,
+        expectedPaths: null,
+        strict: false,
+      }).failures,
+    ).toEqual([]);
+  });
+
+  it("keeps non-strict subject route mismatches non-blocking", () => {
+    expect(
+      validateSubjectOutputCoverage({
+        pages,
+        expectedPaths: new Set([stale]),
+        strict: false,
+      }),
+    ).toEqual({ subjectsOnDisk: 1, failures: [] });
   });
 });
 

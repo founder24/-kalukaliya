@@ -6,75 +6,158 @@ id = "S7ovUJ44LN6nNmlsBKwZX"
 uri = "file://scripts/fullstack-layer-test.txt"
 type = "text"
 title = "fullstack-layer-test.sh (v3 — 1000+ assertions, 22 layers)"
+logical_id = "0d98c94a-c408-4b1b-aa2e-084d9b1da754"
 
 [[outputs]]
 id = "Fh64CCpQ_UNIYP4RYMkXN"
 uri = "file://.local/app_audit.md"
 type = "text"
 title = "Syrabit — Full App Pipeline & Logic Audit"
+logical_id = "8337499f-49ff-4f0d-abb6-25f7505a6f11"
 
 [[outputs]]
 id = "Ih-WQZyTOw4p8QY2SFxSu"
 uri = "file://.local/upgrade_plan.md"
 type = "text"
 title = "Syrabit — God-Level Full-Stack Upgrade Plan"
+logical_id = "1c1d0503-7e90-43fb-9e52-6ca17c52386b"
 
 [[outputs]]
 id = "ODWyhNXtJ32R3Z5q3qaRO"
 uri = "file://admin-panel-upgrade-roadmap.md"
 type = "text"
 title = "Admin Panel Upgrade — File-by-File Roadmap"
+logical_id = "bc2b7afd-c14d-43ac-b26d-efb416020654"
 
 [[outputs]]
 id = "IcePTuprvgbw2hsooaa_q"
 uri = "file://attached_assets/admin-panel-checklist.md"
 type = "text"
 title = "Syrabit Admin Panel — End-to-End Checklist"
+logical_id = "bbbca52d-7392-4250-bc8c-6085ee711570"
 
 [[outputs]]
 id = "esyWHDUy7C2EVs9-J4d9O"
 uri = "file://attached_assets/syrabit_diagram_hq.png"
 type = "image"
 title = "Syrabit.ai — Architecture & Innovation Diagram (PNG)"
+logical_id = "5d774a44-dab0-4840-969d-ebc845a06d48"
 
 [[outputs]]
 id = "GDXsV67YSa9Vztd-I3eup"
 uri = "file://attached_assets/SyrabitAI_BlockDiagram_IdeaHackathon6.pdf"
 type = "pdf"
 title = "SyrabitAI_BlockDiagram_IdeaHackathon6.pdf — Upload this to the form"
+logical_id = "ddd238f5-8677-41ed-b26e-a15b895b2116"
 
 [[outputs]]
 id = "_ccwOzXZabv0GBNqykRp7"
 uri = "file://attached_assets/Syrabit_Technical_Block_Diagram.pptx"
 type = "slides"
 title = "Syrabit_Technical_Block_Diagram.pptx — Upload to Field 10"
+logical_id = "f5e60c7b-8556-49e5-a818-834d7f46a939"
 
 [[outputs]]
 id = "CtwnRDsue3J8O3rPO8KcT"
 uri = "file://attached_assets/slide1.png"
 type = "image"
 title = "Slide 1 — System Architecture Block Diagram"
+logical_id = "f1282307-581f-4137-9a4e-1fb0355f1995"
 
 [[outputs]]
 id = "pffcAGq-gH48feBBLHzJI"
 uri = "file://attached_assets/slide2.png"
 type = "image"
 title = "Slide 2 — Technical Processing Brief"
+logical_id = "2d00d41e-f022-422b-a326-a95b5043a091"
 
 [[outputs]]
 id = "MN5H2qjv4950tzKZDw9Dc"
 uri = "file://attached_assets/Syrabit_Technical_Block_Diagram.pdf"
 type = "pdf"
 title = "Syrabit_Technical_Block_Diagram.pdf — Ready to upload (261 KB)"
+logical_id = "7d16cd48-1f21-4054-baea-eece82737d8d"
 
 [[outputs]]
 id = "5FCnKiDvenF56cbVLLOFE"
 uri = "file://attached_assets/simple_slide1.png"
 type = "image"
 title = "Slide 1 — How a student's question gets answered"
+logical_id = "693b44b3-e5c3-4fd6-ac94-79dd2cd5b5d2"
 
 [[outputs]]
 id = "zvJ-eRRxTF3i2zEddC9Da"
 uri = "file://attached_assets/simple_slide2.png"
 type = "image"
 title = "Slide 2 — What happens step by step + what sets it apart"
+logical_id = "e407e885-b625-410a-8aed-8b40556f6d74"
+
+[[outputs]]
+id = "f85LDf2fT1q2iDcr_5MrQ"
+uri = "file://generated-artifacts/topic-candidates-draft.json"
+type = "unspecified"
+title = "Draft topic candidates"
+description = "389 source-extracted English topic candidates from 204 published chapters; all remain definition_status=pending and are not published."
+logical_id = "dbcee620-1fde-44b4-8822-71b6c7f53d0c"
+content_hash = "sha256:c9e5e67b7bff5d769da9a0b4bc0e1a67f6254a3b4e798f4d8b51781fd2a9ddcc"
+size = 322759
+mtime_ms = 1792700596563
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/dbcee620-1fde-44b4-8822-71b6c7f53d0c/6a850325-0098-4ea0-adc1-1c85cf051052"
+storage_version_token = "1792700648625657"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "xB5Bcg6mAN7G-64WHKWZl"
+uri = "file://generated-artifacts/topic-candidates-reviewed-draft.csv"
+type = "table"
+title = "Reviewed topic candidates (English and Assamese)"
+description = "710 source-backed draft topic rows across 98 chapters. Each row includes language, chapter lineage, a 40–150 word definition, and pending status. These are review candidates, not approved or published content."
+logical_id = "7bc8331a-25d9-44bb-b0ff-a1b882c27d17"
+content_hash = "sha256:0fbbbe8475c10d854339dabfd93aed0d625a01ab6b5638ef62ec9c3c34a52d61"
+size = 592161
+mtime_ms = 1792702000236
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/7bc8331a-25d9-44bb-b0ff-a1b882c27d17/38f99a8d-785a-4c4c-b040-3de50f91bfe8"
+storage_version_token = "1792702113284971"
+content_type = "text/csv"
+
+[[outputs]]
+id = "TfDwoE6YBQq1Yo1CBOfyx"
+uri = "file://.agents/outputs/syrabit-2026-10-23T155537Z-165537Z-request-groups.csv"
+type = "table"
+title = "Cloudflare request groups — 60-minute audit"
+description = "750 grouped request records for the screenshot’s exact UTC hour, with status, path, Cloudflare bot category, User-Agent, counts, timestamps, and a response Ray ID where present."
+logical_id = "210242cf-c8bf-44b6-a0aa-aaae729de239"
+content_hash = "sha256:e4a8a5d9acb0ae5b5705ced81d8e892f399514c8ad5cba71aba06a5799081435"
+size = 159632
+mtime_ms = 1792775517152
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/210242cf-c8bf-44b6-a0aa-aaae729de239/26adf6a6-ceee-460c-831a-f85c5f55bd3e"
+storage_version_token = "1792775616604640"
+content_type = "text/csv"
+
+[[outputs]]
+id = "VhNSabUQkt1NBguYWH7fZ"
+uri = "file://.agents/outputs/syrabit-2026-10-23T155537Z-165537Z-sensitive-200-204.csv"
+type = "table"
+title = "Sensitive-looking paths returning 200/204"
+description = "65 returned request records for sensitive-looking paths with successful HTTP statuses. These do not prove data exposure; response bodies were unavailable."
+logical_id = "c5b06150-d734-4c9b-894e-7d93d675a6af"
+content_hash = "sha256:079cb72f376a0de5ec2af0369c108e20a6e9b19b92853b49eb41e492517e5a9e"
+size = 11141
+mtime_ms = 1792775517400
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/c5b06150-d734-4c9b-894e-7d93d675a6af/52b7932e-eada-4cea-91f0-2fd01435e520"
+storage_version_token = "1792775617903755"
+content_type = "text/csv"
+
+[[outputs]]
+id = "psbIK8eILoyGPlQqpXCk4"
+uri = "file://.agents/outputs/syrabit-2026-10-23T155537Z-165537Z-ray-content-metadata.csv"
+type = "table"
+title = "Ray-ID response metadata — 65 requests"
+description = "Cloudflare request metadata for all 65 Ray IDs: response content type, origin status, cache/request source, latency, and verification category. Bodies were not retained, so content classification remains unavailable."
+logical_id = "bd886233-4641-437d-ac79-afadc3f513b4"
+content_hash = "sha256:cdf26471edb0efc940f3170de59a58a48ccebbb4b28b7214f8e18aae083c95b4"
+size = 24857
+mtime_ms = 1792775958900
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/bd886233-4641-437d-ac79-afadc3f513b4/8499afab-93e2-4784-a34b-be4b806d8d8f"
+storage_version_token = "1792776261979925"
+content_type = "text/csv"

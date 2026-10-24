@@ -75,7 +75,9 @@ export default function SubjectLandingPage() {
   }, [activeSectionChapters, searchQuery]);
 
   const basePath = `/${board}/${classSlug}/${subjectSlug}`;
-  const chapterBasePath = `/${board}/${classSlug}${subject?.stream_slug ? `/${subject.stream_slug}` : ''}/${subjectSlug}`;
+  const chapterBasePath = isAssamese
+    ? `/as/${board}/${classSlug}/${subjectSlug}`
+    : `/${board}/${classSlug}/${subjectSlug}`;
 
   // Pull SEO related-topics for the first chapter to seed the
   // ContinueLearning rail, then backfill with sibling chapters until ≥4 links.

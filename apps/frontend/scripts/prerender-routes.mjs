@@ -54,6 +54,9 @@ import {
   chapterLookupRecovery,
   selectChapterCandidates,
 } from "./_prerender-chapter-policy.mjs";
+import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
+import { injectJsonLdIntoHead, topicPageSchema } from "../src/lib/jsonld.js";
+import { assertGovernmentSpendingMultiplierDefinition } from "./_government-spending-multiplier.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -1216,17 +1219,41 @@ async function main() {
           const locales = [
             { path: `${chapterUrl}/topic/${topic.topic_slug}`, title: topic.title, definition: topic.definition },
           ];
-          if (topic.title_as && topic.definition_as && topic.definition_as.trim().split(/\s+/).length >= 40) {
+          if (
+            topic.title_as?.trim() &&
+            topic.topic_slug_as?.trim() &&
+            topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40
+          ) {
             locales.push({
-              path: `/as${chapterUrl}/topic/${topic.topic_slug_as || topic.topic_slug}`,
-              title: topic.title_as || topic.title,
+              path: `/as${chapterUrl}/topic/${topic.topic_slug_as}`,
+              title: topic.title_as,
               definition: topic.definition_as,
             });
           }
           for (const localized of locales) {
-            if (!publishedTopicPaths.has(localized.path)) continue;
+            if (
+              !publishedTopicPaths.has(
+                canonicalTopicSitemapPath(localized.path),
+              )
+            ) continue;
             try {
               const topicTitle = localized.title || topic.title;
+              if (topic.topic_slug === "government-spending-multiplier") {
+                assertGovernmentSpendingMultiplierDefinition(localized.definition);
+              }
+              const topicLanguage = localized.path.startsWith("/as/") ? "as" : "en";
+              const topicSchema = topicPageSchema({
+                topic: { title: topicTitle, description: localized.definition },
+                chapter: {
+                  subject_name: subjName,
+                  board_name: bName,
+                  class_name: cName,
+                  chapter_title: chapterTitle,
+                },
+                language: topicLanguage,
+                url: `https://syrabit.ai${localized.path}`,
+                parentUrl: `https://syrabit.ai${localized.path.replace(/\/topic\/[^/]+$/, "")}`,
+              });
               const topicHtml = await renderOne(renderRoute, htmlTemplate, {
                 url: localized.path,
                 seed: { chapterPreload: preload },
@@ -1237,15 +1264,15 @@ async function main() {
                   description: (localized.definition || topicTitle).slice(0, 280),
                   canonical: `https://syrabit.ai${localized.path}`,
                   ogImageAlt: `${topicTitle} — ${chapterTitle} | Syrabit.ai`,
-                  language: localized.path.startsWith("/as/") ? "as" : "en",
+                  language: topicLanguage,
                   alternateUrl: localized.path.startsWith("/as/")
                     ? `https://syrabit.ai${localized.path.slice(3)}`
-                    : (topic.title_as && topic.definition_as && topic.topic_slug
-                      ? `https://syrabit.ai/as${chapterUrl}/topic/${topic.topic_slug_as || topic.topic_slug}`
+                    : (topic.title_as?.trim() && topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40 && topic.topic_slug_as?.trim()
+                      ? `https://syrabit.ai/as${chapterUrl}/topic/${topic.topic_slug_as}`
                       : null),
                 },
               });
-              writeRoute(localized.path, topicHtml);
+              writeRoute(localized.path, injectJsonLdIntoHead(topicHtml, topicSchema));
               topicOutputPaths.add(localized.path);
             } catch (topicErr) {
               console.warn(`[prerender-routes] topic render failed for ${localized.path}: ${topicErr.message}`);

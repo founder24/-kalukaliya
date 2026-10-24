@@ -7,7 +7,14 @@ import { SITEMAP_ENDPOINTS } from "../../scripts/generate-static-data.mjs";
 
 const tempDirs = [];
 
-function createDist({ genericShell = false, omitPage = false } = {}) {
+function createDist({
+  genericShell = false,
+  omitPage = false,
+  malformedTopic = false,
+  chapterRoute = "/ahsec/hs-1st-year/physics/laws-of-motion",
+  subjectOrigin = "https://syrabit.ai",
+  duplicateTopicLoc = null,
+} = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "syrabit-sitemap-html-"));
   tempDirs.push(root);
   fs.writeFileSync(
@@ -21,15 +28,18 @@ function createDist({ genericShell = false, omitPage = false } = {}) {
   );
   fs.writeFileSync(
     path.join(root, "sitemap-subjects.xml"),
-    `<urlset><url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics</loc></url></urlset>`,
+    `<urlset><url><loc>${subjectOrigin}/ahsec/hs-1st-year/physics</loc></url></urlset>`,
   );
   fs.writeFileSync(
     path.join(root, "sitemap-chapters.xml"),
-    `<urlset><url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion</loc></url></urlset>`,
+    `<urlset><url><loc>https://syrabit.ai${encodeURI(chapterRoute)}</loc></url></urlset>`,
   );
   fs.writeFileSync(
     path.join(root, "sitemap-topics.xml"),
-    `<urlset><url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia</loc></url></urlset>`,
+    `<urlset>
+      <url><loc>https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia</loc></url>
+      ${duplicateTopicLoc ? `<url><loc>${duplicateTopicLoc}</loc></url>` : ""}
+    </urlset>`,
   );
   fs.writeFileSync(path.join(root, "sitemap-static.xml"), "<urlset></urlset>");
 
@@ -44,26 +54,30 @@ function createDist({ genericShell = false, omitPage = false } = {}) {
       <div id="root" data-hydrate="subject"><main><h1>Physics</h1></main></div>
     </body></html>`;
   const chapterHtml = `<html><head><title>${chapterTitle}</title>
-    <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion">
-    <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion"></head>
+    <link rel="canonical" href="https://syrabit.ai${encodeURI(chapterRoute)}">
+    <meta name="syrabit-prerender-path" content="${chapterRoute}"></head>
     <body><noscript><h1>${shellTitle}</h1></noscript>
       <div id="root" data-hydrate="chapter"><main><h1>${genericShell ? shellTitle : "Laws of Motion"}</h1></main></div>
     </body></html>`;
-  const topicHtml = `<html><head><title>Inertia — Laws of Motion | Physics Notes</title>
+  const topicBody = malformedTopic
+    ? `<h1>Inertia</h1><p>Short.</p>`
+    : `<h1>Inertia</h1>
+        <p>Inertia is the property of matter by which an object resists a change in its state of rest or motion. The amount of inertia depends on the mass of the object. A heavier object has greater inertia than a lighter object. This concept explains why force is needed to change motion.</p>
+        <a href="/ahsec/hs-1st-year/physics/laws-of-motion">Read the chapter</a>`;
+  const topicHtml = `<html lang="${malformedTopic ? 'as' : 'en'}"><head><title>Inertia — Laws of Motion | Physics Notes</title>
     <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia">
     <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"></head>
     <body><noscript><h1>${shellTitle}</h1></noscript>
-      <div id="root" data-hydrate="chapter"><main><h1>Inertia</h1></main></div>
+      <div id="root" data-hydrate="chapter"><main>${topicBody}</main></div>
     </body></html>`;
 
   fs.mkdirSync(path.join(root, "ahsec/hs-1st-year/physics"), { recursive: true });
   fs.writeFileSync(path.join(root, "ahsec/hs-1st-year/physics/index.html"), subjectHtml);
   if (!omitPage) {
-    fs.mkdirSync(path.join(root, "ahsec/hs-1st-year/physics/laws-of-motion"), {
-      recursive: true,
-    });
+    const chapterOutputDir = path.join(root, ...chapterRoute.split("/").filter(Boolean));
+    fs.mkdirSync(chapterOutputDir, { recursive: true });
     fs.writeFileSync(
-      path.join(root, "ahsec/hs-1st-year/physics/laws-of-motion/index.html"),
+      path.join(chapterOutputDir, "index.html"),
       chapterHtml,
     );
   }
@@ -99,6 +113,44 @@ describe("sitemap rendered HTML release check", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("rejects a subject sitemap URL on a non-canonical host", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({ subjectOrigin: "https://alternate.example" }),
+    });
+
+    expect(
+      result.errors.some((error) =>
+        error.includes("sitemap page URL origin is not canonical"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects duplicate curriculum URLs across content sitemaps", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({
+        duplicateTopicLoc: "https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion",
+      }),
+    });
+
+    expect(
+      result.errors.some((error) =>
+        error.includes("duplicate curriculum sitemap URL"),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["spaces", "/ahsec/hs-1st-year/physics/laws of motion"],
+    ["non-ASCII characters", "/ahsec/hs-1st-year/physics/গতিৰ নিয়ম"],
+  ])("resolves percent-encoded sitemap routes containing %s to normalized output files", (_label, chapterRoute) => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({ chapterRoute }),
+    });
+
+    expect(result.checked).toBe(3);
+    expect(result.errors).toEqual([]);
+  });
+
   it("ignores the generic no-script fallback H1 outside the prerendered app root", () => {
     const result = verifySitemapRenderedHtml({ distDir: createDist() });
 
@@ -123,5 +175,15 @@ describe("sitemap rendered HTML release check", () => {
     expect(
       result.errors.some((error) => error.includes("generic SPA shell")),
     ).toBe(true);
+  });
+
+  it("fails when a topic snapshot is thin, mislabeled, or lacks its parent chapter link", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({ malformedTopic: true }),
+    });
+
+    expect(result.errors.some((error) => error.includes("topic language"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("substantial rendered content"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("parent chapter"))).toBe(true);
   });
 });
