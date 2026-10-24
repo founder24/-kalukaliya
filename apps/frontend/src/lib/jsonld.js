@@ -22,7 +22,7 @@
  *   schema.org @types so the same type is never emitted twice.
  */
 
-import { LIBRARY_SEO_TITLE } from "./librarySeo";
+import { LIBRARY_SEO_TITLE } from "./librarySeo.js";
 
 const SITE_ORIGIN = 'https://syrabit.ai';
 const SITE_LOGO = `${SITE_ORIGIN}/icons/icon-192x192.png`;
@@ -1082,8 +1082,73 @@ export function dedupeGraphTypes(typedGraph, externalGraphs = []) {
   return { ...typedGraph, '@graph': filtered };
 }
 
+/**
+ * Route-specific structured data for a published topic page.
+ *
+ * The title and definition are the same localized strings rendered in
+ * ChapterPage's topic view. Curriculum fields are required rather than
+ * guessed, so incomplete records do not publish misleading schema.
+ */
+export function topicPageSchema({ topic, chapter, url, parentUrl, language } = {}) {
+  const name = typeof topic?.title === 'string' ? topic.title.trim() : '';
+  const description = typeof topic?.description === 'string' ? topic.description.trim() : '';
+  const boardName = typeof chapter?.board_name === 'string' ? chapter.board_name.trim() : '';
+  const className = typeof chapter?.class_name === 'string' ? chapter.class_name.trim() : '';
+  const subjectName = typeof chapter?.subject_name === 'string' ? chapter.subject_name.trim() : '';
+  const chapterTitle = typeof chapter?.chapter_title === 'string' ? chapter.chapter_title.trim() : '';
+  const locale = String(language || '').toLowerCase();
+  const isAssamese = locale === 'as' || locale.startsWith('as-');
+  const isEnglish = locale === 'en' || locale.startsWith('en-');
+  const inLanguage = isAssamese ? 'as-IN' : 'en-IN';
+
+  if (!name || !description || !url || !boardName || !className || !subjectName || (!isAssamese && !isEnglish)) return null;
+
+  const resource = {
+    '@type': 'LearningResource',
+    '@id': url,
+    name,
+    description,
+    learningResourceType: 'Topic definition',
+    educationalLevel: className,
+    educationalAlignment: {
+      '@type': 'AlignmentObject',
+      alignmentType: 'educationalSubject',
+      educationalFramework: boardName,
+      targetName: subjectName,
+    },
+    teaches: name,
+    about: { '@type': 'Thing', name },
+    inLanguage,
+    isAccessibleForFree: true,
+    url,
+    provider: { '@type': 'Organization', name: 'Syrabit.ai', url: SITE_ORIGIN },
+  };
+  if (parentUrl) {
+    resource.isPartOf = {
+      '@type': 'WebPage',
+      '@id': parentUrl,
+      ...(chapterTitle ? { name: chapterTitle } : {}),
+    };
+  }
+  return { '@context': 'https://schema.org', '@graph': [resource] };
+}
+
+/**
+ * Insert the same JSON-LD object used by PageMeta into first-byte HTML.
+ * The marker lets PageMeta replace the static script with its hydrated
+ * equivalent instead of leaving duplicate schema in the document head.
+ */
+export function injectJsonLdIntoHead(html, schema) {
+  if (typeof html !== 'string' || !schema || typeof schema !== 'object') return html;
+  const json = JSON.stringify(schema).replace(/<\//g, '<\\/');
+  const tag = `<script type="application/ld+json" data-pm="1">${json}</script>`;
+  return html.replace(/<\/head>/i, () => `    ${tag}\n  </head>`);
+}
+
 export function buildSchemaForPageType(pageType, payload) {
   switch (pageType) {
+    case 'topic':
+      return topicPageSchema({ ...payload, url: payload?.url });
     case 'chapter':
       return chapterSchema(payload?.data, payload?.url, payload?.basePath);
     case 'subject':

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useLocation, Link } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import {
   BookOpen, ChevronRight, ChevronDown, ExternalLink, Home, Sparkles,
@@ -18,6 +18,8 @@ import { siblingsAsRelated } from '@/utils/siblingChapter';
 
 export default function SubjectLandingPage() {
   const { board, classSlug, subjectSlug } = useParams();
+  const location = useLocation();
+  const isAssamese = location.pathname.startsWith('/as/');
   const [searchQuery, setSearchQuery] = useState('');
   const { contentLang } = useContentLang();
 
@@ -73,7 +75,9 @@ export default function SubjectLandingPage() {
   }, [activeSectionChapters, searchQuery]);
 
   const basePath = `/${board}/${classSlug}/${subjectSlug}`;
-  const chapterBasePath = `/${board}/${classSlug}${subject?.stream_slug ? `/${subject.stream_slug}` : ''}/${subjectSlug}`;
+  const chapterBasePath = isAssamese
+    ? `/as/${board}/${classSlug}/${subjectSlug}`
+    : `/${board}/${classSlug}/${subjectSlug}`;
 
   // Pull SEO related-topics for the first chapter to seed the
   // ContinueLearning rail, then backfill with sibling chapters until ≥4 links.
@@ -91,12 +95,12 @@ export default function SubjectLandingPage() {
     // script puts the same payload on `window.__SUBJECT_PRELOAD__`.
     if (typeof window === 'undefined') {
       const ssr = globalThis.__SSR_SUBJECT_PRELOAD__?.topic_index;
-      if (ssr && Array.isArray(ssr.chapters)) return ssr;
-      return { chapters: [], total_topics: 0 };
+      if (ssr && (Array.isArray(ssr.chapters) || Array.isArray(ssr.topics))) return ssr;
+      return { chapters: [], topics: [], total_topics: 0 };
     }
     const seed = window.__SUBJECT_PRELOAD__?.topic_index;
-    if (seed && Array.isArray(seed.chapters)) return seed;
-    return { chapters: [], total_topics: 0 };
+    if (seed && (Array.isArray(seed.chapters) || Array.isArray(seed.topics))) return seed;
+    return { chapters: [], topics: [], total_topics: 0 };
   });
   useEffect(() => {
     let cancelled = false;
@@ -107,8 +111,8 @@ export default function SubjectLandingPage() {
     if (
       typeof window !== 'undefined'
       && window.__SUBJECT_PRELOAD__?.subject_id === subjectId
-      && Array.isArray(window.__SUBJECT_PRELOAD__?.topic_index?.chapters)
-      && (window.__SUBJECT_PRELOAD__.topic_index.chapters.length > 0)
+      && (window.__SUBJECT_PRELOAD__?.topic_index?.chapters?.length > 0
+        || window.__SUBJECT_PRELOAD__?.topic_index?.topics?.length > 0)
     ) {
       return;
     }
@@ -119,11 +123,12 @@ export default function SubjectLandingPage() {
         const payload = r.data || {};
         setTopicIndex({
           chapters: Array.isArray(payload.chapters) ? payload.chapters : [],
+          topics: Array.isArray(payload.topics) ? payload.topics : [],
           total_topics: Number(payload.total_topics || 0),
         });
       })
       .catch(() => {
-        if (!cancelled) setTopicIndex({ chapters: [], total_topics: 0 });
+        if (!cancelled) setTopicIndex({ chapters: [], topics: [], total_topics: 0 });
       });
     return () => { cancelled = true; };
   }, [subjectId]);
@@ -615,7 +620,7 @@ export default function SubjectLandingPage() {
             prerender / SPA so bots see the full internal-linking
             structure on first byte (no JS required). Renders nothing
             when the index is empty. */}
-        <SubjectTopicIndex index={topicIndex} />
+        <SubjectTopicIndex index={topicIndex} chapterBasePath={chapterBasePath} isAssamese={isAssamese} />
 
         {chapters.length > 0 && (
           <ContinueLearning

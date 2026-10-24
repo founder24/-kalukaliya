@@ -6,6 +6,8 @@ import { MessageBubble } from './MessageBubble';
 vi.mock('@/utils/api', () => ({
   postChatFeedback: vi.fn(),
   eduRequestSite: vi.fn(),
+  WORKER_API: '/api/v1',
+  anonHeaders: () => ({}),
 }));
 vi.mock('@/utils/logger', () => ({ log: Object.assign(vi.fn(), { error: vi.fn() }) }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));

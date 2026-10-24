@@ -278,6 +278,49 @@ function normalizedPathname(pathname) {
   return pathname.replace(/\/+$/, "");
 }
 
+function normalizedDecodedPathname(pathname) {
+  try {
+    return normalizedPathname(decodeURI(pathname || "/"));
+  } catch {
+    return normalizedPathname(pathname);
+  }
+}
+
+function unicodeNfcRedirect(request, url) {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+
+  let decodedPathname;
+  try {
+    decodedPathname = decodeURI(url.pathname);
+  } catch {
+    return null;
+  }
+
+  const nfcPathname = decodedPathname.normalize("NFC");
+  if (nfcPathname === decodedPathname) return null;
+
+  const canonicalUrl = new URL(url);
+  canonicalUrl.pathname = nfcPathname;
+  const location = `${canonicalUrl.pathname}${canonicalUrl.search}`;
+  if (location === `${url.pathname}${url.search}`) return null;
+
+  const headers = new Headers({
+    Location: location,
+    "Cache-Control": "public, max-age=3600, s-maxage=86400",
+    "X-Source": "unicode-nfc-canonical",
+  });
+  addSecurityHeaders(headers);
+  return new Response(null, { status: 301, headers });
+}
+
+function decodePathSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 const EXACT_FRONTEND_ROUTES = new Set([
   "/", "/home", "/terms", "/privacy", "/about", "/technology",
   "/status", "/exam-routine", "/payment/success", "/payment/cancel", "/login",
@@ -303,6 +346,146 @@ function isDeclaredFrontendRoute(pathname) {
   return parts.length >= 3 && parts.length <= 7;
 }
 
+function parseStudyRoute(pathname) {
+  const parts = normalizedPathname(pathname)
+    .split("/")
+    .filter(Boolean)
+    .map(decodePathSegment);
+  const isAssamese = parts[0] === "as";
+  if (isAssamese) parts.shift();
+
+  let board, classSlug, streamSlug = null, subjectSlug, chapterSlug, topicSlug = null;
+  if (parts.length === 3) {
+    [board, classSlug, subjectSlug] = parts;
+    return { board, classSlug, subjectSlug, type: "subject", isAssamese };
+  } else if (parts.length === 4) {
+    [board, classSlug, subjectSlug, chapterSlug] = parts;
+  } else if (parts.length === 5 && parts[4] !== "topic") {
+    [board, classSlug, streamSlug, subjectSlug, chapterSlug] = parts;
+  } else if (parts.length === 6 && parts[4] === "topic") {
+    [board, classSlug, subjectSlug, chapterSlug] = parts;
+    topicSlug = parts[5];
+  } else if (parts.length === 7 && parts[5] === "topic") {
+    [board, classSlug, streamSlug, subjectSlug, chapterSlug] = parts;
+    topicSlug = parts[6];
+  } else {
+    return null;
+  }
+  return { board, classSlug, streamSlug, subjectSlug, chapterSlug, topicSlug, isAssamese };
+}
+
+function topicWordCount(value) {
+  return typeof value === "string" ? value.trim().split(/\s+/).filter(Boolean).length : 0;
+}
+
+function isIndexableTopic(topic, isAssamese) {
+  if (!topic || topic.definition_status !== "ok") return false;
+  const englishSlug = topic.topic_slug || topic.slug;
+  const englishTitle = topic.title || topic.name;
+  const englishDefinition = topic.definition || topic.content;
+  if (!englishSlug || !englishTitle || topicWordCount(englishDefinition) < 40) return false;
+  if (!isAssamese) return true;
+  const definitionAs = topic.definition_as || topic.content_as;
+  return Boolean(
+    typeof topic.title_as === "string" && topic.title_as.trim() &&
+    typeof topic.topic_slug_as === "string" && topic.topic_slug_as.trim() &&
+    topicWordCount(definitionAs) >= 40,
+  );
+}
+
+async function resolveStudyRoute(request, env, parsed) {
+  const backend = (env && env.API_BACKEND_URL) || DEFAULT_BACKEND;
+  if (parsed.type === "subject") {
+    const segments = [parsed.board, parsed.classSlug, parsed.subjectSlug]
+      .map(encodeURIComponent);
+    const language = parsed.isAssamese ? "?lang=as" : "";
+    try {
+      const response = await fetch(
+        `${backend}/api/v1/content/resolve-subject/${segments.join("/")}${language}`,
+        { method: "GET", headers: { Accept: "application/json" } },
+      );
+      if (response.status === 404) return { kind: "not-found" };
+      if (!response.ok) return { kind: "unavailable" };
+      const payload = await response.json();
+      return payload?.id ? { kind: "valid" } : { kind: "not-found" };
+    } catch {
+      return { kind: "unavailable" };
+    }
+  }
+  const resolver = parsed.isAssamese ? "chapter-by-slug-as" : "chapter-by-slug";
+  const segments = [
+    parsed.board, parsed.classSlug,
+    ...(parsed.streamSlug ? [parsed.streamSlug] : []),
+    parsed.subjectSlug, parsed.chapterSlug,
+  ].map(encodeURIComponent);
+  try {
+    const response = await fetch(
+      `${backend}/api/v1/content/${resolver}/${segments.join("/")}`,
+      { method: "GET", headers: { Accept: "application/json" } },
+    );
+    if (response.status === 404) return { kind: "not-found" };
+    if (!response.ok) return { kind: "unavailable" };
+    const payload = await response.json();
+    if (!payload || !payload.chapter_id) return { kind: "not-found" };
+
+    if (parsed.topicSlug) {
+      const topics = Array.isArray(payload.published_topics)
+        ? payload.published_topics
+        : [];
+      const topicExists = topics.some((topic) =>
+        isIndexableTopic(topic, parsed.isAssamese) &&
+        (parsed.isAssamese
+          ? topic.topic_slug_as === parsed.topicSlug
+          : (topic.topic_slug || topic.slug) === parsed.topicSlug)
+      );
+      if (!topicExists) return { kind: "not-found" };
+    }
+
+    const canonicalSlug = payload.canonical_slug;
+    if (
+      payload.slug_redirect &&
+      canonicalSlug &&
+      canonicalSlug !== parsed.chapterSlug
+    ) {
+      const topicSuffix = parsed.topicSlug ? `/topic/${parsed.topicSlug}` : "";
+      const chapterPath = normalizedPathname(new URL(request.url).pathname)
+        .slice(0, topicSuffix ? -topicSuffix.length : undefined);
+      const slash = chapterPath.lastIndexOf("/");
+      const targetPath = `${chapterPath.slice(0, slash + 1)}${encodeURIComponent(canonicalSlug)}${topicSuffix}`;
+      return { kind: "redirect", location: `${targetPath}${new URL(request.url).search}` };
+    }
+    return { kind: "valid" };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}
+
+function studyRouteResponse(request, result) {
+  if (result.kind === "not-found") return botNotFoundResponse(request);
+  if (result.kind === "redirect") {
+    return new Response(null, {
+      status: 301,
+      headers: {
+        Location: result.location,
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Source": "verified-chapter-alias",
+      },
+    });
+  }
+  if (result.kind === "unavailable") {
+    return new Response(request.method === "HEAD" ? null : "Study page validation temporarily unavailable\n", {
+      status: 503,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Retry-After": "120",
+        "X-Source": "study-route-validation-unavailable",
+      },
+    });
+  }
+  return null;
+}
+
 async function assetMatchesRequestedPrerender(response, pathname) {
   try {
     const html = await response.clone().text();
@@ -310,12 +493,36 @@ async function assetMatchesRequestedPrerender(response, pathname) {
     for (const tag of metas) {
       if (!/\bname\s*=\s*["']syrabit-prerender-path["']/i.test(tag)) continue;
       const outputPath = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
-      return normalizedPathname(outputPath) === normalizedPathname(pathname);
+      return normalizedDecodedPathname(outputPath) === normalizedDecodedPathname(pathname);
     }
   } catch {
     // Treat unreadable HTML as an asset miss and use backend bot rendering.
   }
   return false;
+}
+
+async function canonicalRedirectFromPrerender(response, request, pathname) {
+  try {
+    const html = await response.clone().text();
+    const href = html.match(/<link\b(?=[^>]*\brel=["']canonical["'])[^>]*\bhref=["']([^"']+)["']/i)?.[1];
+    if (!href) return null;
+    const canonical = new URL(href, request.url);
+    const current = new URL(request.url);
+    if (
+      canonical.origin !== current.origin ||
+      normalizedPathname(canonical.pathname) === normalizedPathname(pathname)
+    ) return null;
+    return new Response(null, {
+      status: 301,
+      headers: {
+        Location: `${canonical.pathname}${canonical.search}`,
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Source": "verified-prerender-canonical",
+      },
+    });
+  } catch {
+    return null;
+  }
 }
 
 function botNotFoundResponse(request) {
@@ -459,8 +666,12 @@ function minimalRedirectResponse() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const unicodeRedirect = unicodeNfcRedirect(request, url);
+    if (unicodeRedirect) return unicodeRedirect;
+
     const ua = request.headers.get("User-Agent") || "";
     const isBot = SEARCH_BOT_UA.test(ua);
+    const studyRoute = parseStudyRoute(url.pathname);
 
     // Task #640: sitemap + feed XML proxy. Run BEFORE bot-render and
     // BEFORE asset lookup so we never accidentally serve the SPA shell
@@ -591,6 +802,12 @@ export default {
             (ct.includes("text/html") || ct.includes("application/xhtml")) &&
             await assetMatchesRequestedPrerender(assetResp, url.pathname)
           ) {
+            if (studyRoute) {
+              const canonicalRedirect = await canonicalRedirectFromPrerender(
+                assetResp, request, url.pathname,
+              );
+              if (canonicalRedirect) return canonicalRedirect;
+            }
             const headers = new Headers(assetResp.headers);
             headers.set("X-Source", "prerender");
             headers.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
@@ -608,6 +825,11 @@ export default {
       // routes without a snapshot still fall through to backend bot rendering.
       if (!isDeclaredFrontendRoute(url.pathname)) {
         return botNotFoundResponse(request);
+      }
+      if (studyRoute) {
+        const validation = await resolveStudyRoute(request, env, studyRoute);
+        const response = studyRouteResponse(request, validation);
+        if (response) return response;
       }
       // 2) No prerendered snapshot — try the backend bot-render proxy.
       //    botRender now returns a 503 on failure (M-5 fix) so bots
@@ -628,6 +850,33 @@ export default {
       ) ? new URL(url.pathname + "/", url.origin) : url;
       const assetRequest = assetUrl === url ? request : new Request(assetUrl, request);
       const response = await env.ASSETS.fetch(assetRequest);
+      if (
+        studyRoute &&
+        (request.method === "GET" || request.method === "HEAD") &&
+        (
+          (request.headers.get("Accept") || "").includes("text/html") ||
+          (request.method === "HEAD" && ["", "*/*"].includes(request.headers.get("Accept") || ""))
+        )
+      ) {
+        const contentType = response.headers.get("content-type") || "";
+        if (
+          response.status === 200 &&
+          /(?:x?html)/i.test(contentType) &&
+          await assetMatchesRequestedPrerender(response, url.pathname)
+        ) {
+          if (studyRoute) {
+            const canonicalRedirect = await canonicalRedirectFromPrerender(
+              response, request, url.pathname,
+            );
+            if (canonicalRedirect) return canonicalRedirect;
+          }
+          return response;
+        }
+        const validation = await resolveStudyRoute(request, env, studyRoute);
+        const validationResponse = studyRouteResponse(request, validation);
+        if (validationResponse) return validationResponse;
+        return spaShellResponse(request, env, url, response.status);
+      }
       if (response.status === 404) {
         const accept = request.headers.get("Accept") || "";
         // Same-as-before SPA fallback rules. Note that for bots we
@@ -654,6 +903,12 @@ export default {
       }
       return response;
     } catch {
+      if (studyRoute && (request.method === "GET" || request.method === "HEAD")) {
+        const validation = await resolveStudyRoute(request, env, studyRoute);
+        const validationResponse = studyRouteResponse(request, validation);
+        if (validationResponse) return validationResponse;
+        return spaShellResponse(request, env, url, 200);
+      }
       return spaShellResponse(request, env, url, 200);
     }
   },

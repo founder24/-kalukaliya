@@ -1,0 +1,20 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Syrabit",
+    "identifier": "https://syrabit.ai"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:syrabit.ai:api:public-content-search",
+      "displayName": "Published curriculum content search",
+      "type": "application/json",
+      "url": "https://api.syrabit.ai/api/v1/content/search",
+      "representativeQueries": [
+        "Find published notes about office communication",
+        "Search Assamese school curriculum content",
+        "Find a chapter about principles of management"
+      ]
+    }
+  ]
+}

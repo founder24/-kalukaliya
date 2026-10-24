@@ -6,6 +6,7 @@
  */
 
 import { Hono } from 'hono';
+import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
 import type { Env } from '../types';
 
 export const seoRouter = new Hono<{ Bindings: Env }>();
@@ -52,13 +53,20 @@ function topicEntries(rows: ContentUrl[]): string[] {
   const entries = new Map<string, string>();
   for (const row of rows) {
     try {
-      const topics = JSON.parse(row.publishedTopics ?? '[]') as Array<{ slug?: string; topic_slug?: string }>;
+      const topics = indexablePublishedTopics(JSON.parse(row.publishedTopics ?? '[]'));
       for (const topic of topics) {
-        const slug = topic.topic_slug ?? topic.slug;
-        if (!slug) continue;
+        const slug = String(topic.topic_slug);
         const location = `${contentUrl(row)}/topic/${encodeURIComponent(slug)}`;
-        if (!entries.has(location)) {
+        const assameseOnly = topic.language === 'Assamese';
+        if (!assameseOnly && !entries.has(location)) {
           entries.set(location, urlEntry(location, date(row.updatedAt), '0.6'));
+        }
+        if (assameseOnly || completeAssameseTopic(topic)) {
+          const slugAs = String(topic.topic_slug_as ?? slug).trim();
+          const localizedLocation = `${SITE_URL}/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}/topic/${encodeURIComponent(slugAs)}`;
+          if (!entries.has(localizedLocation)) {
+            entries.set(localizedLocation, urlEntry(localizedLocation, date(row.updatedAt), '0.6'));
+          }
         }
       }
     } catch {
@@ -191,7 +199,7 @@ Crawl-delay: 0
 # search=yes: content is intended for search indexing
 # ai-input=yes: content may be used as grounding for AI-generated answers
 # ai-train=no: content must NOT be used for model training
-# Content-Signal: search=yes, ai-input=yes, ai-train=no
+Content-Signal: search=yes, ai-input=yes, ai-train=no
 
 # --- AI training crawlers: explicitly disallowed. ---
 User-agent: GPTBot

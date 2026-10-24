@@ -11,21 +11,39 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  validateIndexNowKey,
+  writeIndexNowKeyFile,
+} from "./write-indexnow-key-file.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
+const publicDir = path.resolve(__dirname, "..", "public");
 const SITE_ORIGIN = "https://syrabit.ai";
 const BACKEND_URL = process.env.INDEXNOW_BACKEND_URL || "https://api.syrabit.ai";
 const SECRET = process.env.INDEXNOW_SECRET || "";
 const BATCH_SIZE = 100;
 
-function verifyKeyFile(directory) {
-  const key = process.env.INDEXNOW_API_KEY || "";
-  if (!key) {
-    throw new Error("INDEXNOW_API_KEY is required to verify the ownership file");
+export function verifyKeyFile(
+  directory,
+  configuredKey = process.env.INDEXNOW_API_KEY,
+  { generateIfMissing = false, allowMissing = false } = {},
+) {
+  const key = validateIndexNowKey(configuredKey);
+  const resolvedDirectory = path.resolve(directory);
+
+  if (resolvedDirectory === publicDir || allowMissing) {
+    console.log(
+      "[indexnow-submit] Release key format is valid; ownership file will be generated in the Pages artifact",
+    );
+    return;
   }
 
-  const keyFile = path.join(directory, `${key}.txt`);
+  if (resolvedDirectory === distDir || generateIfMissing) {
+    writeIndexNowKeyFile(resolvedDirectory, key);
+  }
+
+  const keyFile = path.join(resolvedDirectory, `${key}.txt`);
   if (!fs.existsSync(keyFile)) {
     throw new Error("The IndexNow ownership file for the configured release key is missing");
   }
@@ -121,18 +139,27 @@ async function main() {
   );
 }
 
-if (process.argv[2] === "--verify-key-file") {
-  try {
-    const directory = path.resolve(process.argv[3] || distDir);
-    verifyKeyFile(directory);
-  } catch (err) {
-    console.error(`[indexnow-submit] Ownership verification failed: ${err.message}`);
-    process.exit(1);
+const isDirectInvocation =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectInvocation) {
+  if (process.argv[2] === "--verify-key-file") {
+    try {
+      const directory = path.resolve(process.argv[3] || distDir);
+      verifyKeyFile(directory, process.env.INDEXNOW_API_KEY, {
+        generateIfMissing: directory === distDir,
+        allowMissing: directory === publicDir,
+      });
+    } catch (err) {
+      console.error(`[indexnow-submit] Ownership verification failed: ${err.message}`);
+      process.exit(1);
+    }
+  } else {
+    main().catch((err) => {
+      console.error("[indexnow-submit] Fatal error:", err);
+      // Non-fatal: don't fail the deploy if IndexNow is unreachable
+      process.exit(0);
+    });
   }
-} else {
-  main().catch((err) => {
-    console.error("[indexnow-submit] Fatal error:", err);
-    // Non-fatal: don't fail the deploy if IndexNow is unreachable
-    process.exit(0);
-  });
 }

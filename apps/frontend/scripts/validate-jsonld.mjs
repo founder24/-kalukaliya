@@ -26,6 +26,8 @@ import {
   detectHowToFromDoc,
   dedupeGraphTypes,
   buildSchemaForPageType,
+  topicPageSchema,
+  injectJsonLdIntoHead,
   ORG_SAMEAS,
   FOUNDER,
 } from '../src/lib/jsonld.js';
@@ -63,6 +65,53 @@ test('chapterSchema → Article + LearningResource + WebPage + Breadcrumb (+ FAQ
 test('chapterSchema returns null for missing inputs', () => {
   assert.equal(chapterSchema(null, 'x'), null);
   assert.equal(chapterSchema({ title: 'x' }, ''), null);
+});
+
+test('topicPageSchema matches English and Assamese visible topic content and curriculum', () => {
+  const chapter = {
+    board_name: 'AHSEC',
+    class_name: 'Class 11',
+    subject_name: 'Physics',
+    chapter_title: 'Laws of Motion',
+  };
+  const english = {
+    topic: { title: 'Inertia', description: 'Inertia is resistance to a change in motion.' },
+    chapter,
+    language: 'en',
+    url: 'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia',
+    parentUrl: 'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion',
+  };
+  const englishSchema = topicPageSchema(english);
+  const englishResource = englishSchema['@graph'][0];
+  assert.equal(englishResource['@type'], 'LearningResource');
+  assert.equal(englishResource.name, english.topic.title);
+  assert.equal(englishResource.description, english.topic.description);
+  assert.equal(englishResource.inLanguage, 'en-IN');
+  assert.equal(englishResource.educationalLevel, 'Class 11');
+  assert.equal(englishResource.educationalAlignment.educationalFramework, 'AHSEC');
+  assert.equal(englishResource.educationalAlignment.targetName, 'Physics');
+  assert.equal(englishResource.isPartOf['@id'], english.parentUrl);
+
+  const assamese = {
+    ...english,
+    topic: { title: 'জড়তা', description: 'জড়তা হৈছে গতিৰ পৰিৱৰ্তনৰ প্ৰতি বস্তুৰ প্ৰতিৰোধ।' },
+    language: 'as',
+    url: 'https://syrabit.ai/as/ahsec/hs-1st-year/physics/laws-of-motion/topic/jarata',
+    parentUrl: 'https://syrabit.ai/as/ahsec/hs-1st-year/physics/laws-of-motion',
+  };
+  const assameseSchema = topicPageSchema(assamese);
+  assert.equal(assameseSchema['@graph'][0].name, assamese.topic.title);
+  assert.equal(assameseSchema['@graph'][0].description, assamese.topic.description);
+  assert.equal(assameseSchema['@graph'][0].inLanguage, 'as-IN');
+  assert.equal(assameseSchema['@graph'].some((node) => node['@type'] === 'FAQPage'), false);
+
+  assert.deepEqual(buildSchemaForPageType('topic', { ...english, url: english.url }), englishSchema);
+  assert.equal(topicPageSchema({ ...english, language: undefined }), null);
+
+  const injected = injectJsonLdIntoHead('<html><head></head><body></body></html>', englishSchema);
+  const json = injected.match(/<script type="application\/ld\+json" data-pm="1">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(json, 'expected first-byte topic JSON-LD script');
+  assert.deepEqual(JSON.parse(json), englishSchema);
 });
 
 test('subjectHubSchema → EducationalOrganization + CollectionPage + Course + Breadcrumb', () => {
