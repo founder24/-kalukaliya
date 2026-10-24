@@ -278,6 +278,49 @@ function normalizedPathname(pathname) {
   return pathname.replace(/\/+$/, "");
 }
 
+function normalizedDecodedPathname(pathname) {
+  try {
+    return normalizedPathname(decodeURI(pathname || "/"));
+  } catch {
+    return normalizedPathname(pathname);
+  }
+}
+
+function unicodeNfcRedirect(request, url) {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+
+  let decodedPathname;
+  try {
+    decodedPathname = decodeURI(url.pathname);
+  } catch {
+    return null;
+  }
+
+  const nfcPathname = decodedPathname.normalize("NFC");
+  if (nfcPathname === decodedPathname) return null;
+
+  const canonicalUrl = new URL(url);
+  canonicalUrl.pathname = nfcPathname;
+  const location = `${canonicalUrl.pathname}${canonicalUrl.search}`;
+  if (location === `${url.pathname}${url.search}`) return null;
+
+  const headers = new Headers({
+    Location: location,
+    "Cache-Control": "public, max-age=3600, s-maxage=86400",
+    "X-Source": "unicode-nfc-canonical",
+  });
+  addSecurityHeaders(headers);
+  return new Response(null, { status: 301, headers });
+}
+
+function decodePathSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 const EXACT_FRONTEND_ROUTES = new Set([
   "/", "/home", "/terms", "/privacy", "/about", "/technology",
   "/status", "/exam-routine", "/payment/success", "/payment/cancel", "/login",
@@ -304,7 +347,10 @@ function isDeclaredFrontendRoute(pathname) {
 }
 
 function parseStudyRoute(pathname) {
-  const parts = normalizedPathname(pathname).split("/").filter(Boolean);
+  const parts = normalizedPathname(pathname)
+    .split("/")
+    .filter(Boolean)
+    .map(decodePathSegment);
   const isAssamese = parts[0] === "as";
   if (isAssamese) parts.shift();
 
@@ -326,6 +372,25 @@ function parseStudyRoute(pathname) {
     return null;
   }
   return { board, classSlug, streamSlug, subjectSlug, chapterSlug, topicSlug, isAssamese };
+}
+
+function topicWordCount(value) {
+  return typeof value === "string" ? value.trim().split(/\s+/).filter(Boolean).length : 0;
+}
+
+function isIndexableTopic(topic, isAssamese) {
+  if (!topic || topic.definition_status !== "ok") return false;
+  const englishSlug = topic.topic_slug || topic.slug;
+  const englishTitle = topic.title || topic.name;
+  const englishDefinition = topic.definition || topic.content;
+  if (!englishSlug || !englishTitle || topicWordCount(englishDefinition) < 40) return false;
+  if (!isAssamese) return true;
+  const definitionAs = topic.definition_as || topic.content_as;
+  return Boolean(
+    typeof topic.title_as === "string" && topic.title_as.trim() &&
+    typeof topic.topic_slug_as === "string" && topic.topic_slug_as.trim() &&
+    topicWordCount(definitionAs) >= 40,
+  );
 }
 
 async function resolveStudyRoute(request, env, parsed) {
@@ -368,12 +433,10 @@ async function resolveStudyRoute(request, env, parsed) {
         ? payload.published_topics
         : [];
       const topicExists = topics.some((topic) =>
-        topic && (
-          topic.topic_slug === parsed.topicSlug ||
-          topic.slug === parsed.topicSlug ||
-          topic.topic_slug_as === parsed.topicSlug
-        ) &&
-        (!topic.definition_status || topic.definition_status === "ok" || topic.status === "published")
+        isIndexableTopic(topic, parsed.isAssamese) &&
+        (parsed.isAssamese
+          ? topic.topic_slug_as === parsed.topicSlug
+          : (topic.topic_slug || topic.slug) === parsed.topicSlug)
       );
       if (!topicExists) return { kind: "not-found" };
     }
@@ -430,7 +493,7 @@ async function assetMatchesRequestedPrerender(response, pathname) {
     for (const tag of metas) {
       if (!/\bname\s*=\s*["']syrabit-prerender-path["']/i.test(tag)) continue;
       const outputPath = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
-      return normalizedPathname(outputPath) === normalizedPathname(pathname);
+      return normalizedDecodedPathname(outputPath) === normalizedDecodedPathname(pathname);
     }
   } catch {
     // Treat unreadable HTML as an asset miss and use backend bot rendering.
@@ -603,6 +666,9 @@ function minimalRedirectResponse() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const unicodeRedirect = unicodeNfcRedirect(request, url);
+    if (unicodeRedirect) return unicodeRedirect;
+
     const ua = request.headers.get("User-Agent") || "";
     const isBot = SEARCH_BOT_UA.test(ua);
     const studyRoute = parseStudyRoute(url.pathname);

@@ -22,7 +22,7 @@ import { Link } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 
 export default function SubjectTopicIndex({ index, chapterBasePath = '', isAssamese = false }) {
-  const chapters = Array.isArray(index?.chapters) ? index.chapters : (() => {
+  const sourceChapters = Array.isArray(index?.chapters) ? index.chapters : (() => {
     const grouped = new Map();
     for (const topic of index?.topics || []) {
       const key = topic.chapter_id;
@@ -43,6 +43,26 @@ export default function SubjectTopicIndex({ index, chapterBasePath = '', isAssam
     }
     return [...grouped.values()];
   })();
+  const chapters = sourceChapters.map((chapter) => ({
+    ...chapter,
+    chapter_url: isAssamese
+      ? (chapter.chapter_url_as || (chapter.chapter_url?.startsWith('/as/')
+        ? chapter.chapter_url
+        : `/as${chapter.chapter_url || ''}`))
+      : chapter.chapter_url,
+    topics: (chapter.topics || [])
+      .filter((topic) => !isAssamese || (
+        topic.deep_link_path_as &&
+        topic.title_as &&
+        topic.topic_slug_as &&
+        String(topic.definition_as || '').trim().split(/\s+/).filter(Boolean).length >= 40
+      ))
+      .map((topic) => ({
+        ...topic,
+        title: isAssamese ? topic.title_as : topic.title,
+        deep_link_path: isAssamese ? topic.deep_link_path_as : topic.deep_link_path,
+      })),
+  })).filter((chapter) => chapter.topics.length > 0);
   const total = Number(index?.total_topics || 0);
   if (chapters.length === 0 || total === 0) return null;
 

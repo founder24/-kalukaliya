@@ -69,7 +69,7 @@
 - [Worker chat student memory](worker-chat-student-memory.md) — authenticated chat reads and refreshes bounded D1 memory; anonymous chat never writes long-term memory.
 - [Outbound URL connection pinning](outbound-url-connection-pinning.md) — URL checks must pin HTTP connections to validated public DNS answers and revalidate every redirect.
 - [GitHub Actions secret repair](github-actions-secret-repair.md) — If shell tokens lack secret-admin scope, use the GitHub connector public key and sealed-box encrypted secret writes.
-- [Cloudflare-only production boundary](cloudflare-only-production.md) — Local and production traffic must use the API Worker service binding; Cloud Run is disconnected, not an allowed fallback.
+- [Cloudflare-only production boundary](cloudflare-only-production.md) — GitHub drives Cloudflare releases; use the API Worker service binding and keep Cloud Run disconnected.
 - [GCP decommission billing block](gcp-decommission-billing-block.md) — Cloud Run deletion works with billing disabled, but Artifact Registry cleanup is blocked until billing is briefly enabled.
 - [External library crawl boundaries](external-library-crawl-boundaries.md) — dedupe archive graphs before processing and defer bulk scan OCR so large refreshes remain bounded.
 - [Syllabus PDF alignment](syllabus-pdf-alignment.md) — catalog PDFs lack subject links; align by official structure and reject body-keyword guesses.
@@ -94,8 +94,10 @@
 - [AHSEC importer workflow runtime](syrabit-import-workflow-runtime.md) — avoid the read-only Nix Python site; use user-scoped installs or isolated uv, with test tools kept out of runtime deps.
 - [Referral settlement controls](referral-settlement-controls.md) — fund and settle only frozen mature-claim statements with private payout evidence and immutable pause cutoffs
 - [Assamese translation boundary](assamese-translation-boundary.md) — validate raw translation chunks before cleanup, accumulation, or bilingual chapter writes
+- [Assamese assistant voice](assamese-assistant-voice.md) — Syrabit speaks as “মই” and addresses students as “আপুনি”.
 - [Live staff Access boundary](staff-live-access-boundary.md) — production staff verification needs both application auth and Cloudflare Access credentials
 - [Cloudflare release provenance](cloudflare-release-provenance.md) — release builds must keep generated curriculum, review cache, and browser output out of tracked source
+- [Cloudflare Agent Readiness policy](cloudflare-agent-readiness-policy.md) — advertise only working services; leave unsupported agent protocols unscored rather than fabricate discovery metadata
 - [Production AdSense verification](production-ads-verification.md) — a live Google loader is not enough; verify compiled slot IDs, DOM metadata, fills, and stale hashed assets separately
 - [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
@@ -110,3 +112,6 @@
 - [Chat transcript access audit](chat-transcript-access-audit.md) — audit authorized staff transcript reads with actor, session, and time only; never copy message content into the event.
 - [braces advisory mitigation](braces-advisory-mitigation.md) — GHSA-vfj7-8cjw-p6xm has no upstream fixed release; local parser depth patch is protective but version-based scans still flag it.
 - [Worker chat media models](worker-chat-media-models.md) — Current OCR/TTS binding contracts differ from the legacy backend client; verify Cloudflare's model catalog before changing them.
+- [Tollbit crawler integration](tollbit-crawler-integration.md) — Use verified Tollbit-supported ingestion/configuration, not a raw User-Agent proxy; validate the supplied bot list before use.
+- [AI readiness review evidence](ai-readiness-evidence.md) — Separate page-internal claim support from official curriculum verification; keep composite scores N/A when required evidence is missing.
+- [SSR route heading audits](ssr-route-heading-audits.md) — Shared shell H1 may precede route H1; score page content against the route-specific heading.

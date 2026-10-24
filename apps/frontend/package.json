@@ -40,6 +40,7 @@
     "build": "node scripts/build.mjs",
     "build:client": "vite build",
     "check:sitemap-rendered-html": "node scripts/verify-sitemap-rendered-html.mjs",
+    "score:seo-readiness": "node scripts/ai-readiness-scorecard.mjs",
     "check:staff-chunks": "node scripts/check-staff-production-chunks.mjs",
     "check:hashed-assets": "node scripts/check-hashed-assets.mjs dist",
     "build:ssr": "vite build --ssr src/entry-server.jsx --outDir dist-ssr --emptyOutDir",
