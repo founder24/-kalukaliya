@@ -29,9 +29,21 @@ function createDist() {
     "The amount of inertia depends on the mass of the object, so a heavier object has greater inertia.",
     "This explanation describes the topic in the context of the AHSEC Class 11 Physics chapter on Laws of Motion.",
   ].join(" ");
+  const learningResource = {
+    "@type": "LearningResource",
+    "name": "Inertia",
+    "description": body,
+    "inLanguage": "en-IN",
+    "educationalLevel": "Class 11",
+    "educationalAlignment": {
+      "@type": "AlignmentObject",
+      "educationalFramework": "AHSEC",
+      "targetName": "Physics",
+    },
+  };
   fs.writeFileSync(
     path.join(output, "index.html"),
-    `<!doctype html><html lang="en"><head><title>Inertia&#39;s Motion — Laws of Motion</title><meta name="description" content="Study inertia in AHSEC Class 11 Physics."><link rel="canonical" href="${url}"><meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"></head><body><div id="root" data-hydrate="chapter"><main><h1>Inertia</h1><p>${body}</p><a href="/ahsec/hs-1st-year/physics/laws-of-motion">Read the chapter</a></main></div><script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@graph": [{ "@type": "LearningResource", "name": "Inertia" }] })}</script></body></html>`,
+    `<!doctype html><html lang="en"><head><title>Inertia&#39;s Motion — Laws of Motion</title><meta name="description" content="Study inertia in AHSEC Class 11 Physics."><link rel="canonical" href="${url}"><meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"></head><body><header><h1>Syrabit.ai — Educational Browser For Assam Board Students</h1></header><div id="root" data-hydrate="chapter"><main><h1>Inertia</h1><p>${body}</p><a href="/ahsec/hs-1st-year/physics/laws-of-motion">Read the chapter</a></main></div><script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@graph": [learningResource] })}</script></body></html>`,
   );
   return root;
 }
@@ -80,6 +92,50 @@ describe("AI readiness scorecard", () => {
     expect(report.editorialSample).toHaveLength(1);
     expect(report.answerQuestions).toHaveLength(1);
     expect(report.answerQuestions[0].question).toBe("What should a student know about Inertia's Motion?");
+  });
+
+  it("rejects topic markup with the wrong language even when the title matches", () => {
+    const distDir = createDist();
+    const page = path.join(
+      distDir,
+      "ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia/index.html",
+    );
+    fs.writeFileSync(
+      page,
+      fs.readFileSync(page, "utf8").replace('"inLanguage":"en-IN"', '"inLanguage":"as-IN"'),
+    );
+
+    const report = buildReadinessReport({ distDir });
+    expect(report.categories.aeo.subscores.structuredMarkup.points).toBe(0);
+    expect(report.categories.aeo.subscores.structuredMarkup.failures[0]).toMatchObject({
+      titleMatches: true,
+      languageMatches: false,
+    });
+  });
+
+  it("rejects FAQ markup on topic pages without visible FAQ content", () => {
+    const distDir = createDist();
+    const page = path.join(
+      distDir,
+      "ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia/index.html",
+    );
+    fs.writeFileSync(
+      page,
+      fs.readFileSync(page, "utf8").replace(
+        "</body>",
+        `<script type="application/ld+json">${JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          "mainEntity": [],
+        })}</script></body>`,
+      ),
+    );
+
+    const report = buildReadinessReport({ distDir });
+    expect(report.categories.aeo.subscores.structuredMarkup.points).toBe(0);
+    expect(report.categories.aeo.subscores.structuredMarkup.failures[0]).toMatchObject({
+      faqPageCount: 1,
+    });
   });
 
   it("accepts complete rubric-versioned evidence and can produce 100/100", () => {

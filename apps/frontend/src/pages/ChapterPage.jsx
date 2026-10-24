@@ -1193,10 +1193,17 @@ export default function ChapterPage() {
           url={canonical}
           type="article"
           section={subjectName}
-          pageType="chapter"
+          pageType="topic"
           pageData={{
-            data: { ...data, published_topics: [activeDeepLinkTopic] },
-            basePath: isAssamesePath ? asBasePath : basePath,
+            topic: { title: topicTitle, description: topicDefinition },
+            chapter: {
+              subject_name: subjectName,
+              board_name: boardName,
+              class_name: className,
+              chapter_title: chapterTitle,
+            },
+            parentUrl: `https://syrabit.ai${_topicParentPath}`,
+            language: isAssamesePath ? "as" : "en",
           }}
           hasAssamese={Boolean(activeDeepLinkTopic.definition_as)}
           language={isAssamesePath ? "as" : "en"}

@@ -370,7 +370,8 @@ export function buildReadinessReport({ distDir = DEFAULT_DIST_DIR, robotsPath, e
     if (checks.file) {
       html = fs.readFileSync(file, "utf8");
       const title = textFromHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
-      h1 = textFromHtml(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? "");
+      const h1Matches = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
+      h1 = textFromHtml(h1Matches.at(-1)?.[1] ?? "");
       const canonical = html.match(/<link\b[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i)?.[1]
         ?? html.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*rel=["']canonical["']/i)?.[1];
       const lang = html.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1]?.toLowerCase();
@@ -387,11 +388,45 @@ export function buildReadinessReport({ distDir = DEFAULT_DIST_DIR, robotsPath, e
         const types = Array.isArray(node["@type"]) ? node["@type"] : [node["@type"]];
         return types.includes("LearningResource");
       });
+      const faqPageCount = schema.nodes.filter((node) => {
+        const types = Array.isArray(node["@type"]) ? node["@type"] : [node["@type"]];
+        return types.includes("FAQPage");
+      }).length;
+      const h1Match = h1Matches.at(-1) ?? null;
+      const visibleDefinition = h1Match
+        ? textFromHtml(html.slice(h1Match.index + h1Match[0].length).match(/<p\b[^>]*>([\s\S]*?)<\/p>/i)?.[1] ?? "")
+        : "";
+      const expectedLanguage = pathname.startsWith("/as/") ? "as-IN" : "en-IN";
+      const matchingResource = learningResources.find((node) => String(node.name ?? "").trim() === h1);
+      const alignments = Array.isArray(matchingResource?.educationalAlignment)
+        ? matchingResource.educationalAlignment
+        : [matchingResource?.educationalAlignment];
+      const curriculumContext = Boolean(
+        String(matchingResource?.educationalLevel ?? "").trim() &&
+        alignments.some((alignment) =>
+          String(alignment?.educationalFramework ?? "").trim() &&
+          String(alignment?.targetName ?? "").trim()
+        ),
+      );
+      const descriptionMatches = Boolean(
+        visibleDefinition &&
+        textFromHtml(String(matchingResource?.description ?? "")) === visibleDefinition,
+      );
       structuredRows.push({
         url,
-        pass: schema.invalid === 0 && learningResources.some((node) => String(node.name ?? "").trim() === h1),
+        pass: schema.invalid === 0 &&
+          Boolean(matchingResource) &&
+          matchingResource.inLanguage === expectedLanguage &&
+          descriptionMatches &&
+          curriculumContext &&
+          faqPageCount === 0,
         invalidJsonLd: schema.invalid,
         learningResourceCount: learningResources.length,
+        titleMatches: Boolean(matchingResource),
+        languageMatches: matchingResource?.inLanguage === expectedLanguage,
+        descriptionMatches,
+        curriculumContext,
+        faqPageCount,
       });
     } else {
       metadataRows.push({ url, title: "", checks });
