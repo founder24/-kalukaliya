@@ -42,3 +42,10 @@ For library content, AEC courses are subject cards under Degree → semester →
 **Why:** The user clarified that AEC is a course within a semester and stream; the profile selector uses a separate course-type taxonomy.
 
 **How to apply:** Place each syllabus AEC card under its correct semester and existing degree stream, while leaving the profile selector taxonomy unchanged.
+
+## Curriculum content rollout sequence
+The intended upload order is: create the subject card; upload the English syllabus first and derive topic-wise chapter-page metadata from it; add individual PYQs as standalone pages; then add topic-wise PYQs to each chapter’s Questions section, English followed by Assamese; finally add topic-wise Notes content, English followed by Assamese. Chapters may be processed in parallel, while each chapter follows the English-then-Assamese order.
+
+**Why:** The user specified a staged bilingual workflow that uses the English syllabus as the source for chapter and topic metadata and separates standalone PYQ pages from chapter-level Questions and Notes.
+
+**How to apply:** Preserve this order in content-ingestion and staff upload flows. Treat only standalone PYQ routes as individual indexable pages; embedded chapter questions and notes remain part of their chapter page unless a separate route is intentionally created.
