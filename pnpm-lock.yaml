@@ -217,8 +217,8 @@ importers:
         specifier: ^7.29.7
         version: 7.29.7(@babel/core@7.29.6)(eslint@9.39.5(jiti@2.7.0))
       '@babel/plugin-syntax-jsx':
-        specifier: ^7.29.7
-        version: 7.29.7(@babel/core@7.29.6)
+        specifier: ^8.0.1
+        version: 8.0.1(@babel/core@7.29.6)
       '@playwright/test':
         specifier: ^1.64.1
         version: 1.64.1
@@ -358,6 +358,12 @@ packages:
     resolution: {integrity: sha512-G7sHYigPY17oO5SYWnfD/0MTBwVR781S/JI643e/JhUYgVgWE/61SoW3NH9KWUKyKq5LVh3npif99Wkt6j86Jw==}
     engines: {node: '>=6.9.0'}
 
+  '@babel/helper-plugin-utils@8.0.1':
+    resolution: {integrity: sha512-3PKFgjTyPlhFhorfP+SjKQxLViIL++zWjFOO4hGriYU+Bsm983DxEM1JmDRJVWXV0O9npu+xXRqz7Pbd3mh70g==}
+    engines: {node: ^22.18.0 || >=24.11.0}
+    peerDependencies:
+      '@babel/core': 7.29.6
+
   '@babel/helper-string-parser@7.29.7':
     resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
     engines: {node: '>=6.9.0'}
@@ -384,9 +390,9 @@ packages:
     engines: {node: '>=6.0.0'}
     hasBin: true
 
-  '@babel/plugin-syntax-jsx@7.29.7':
-    resolution: {integrity: sha512-TSu8+mHCoEaaCDEZ0I3+6mvTBYR4PCxQwf2z9/r5Tbztv6NaLR3B9thGTTxX2WGuGHJqRiAbKPeGTJ5XWXVg6A==}
-    engines: {node: '>=6.9.0'}
+  '@babel/plugin-syntax-jsx@8.0.1':
+    resolution: {integrity: sha512-n0jtCOxEovhU7METqSQjcZO9pX53nu9uNIjMS+hEt+Nt9jA7oOZoBIgbCxhhASmF6T6rPDGge5UAvh6Z4eFz/g==}
+    engines: {node: ^22.18.0 || >=24.11.0}
     peerDependencies:
       '@babel/core': 7.29.6
 
@@ -5203,6 +5209,10 @@ snapshots:
 
   '@babel/helper-plugin-utils@7.29.7': {}
 
+  '@babel/helper-plugin-utils@8.0.1(@babel/core@7.29.6)':
+    dependencies:
+      '@babel/core': 7.29.6
+
   '@babel/helper-string-parser@7.29.7': {}
 
   '@babel/helper-validator-identifier@7.29.7': {}
@@ -5222,10 +5232,10 @@ snapshots:
     dependencies:
       '@babel/types': 7.29.8
 
-  '@babel/plugin-syntax-jsx@7.29.7(@babel/core@7.29.6)':
+  '@babel/plugin-syntax-jsx@8.0.1(@babel/core@7.29.6)':
     dependencies:
       '@babel/core': 7.29.6
-      '@babel/helper-plugin-utils': 7.29.7
+      '@babel/helper-plugin-utils': 8.0.1(@babel/core@7.29.6)
 
   '@babel/plugin-transform-react-jsx-self@7.27.1(@babel/core@7.29.6)':
     dependencies:
