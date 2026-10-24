@@ -32,8 +32,10 @@ beanie==2.1.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
 beautifulsoup4==4.15.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
-brotli==1.2.0
-    # via httpx
+brotli==1.2.1
+    # via
+    #   -r /home/runner/workspace/apps/backend/requirements.in
+    #   httpx
 certifi==2026.10.19
     # via
     #   -r /home/runner/workspace/apps/backend/requirements.in
@@ -211,7 +213,7 @@ pymongo==4.19.0
     #   -r /home/runner/workspace/apps/backend/requirements.in
     #   beanie
     #   motor
-pypdf==6.20.1
+pypdf==6.21.2
     # via -r /home/runner/workspace/apps/backend/requirements.in
 pypdfium2==5.13.0
     # via -r /home/runner/workspace/apps/backend/requirements.in
