@@ -17,6 +17,8 @@ on:
       - 'scripts/test-ci-workflow-concurrency.py'
       - 'scripts/check-staff-chunk-release-gate.py'
       - 'scripts/test-staff-chunk-release-gate.py'
+      - 'scripts/audit-dependabot-manifests.mjs'
+      - 'scripts/audit-dependabot-manifests.test.mjs'
   push:
     branches: [main]
     paths:
@@ -31,6 +33,8 @@ on:
       - 'scripts/test-ci-workflow-concurrency.py'
       - 'scripts/check-staff-chunk-release-gate.py'
       - 'scripts/test-staff-chunk-release-gate.py'
+      - 'scripts/audit-dependabot-manifests.mjs'
+      - 'scripts/audit-dependabot-manifests.test.mjs'
   workflow_dispatch:
 
 permissions:
@@ -69,6 +73,9 @@ jobs:
 
       - name: Test staff chunk release gate checker
         run: python3 scripts/test-staff-chunk-release-gate.py
+
+      - name: Test Dependabot manifest audit
+        run: node --test scripts/audit-dependabot-manifests.test.mjs
 
       - name: Check actionlint release pin
         run: python3 scripts/update-actionlint.py

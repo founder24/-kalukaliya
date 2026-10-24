@@ -1,0 +1,27 @@
+name: Audit Dependabot manifest paths
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: read
+
+concurrency:
+  group: dependabot-manifest-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Read-only Dependabot manifest audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Compare open alert manifests with the default branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/audit-dependabot-manifests.mjs

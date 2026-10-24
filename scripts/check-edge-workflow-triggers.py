@@ -23,6 +23,8 @@ WORKFLOW_CONTRACTS: dict[str, list[str] | None] = {
         "scripts/test-ci-workflow-concurrency.py",
         "scripts/check-staff-chunk-release-gate.py",
         "scripts/test-staff-chunk-release-gate.py",
+        "scripts/audit-dependabot-manifests.mjs",
+        "scripts/audit-dependabot-manifests.test.mjs",
     ],
     ".github/workflows/ci-api.yml": None,
     ".github/workflows/ci-edge.yml": [
