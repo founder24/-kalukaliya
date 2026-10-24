@@ -6,6 +6,7 @@ import {
   adminSeoRegenerateSitemap, adminSeoDeleteTopic, adminSeoPilot,
   adminSeoAutoRun, adminSeoJobStatus, adminSeoInsights,
   adminSeoBulkPublish, adminSeoSubjectCoverage, adminSeoRunSubject,
+  adminSeoUpdateTopic,
   seoInternalLinksAnalyze, seoInternalLinksInject,
   seoInjectSchemaBulk, seoInjectSchema, seoSitemapValidate,
   adminSeoRefreshMeta, adminSeoReviewQueue,
@@ -141,17 +142,19 @@ export default function useSeoManager(adminToken) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, topicsRes, pagesRes] = await Promise.all([
+      const results = await Promise.allSettled([
         adminSeoStats(adminToken),
         adminSeoListTopics(adminToken),
         adminSeoListPages(adminToken),
       ]);
-      setStats(statsRes.data);
-      setTopics(Array.isArray(topicsRes.data) ? topicsRes.data : []);
-      const raw = pagesRes.data;
-      setPages(Array.isArray(raw) ? raw : (raw?.pages || []));
-    } catch {
-      toast.error('Failed to load SEO data');
+      const [statsRes, topicsRes, pagesRes] = results;
+      if (statsRes.status === 'fulfilled') setStats(statsRes.value.data);
+      if (topicsRes.status === 'fulfilled') setTopics(Array.isArray(topicsRes.value.data) ? topicsRes.value.data : []);
+      if (pagesRes.status === 'fulfilled') {
+        const raw = pagesRes.value.data;
+        setPages(Array.isArray(raw) ? raw : (raw?.pages || []));
+      }
+      if (results.every(result => result.status === 'rejected')) toast.error('Failed to load SEO data');
     } finally {
       setLoading(false);
     }
@@ -351,6 +354,15 @@ export default function useSeoManager(adminToken) {
     } catch { toast.error('Delete failed'); }
   }, [adminToken]);
 
+  const handleUpdateTopic = useCallback(async (topic, values) => {
+    const id = topic._id || topic.id;
+    await adminSeoUpdateTopic(adminToken, id, values);
+    setTopics(prev => prev.map(item =>
+      (item._id || item.id) === id ? { ...item, ...values } : item,
+    ));
+    toast.success('Topic translations saved');
+  }, [adminToken]);
+
   const handleRegenerateSitemap = useCallback(async () => {
     setSitemap(true);
     try {
@@ -532,7 +544,7 @@ export default function useSeoManager(adminToken) {
     sitemapData, sitemapValidating, refreshingMeta,
     load, loadInsights, loadCoverage, loadReviewQueue,
     handleAutoRun, handleExtract, handleGenerate, handleToggleStatus,
-    handleDeleteTopic, handleRegenerateSitemap, handleBulkPublish,
+    handleDeleteTopic, handleUpdateTopic, handleRegenerateSitemap, handleBulkPublish,
     handleInsightAction, handleLinksAnalyze, handleLinksInject,
     handleSchemaInjectSingle, handleSchemaBulk, handleSitemapValidate,
     handleRefreshMeta, handlePilot, handleRunSubject,

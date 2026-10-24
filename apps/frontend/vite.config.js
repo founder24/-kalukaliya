@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { visualizer } from 'rollup-plugin-visualizer';
 import codemirrorStubPlugin from './vite-plugins/codemirror-stub.js';
 import sentryReplayStubPlugin from './vite-plugins/sentry-replay-stub.js';
+import { failOnMissingExport } from './vite-plugins/fail-missing-export.js';
 import modulepreloadInjectPlugin from './vite-plugins/modulepreload-inject.js';
 import preloadHeadersInjectPlugin from './vite-plugins/preload-headers-inject.js';
 import {
@@ -718,6 +719,7 @@ export default defineConfig(({ mode }) => ({
     // PWA manifest that Cloudflare Pages serves from /manifest.json).
     manifest: true,
     rollupOptions: {
+      onwarn: failOnMissingExport,
       output: {
         // Manual chunk strategy — see Task #359 for the full root-cause
         // and the matching audit note in `.local/audits/syrabit-page-load

@@ -4,6 +4,7 @@ import {
   buildSystemPrompt,
   buildEmbeddingQuery,
   detectLang,
+  hasAssameseAssistantIdentityError,
   hasAssameseProseLeakage,
   isReliableAssameseAnswer,
   isUsableAssameseAnswer,
@@ -44,6 +45,25 @@ describe('student chat curriculum scope', () => {
     expect(prompt).toContain('বাংলা, হিন্দী/দেৱনাগৰী বা ইংৰাজী বাক্য');
     expect(prompt).toContain('সূত্ৰ, সমীকৰণ, ৰাসায়নিক সংকেত');
     expect(prompt).toContain('উৎসৰ ভাষা `english`');
+  });
+
+  it('keeps the assistant in first person and reserves আপুনি for the student', () => {
+    const prompt = buildSystemPrompt({
+      lang: 'as',
+      contextText: '',
+      history: '',
+      question: 'আপুনি কোন?',
+    });
+    const wrongIntro = 'আপুনি Syrabit AI, এজন বিশেষজ্ঞ শিক্ষা সহায়ক। মই AHSEC-ৰ পাঠ বুজাওঁ।';
+    const rightIntro = 'মই Syrabit AI, এজন বিশেষজ্ঞ শিক্ষা সহায়ক। মই AHSEC-ৰ পাঠ বুজাওঁ।';
+
+    expect(prompt).toContain('নিজৰ পৰিচয় প্ৰথম পুৰুষত');
+    expect(prompt).toContain('“মই Syrabit AI...”');
+    expect(prompt).toContain('“আপুনি” কেৱল শিক্ষাৰ্থীক সম্বোধন কৰিবলৈ');
+    expect(hasAssameseAssistantIdentityError(wrongIntro)).toBe(true);
+    expect(hasAssameseAssistantIdentityError(rightIntro)).toBe(false);
+    expect(isDeliverableAssameseAnswer(wrongIntro)).toBe(false);
+    expect(isDeliverableAssameseAnswer(rightIntro)).toBe(true);
   });
 
   it('normalizes streamed Assamese safely without removing formulas or names', () => {

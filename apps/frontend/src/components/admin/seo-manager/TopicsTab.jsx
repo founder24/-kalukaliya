@@ -1,11 +1,45 @@
-import { Loader2, Search, BookOpen, CheckCircle2, Trash2, RefreshCw, Zap, ArrowRight } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, Search, BookOpen, CheckCircle2, Trash2, RefreshCw, Zap, ArrowRight, Pencil, Save, X } from 'lucide-react';
 
 export default function TopicsTab({
   loading, filteredTopics, topics, topicSearch, setTopicSearch,
   selectedTopics, toggleTopic, extracting, handleExtract,
-  handleDeleteTopic, hubCtx, scopeSubjectOnly, setScopeSubjectOnly,
+  handleDeleteTopic, onUpdateTopic, hubCtx, scopeSubjectOnly, setScopeSubjectOnly,
   onNavigate, setTab,
 }) {
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  const startEditing = (topic) => {
+    setSaveError('');
+    setEditing({
+      topic,
+      title_as: topic.title_as || '',
+      topic_slug_as: topic.topic_slug_as || '',
+      definition_as: topic.definition_as || '',
+    });
+  };
+
+  const saveTranslation = async (event) => {
+    event.preventDefault();
+    if (!editing || saving) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onUpdateTopic(editing.topic, {
+        title_as: editing.title_as.trim(),
+        topic_slug_as: editing.topic_slug_as.trim(),
+        definition_as: editing.definition_as.trim(),
+      });
+      setEditing(null);
+    } catch {
+      setSaveError('Could not save the Assamese topic fields. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       {hubCtx?.subjectId && (
@@ -83,7 +117,7 @@ export default function TopicsTab({
             const isSel = selectedTopics.has(tid);
             return (
               <div key={tid} onClick={() => toggleTopic(tid)}
-                className="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all"
+                className="flex flex-wrap items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all"
                 style={{
                   background: isSel ? 'rgba(124,58,237,0.08)' : '#f9fafb',
                   borderColor: isSel ? 'rgba(124,58,237,0.35)' : '#e5e7eb',
@@ -99,6 +133,15 @@ export default function TopicsTab({
                   </p>
                 </div>
                 <span className="text-[10px] font-mono hidden sm:inline" style={{ color: '#d1d5db' }}>{topic.slug}</span>
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); startEditing(topic); }}
+                  className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold"
+                  style={{ background: 'rgba(124,58,237,0.10)', color: '#7c3aed' }}
+                  title="Edit Assamese topic fields"
+                >
+                  <Pencil size={11} /> Assamese
+                </button>
                 {onNavigate && (
                   <button
                     onClick={e => {
@@ -127,6 +170,91 @@ export default function TopicsTab({
                   className="flex-shrink-0 p-1 rounded transition-colors" style={{ color: '#d1d5db' }}>
                   <Trash2 size={13} />
                 </button>
+                {editing && (editing.topic._id || editing.topic.id) === tid && (
+                  <form
+                    onClick={e => e.stopPropagation()}
+                    onSubmit={saveTranslation}
+                    className="basis-full mt-2 p-3 rounded-xl border space-y-3"
+                    style={{ background: '#fff', borderColor: '#ddd6fe' }}
+                  >
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-xs font-semibold text-gray-600">
+                        Assamese title
+                        <input
+                          value={editing.title_as}
+                          onChange={e => setEditing(prev => ({ ...prev, title_as: e.target.value }))}
+                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold text-gray-600">
+                        Assamese URL slug
+                        <input
+                          value={editing.topic_slug_as}
+                          onChange={e => setEditing(prev => ({ ...prev, topic_slug_as: e.target.value }))}
+                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal"
+                        />
+                      </label>
+                    </div>
+                    <label className="block text-xs font-semibold text-gray-600">
+                      Assamese definition
+                      <textarea
+                        value={editing.definition_as}
+                        onChange={e => setEditing(prev => ({ ...prev, definition_as: e.target.value }))}
+                        rows={5}
+                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-normal"
+                      />
+                    </label>
+                    {(() => {
+                      const words = editing.definition_as.trim().split(/\s+/).filter(Boolean).length;
+                      const ready = Boolean(
+                        editing.title_as.trim() &&
+                        editing.topic_slug_as.trim() &&
+                        words >= 40 &&
+                        editing.topic.board_slug &&
+                        editing.topic.class_slug &&
+                        editing.topic.subject_slug &&
+                        editing.topic.chapter_slug
+                      );
+                      const previewPath = ready
+                        ? `/as/${[
+                          editing.topic.board_slug,
+                          editing.topic.class_slug,
+                          editing.topic.subject_slug,
+                          editing.topic.chapter_slug,
+                        ].map(encodeURIComponent).join('/')}/topic/${encodeURIComponent(editing.topic_slug_as.trim())}`
+                        : null;
+                      return (
+                        <div className="rounded-xl border p-3" style={{ background: '#faf5ff', borderColor: '#e9d5ff' }}>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-violet-800">Assamese page preview</p>
+                            <span className="text-[10px] text-gray-500">{words} / 40 words</span>
+                          </div>
+                          {previewPath ? (
+                            <>
+                              <p className="mt-1 break-all font-mono text-[11px] text-violet-700">{previewPath}</p>
+                              <h4 className="mt-3 text-base font-semibold text-gray-900">{editing.title_as}</h4>
+                              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-gray-700">{editing.definition_as}</p>
+                            </>
+                          ) : (
+                            <p className="mt-1 text-xs text-gray-500">
+                              Complete the Assamese title, slug, and a 40-word definition to preview the canonical route. Until then, this translation stays out of the Assamese sitemap.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {saveError && <p role="alert" className="text-xs text-red-600">{saveError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setEditing(null)} className="flex items-center gap-1 rounded-lg border px-3 py-2 text-xs text-gray-600">
+                        <X size={12} /> Cancel
+                      </button>
+                      <button type="submit" disabled={saving} className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" style={{ background: '#7c3aed' }}>
+                        {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                        Save Assamese fields
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
             );
           })}

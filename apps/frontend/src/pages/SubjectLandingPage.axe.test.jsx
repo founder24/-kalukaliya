@@ -14,6 +14,7 @@ expect.extend(toHaveNoViolations);
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ board: 'ahsec', classSlug: 'class-11', subjectSlug: 'english' }),
+  useLocation: () => ({ pathname: '/ahsec/class-11/english' }),
   Link:      ({ children, to }) => <a href={to}>{children}</a>,
 }));
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
-import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useLocation, Link, useSearchParams } from 'react-router-dom';
 import PageMeta from '@/components/seo/PageMeta';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import TopicAnswerCard from '@/components/chapter/TopicAnswerCard';
@@ -239,6 +239,7 @@ function readChapterPreload(board, classSlug, subjectSlug, chapterSlug) {
 
 export default function ChapterPage() {
   const params = useParams();
+  const routerLocation = useLocation();
   const board = params.board;
   const classSlug = params.classSlug;
   const hasStreamInUrl = !!(params.streamSlug && params.chapterSlug);
@@ -253,7 +254,24 @@ export default function ChapterPage() {
   // route also overrides PageMeta's canonical to point back at the
   // chapter URL with the topic anchor, and shapes the SEO title /
   // description around the topic for AI-citation surfaces.
-  const topicSlugParam = params.topicSlug || null;
+  const topicSlugParam = (() => {
+    const slug =
+      params.topicSlug ||
+      routerLocation.pathname.match(/\/topic\/([^/]+)$/)?.[1] ||
+      null;
+    if (!slug) return null;
+    let normalizedSlug = slug;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const decoded = decodeURIComponent(normalizedSlug);
+        if (decoded === normalizedSlug) break;
+        normalizedSlug = decoded;
+      } catch {
+        break;
+      }
+    }
+    return normalizedSlug;
+  })();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialChapterData = useMemo(
     () => readChapterPreload(board, classSlug, subjectSlug, chapterSlug),
@@ -299,8 +317,9 @@ export default function ChapterPage() {
   const [contentMode, setContentMode] = useState(
     ['notes', 'qa', 'pyq'].includes(_initTab) ? _initTab : 'notes',
   );
-  const isAssamesePath = typeof window !== 'undefined'
-    && (window.location.pathname || '').startsWith('/as/');
+  // Use the router location rather than window.location so SSR and
+  // prerendering select the same localized topic record as the browser.
+  const isAssamesePath = routerLocation.pathname.startsWith('/as/');
   const [activeId, setActiveId] = useState('');
   const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
@@ -932,15 +951,36 @@ export default function ChapterPage() {
     : (_chapterStreamSlug
       ? `/${board}/${classSlug}/${_chapterStreamSlug}/${subjectSlug}/${chapterSlug}`
       : `${basePath}/${chapterSlug}`);
+  const _topicParentPath = topicSlugParam
+    ? routerLocation.pathname.replace(/\/topic\/[^/]+$/, "")
+    : _chapterPath;
   const chapterUrl = `https://syrabit.ai${_chapterPath}`;
   const canonical = topicSlugParam
-    ? `${chapterUrl}#topic-${topicSlugParam}`
+    ? `https://syrabit.ai${routerLocation.pathname}`
     : chapterUrl;
   // Look up the active topic doc for the deep-link route so we can
   // shape topic-specific title/description without an extra fetch.
   const activeDeepLinkTopic = topicSlugParam
-    ? (publishedTopics.find((t) => (t.topic_slug || t.slug) === topicSlugParam) || null)
+    ? (publishedTopics.find((t) => isAssamesePath
+      ? (t.topic_slug_as === topicSlugParam || (t.language === 'Assamese' && t.topic_slug === topicSlugParam))
+      : (t.language !== 'Assamese' && (t.topic_slug || t.slug) === topicSlugParam)) || null)
     : null;
+  const activeTopicDefinitionAs = typeof activeDeepLinkTopic?.definition_as === 'string'
+    ? activeDeepLinkTopic.definition_as
+    : typeof activeDeepLinkTopic?.content_as === 'string' ? activeDeepLinkTopic.content_as : '';
+  const hasCompleteTopicAs = Boolean(
+    typeof activeDeepLinkTopic?.title_as === 'string' && activeDeepLinkTopic.title_as.trim() &&
+    typeof activeDeepLinkTopic?.topic_slug_as === 'string' && activeDeepLinkTopic.topic_slug_as.trim() &&
+    activeTopicDefinitionAs.trim().split(/\s+/).filter(Boolean).length >= 40
+  );
+  const topicAlternateUrl = hasCompleteTopicAs
+    ? `https://syrabit.ai${isAssamesePath
+      ? routerLocation.pathname
+          .replace(/^\/as\//, "/")
+          .replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug}`)
+      : `/as${routerLocation.pathname.replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug_as}`)}`
+    }`
+    : undefined;
   const readMins = data?.word_count ? Math.max(1, Math.ceil(data.word_count / 200)) : null;
 
   const handleShare = useCallback(() => {
@@ -1133,6 +1173,57 @@ export default function ChapterPage() {
   const seoDesc = _bingDescTerms.length > 0 && _baseDesc.length < 180
     ? `${_baseDesc} Covers ${_bingDescTerms.join(', ')}.`.slice(0, 300)
     : _baseDesc;
+
+  if (topicSlugParam && activeDeepLinkTopic) {
+    const topicTitle = isAssamesePath
+      ? (activeDeepLinkTopic.title_as || activeDeepLinkTopic.title)
+      : activeDeepLinkTopic.title;
+    const topicDefinition = isAssamesePath
+      ? (activeDeepLinkTopic.definition_as || activeDeepLinkTopic.definition)
+      : activeDeepLinkTopic.definition;
+    return (
+      <main className="min-h-screen bg-background text-foreground px-4 py-8">
+        <PageMeta
+          title={`${topicTitle} — ${chapterTitle}`}
+          description={(topicDefinition || seoDesc).slice(0, 280)}
+          url={canonical}
+          type="article"
+          section={subjectName}
+          pageType="topic"
+          pageData={{
+            topic: { title: topicTitle, description: topicDefinition },
+            chapter: {
+              subject_name: subjectName,
+              board_name: boardName,
+              class_name: className,
+              chapter_title: chapterTitle,
+            },
+            parentUrl: `https://syrabit.ai${_topicParentPath}`,
+            language: isAssamesePath ? "as" : "en",
+          }}
+          hasAssamese={Boolean(activeDeepLinkTopic.definition_as)}
+          language={isAssamesePath ? "as" : "en"}
+          alternateUrl={topicAlternateUrl}
+        />
+        <article className="mx-auto max-w-3xl">
+          <nav aria-label="Breadcrumb" className="mb-6 text-sm text-muted-foreground">
+            <Link to={isAssamesePath ? asBasePath : basePath}>{subjectName}</Link>
+            <span className="mx-2">/</span>
+            <Link to={_topicParentPath}>{chapterTitle}</Link>
+          </nav>
+          <h1 className="mb-5 text-3xl font-bold">{topicTitle}</h1>
+          <section className="prose dark:prose-invert max-w-none" aria-label={topicTitle}>
+            <p>{topicDefinition}</p>
+          </section>
+          <p className="mt-8">
+            <Link className="text-primary underline" to={_topicParentPath}>
+              {isAssamesePath ? 'অধ্যায়ৰ সম্পূৰ্ণ টোকা পঢ়ক' : `Read the complete ${chapterTitle} chapter notes`}
+            </Link>
+          </p>
+        </article>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -1414,6 +1505,13 @@ export default function ChapterPage() {
                             key={t.id || tSlug}
                             topic={t}
                             chapterUrl={chapterUrl}
+                            topicUrl={isAssamesePath
+                              ? (typeof t.topic_slug_as === 'string' && typeof t.title_as === 'string' && typeof t.definition_as === 'string' && t.definition_as.trim().split(/\s+/).filter(Boolean).length >= 40
+                                ? `${_chapterPath}/topic/${encodeURIComponent(t.topic_slug_as)}`
+                                : undefined)
+                              : (t.topic_slug || t.slug
+                                ? `${_chapterPath}/topic/${encodeURIComponent(t.topic_slug || t.slug)}`
+                                : undefined)}
                             fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}
                           />
                         );
@@ -1492,6 +1590,44 @@ export default function ChapterPage() {
                 </div>
               )}
             </div>
+
+            {publishedTopics.length > 0 && (
+              <nav
+                className="my-8 rounded-xl border border-border/50 p-4"
+                aria-label={contentLang === 'as' ? 'এই অধ্যায়ৰ বিষয়সমূহ' : 'Topics in this chapter'}
+                data-chapter-topic-links
+              >
+                <h2 className="mb-3 text-base font-semibold">
+                  {contentLang === 'as' ? 'এই অধ্যায়ৰ বিষয়সমূহ' : 'Topics in this chapter'}
+                </h2>
+                <ul className="flex flex-wrap gap-x-4 gap-y-2">
+                  {publishedTopics
+                    .filter((topic) => isAssamesePath || topic.language !== 'Assamese')
+                    .map((topic) => {
+                    const localized = isAssamesePath;
+                    const slug = localized ? topic.topic_slug_as : (topic.topic_slug || topic.slug);
+                    const title = localized ? topic.title_as : topic.title;
+                    const definition = localized ? topic.definition_as : topic.definition;
+                    if (
+                      typeof slug !== 'string' ||
+                      typeof title !== 'string' ||
+                      !title.trim() ||
+                      (localized && (typeof definition !== 'string' || definition.trim().split(/\s+/).filter(Boolean).length < 40))
+                    ) return null;
+                    return (
+                      <li key={topic.topic_id || topic.id || slug}>
+                        <Link
+                          className="text-sm text-primary underline underline-offset-2"
+                          to={`${_chapterPath}/topic/${encodeURIComponent(slug)}`}
+                        >
+                          {title}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </nav>
+            )}
 
             {/* Topical-mapping graph — related topic links at bottom */}
             <ChapterTopicGraph

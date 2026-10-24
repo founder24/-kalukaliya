@@ -16,6 +16,16 @@
   Cross-Origin-Resource-Policy: same-origin
   Cross-Origin-Embedder-Policy: credentialless
 
+/library*
+  Link: <https://syrabit.ai/.well-known/api-catalog>; rel="api-catalog", <https://syrabit.ai/.well-known/openapi.json>; rel="service-desc", <https://syrabit.ai/llms.txt>; rel="service-doc"
+
+/.well-known/api-catalog
+  Content-Type: application/linkset+json
+  Access-Control-Allow-Origin: *
+
+/.well-known/ai-catalog.json
+  Access-Control-Allow-Origin: *
+
 # NOTE: `Link: rel=preload` headers for the critical JS/CSS chunks are NOT
 # listed here because Vite uses content-hash filenames that change every build.
 # They are injected into dist/_headers at build time by the Vite plugin:
