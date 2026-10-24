@@ -27,6 +27,7 @@ import { eq, and, ne, inArray, asc, count } from 'drizzle-orm';
 import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
+import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
@@ -44,7 +45,9 @@ const COURSE_TYPE_ICONS: Record<CourseTypeSlug, string> = {
   aec: 'brain',
 };
 
-function publishedAnswerTopics(input: unknown[]): Array<Record<string, unknown>> {
+// Chapter pages can contain shorter published sections. The stricter
+// 40-word/reviewed gate applies only when a topic is promoted to its own page.
+function publishedChapterTopics(input: unknown[]): Array<Record<string, unknown>> {
   return input.flatMap((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const topic = value as Record<string, unknown>;
@@ -58,8 +61,8 @@ function publishedAnswerTopics(input: unknown[]): Array<Record<string, unknown>>
     if (!isPublished || !title || !definition.trim()) return [];
     const slugFromTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const topicSlug = topic.topic_slug || topic.slug || slugFromTitle || topic.id;
-    if (typeof topicSlug !== 'string' || !topicSlug) return [];
-    return [{ ...topic, definition, topic_slug: topicSlug }];
+    if (typeof topicSlug !== 'string' || !topicSlug.trim()) return [];
+    return [{ ...topic, title, definition, topic_slug: topicSlug.trim() }];
   });
 }
 
@@ -362,27 +365,40 @@ contentRouter.get('/subjects/:subjectId/topic-index', async (c) => {
   const grouped = [];
   let totalTopics = 0;
   for (const row of rows) {
-    const subjectPath = [
-      row.boardSlug,
-      row.classSlug,
-      row.streamSlug,
-      row.subjectSlug,
-    ].filter(Boolean).join('/');
+    // Public sitemap paths are the canonical route contract; match them
+    // rather than adding the optional internal stream segment.
+    const subjectPath = [row.boardSlug, row.classSlug, row.subjectSlug]
+      .filter(Boolean).join('/');
     const chapterUrl = `/${subjectPath}/${row.chapterSlug}`;
     const rawTopics = safeParse<unknown[]>(row.publishedTopics) ?? [];
-    const topics = rawTopics.flatMap((raw) => {
-      if (!raw || typeof raw !== 'object') return [];
-      const topic = raw as Record<string, unknown>;
-      const slug = String(topic.topic_slug ?? topic.slug ?? '').trim();
-      const title = String(topic.title ?? topic.name ?? slug).trim();
-      if (!slug || !title) return [];
+    const topics = indexablePublishedTopics(rawTopics).map((topic) => {
+      const slug = String(topic.topic_slug);
       const topicId = String(topic.topic_id ?? topic.id ?? slug);
-      return [{
+      const chapterUrlAs = `/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}`;
+      if (topic.language === 'Assamese') {
+        return {
+          topic_id: topicId,
+          language: 'Assamese',
+          title_as: topic.title,
+          topic_slug_as: slug,
+          definition_as: topic.definition,
+          chapter_url_as: chapterUrlAs,
+          deep_link_path_as: `${chapterUrlAs}/topic/${encodeURIComponent(slug)}`,
+        };
+      }
+      return {
         topic_id: topicId,
         topic_slug: slug,
-        title,
+        title: topic.title,
         deep_link_path: `${chapterUrl}/topic/${encodeURIComponent(slug)}`,
-      }];
+        ...(completeAssameseTopic(topic) ? {
+          title_as: topic.title_as,
+          topic_slug_as: topic.topic_slug_as,
+          definition_as: topic.definition_as ?? topic.content_as,
+          chapter_url_as: chapterUrlAs,
+          deep_link_path_as: `${chapterUrlAs}/topic/${encodeURIComponent(String(topic.topic_slug_as))}`,
+        } : {}),
+      };
     });
     if (topics.length === 0) continue;
     totalTopics += topics.length;
@@ -609,7 +625,7 @@ async function resolveChapterBySlug(
       return titleAs ? { ...row, title: titleAs } : row;
     })
     : topicsArr;
-  const displayPublishedTopics = publishedAnswerTopics(topicsArr).map(topic => {
+  const displayPublishedTopics = publishedChapterTopics(topicsArr).map(topic => {
     if (!useSlugAs) return topic;
     const titleAs = typeof topic.title_as === 'string' ? topic.title_as.trim() : '';
     const definitionAs = typeof topic.definition_as === 'string'
@@ -964,18 +980,18 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
 
   const rawTopics = safeParse<unknown[]>(ch.publishedTopics) ?? [];
   const lang = c.req.query('lang');
-  const topics = publishedAnswerTopics(rawTopics).map(topic => {
-    if (lang !== 'as') return topic;
-    const titleAs = typeof topic.title_as === 'string' ? topic.title_as.trim() : '';
-    const definitionAs = typeof topic.definition_as === 'string'
-      ? topic.definition_as
-      : typeof topic.content_as === 'string' ? topic.content_as : '';
-    return {
-      ...topic,
-      ...(titleAs ? { title: titleAs } : {}),
-      ...(definitionAs.trim() ? { definition: definitionAs } : {}),
-    };
-  });
+  const topics = publishedChapterTopics(rawTopics).map(topic => {
+      if (lang !== 'as') return topic;
+      const definitionAs = typeof topic.definition_as === 'string'
+        ? topic.definition_as
+        : typeof topic.content_as === 'string' ? topic.content_as : '';
+      const titleAs = typeof topic.title_as === 'string' ? topic.title_as.trim() : '';
+      return {
+        ...topic,
+        ...(titleAs ? { title: titleAs } : {}),
+        ...(definitionAs.trim() ? { definition: definitionAs } : {}),
+      };
+    });
   return c.json({ chapter_id: ch.id, topics, total: topics.length });
 });
 

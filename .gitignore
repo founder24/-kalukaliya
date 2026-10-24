@@ -52,6 +52,9 @@ htmlcov/
 .coverage
 apps/frontend/test-results/
 
+# Generated review exports
+/generated-artifacts/
+
 # Compressed files
 *.zip
 *.gz

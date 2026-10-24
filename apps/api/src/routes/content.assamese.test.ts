@@ -47,7 +47,7 @@ beforeAll(async () => {
         'translated', 'subject', 'Motion', 'গতি', 'motion', 'gati',
         'English description', 'অসমীয়া বিৱৰণ', 'motion, physics', 'গতি, পদাৰ্থবিজ্ঞান',
         'published', 'English notes', 'অসমীয়া টোকা',
-        '[{"title":"Velocity","title_as":"বেগ","slug":"velocity","content":"Speed with direction.","content_as":"দিশসহ গতি।","status":"published"},{"title":"Acceleration","title_as":"  ","slug":"acceleration"}]'
+        '[{"title":"Velocity","title_as":"বেগ","slug":"velocity","content":"Speed with direction.","content_as":"দিশসহ গতি।","status":"published","definition_status":"ok","definition":"Velocity is the rate of change of displacement with time. It describes both speed and direction of motion. In physics velocity is a vector quantity with magnitude and direction. Its SI unit is metres per second. The sign indicates movement along an axis. Average velocity differs from instantaneous velocity."},{"title":"Acceleration","title_as":"  ","slug":"acceleration"}]'
       )
     `),
     env.DB.prepare(`
@@ -59,7 +59,7 @@ beforeAll(async () => {
         'fallback', 'subject', 'Force', '  ', 'force', '  ',
         'Force description', '  ', 'force, mechanics', '  ',
         'published', 'Force notes', 'বলৰ টোকা',
-        '[{"title":"Newton laws","title_as":"  ","slug":"newton-laws"}]'
+        '[{"title":"Newton laws","title_as":"  ","slug":"newton-laws","definition_status":"ok","definition":"Newton laws explain how forces determine motion. The first law describes inertia, the second relates force to mass and acceleration, and the third states that interactions occur in equal and opposite pairs. Together these laws help students analyze everyday motion and solve classical mechanics problems."}]'
       )
     `),
     env.DB.prepare(`
@@ -79,7 +79,7 @@ beforeAll(async () => {
         id, subject_id, title, slug, status, published_topics
       ) VALUES (
         'indexed', 'index-subject', 'Indexed Topics', 'indexed-topics', 'published',
-        '[{"title":"Energy","slug":"energy"},{"title":"Missing slug"},{"name":"Named topic","slug":"named-topic"}]'
+        '[{"title":"Energy","slug":"energy","definition_status":"ok","definition":"Energy is the capacity to do work or cause change. It appears in kinetic, potential, thermal, chemical, and electrical forms. Energy can transfer between objects or transform from one form to another. In an isolated system the total energy remains conserved, helping explain physical processes."},{"title":"Missing slug"},{"name":"Named topic","slug":"named-topic","definition_status":"ok","definition":"A clear topic definition identifies the central concept and explains why it matters. It gives students enough context to connect the idea with its chapter, subject, and class. This reviewed example also demonstrates how canonical topic links are formed while navigation-only records remain outside the public index."}]'
       )
     `),
     env.DB.prepare(`
@@ -228,6 +228,7 @@ describe('Assamese public content metadata', () => {
         content: 'Speed with direction.',
         content_as: 'দিশসহ গতি।',
         status: 'published',
+        definition_status: 'ok',
         definition: 'দিশসহ গতি।',
         topic_slug: 'velocity',
       }],
@@ -258,15 +259,15 @@ describe('Assamese public content metadata', () => {
       }>;
     };
     expect(payload.subject_id).toBe('subject');
-    expect(payload.total_topics).toBe(3);
+    expect(payload.total_topics).toBe(2);
 
     const motion = payload.chapters.find((chapter) => chapter.chapter_id === 'translated');
     expect(motion).toMatchObject({
-      chapter_url: '/ahsec/class-12/science/physics/motion',
+      chapter_url: '/ahsec/class-12/physics/motion',
     });
     expect(motion?.topics[0]).toMatchObject({
       topic_slug: 'velocity',
-      deep_link_path: '/ahsec/class-12/science/physics/motion/topic/velocity',
+      deep_link_path: '/ahsec/class-12/physics/motion/topic/velocity',
     });
 
     expect(payload.chapters.some((chapter) => chapter.chapter_id === 'draft-topics')).toBe(false);
@@ -282,11 +283,11 @@ describe('Assamese public content metadata', () => {
     };
     expect(indexedPayload.total_topics).toBe(2);
     expect(indexedPayload.chapters[0]).toMatchObject({
-      chapter_url: '/ahsec/class-12/science/index-subject/indexed-topics',
+      chapter_url: '/ahsec/class-12/index-subject/indexed-topics',
       topics: [
         {
           topic_slug: 'energy',
-          deep_link_path: '/ahsec/class-12/science/index-subject/indexed-topics/topic/energy',
+          deep_link_path: '/ahsec/class-12/index-subject/indexed-topics/topic/energy',
         },
         { topic_slug: 'named-topic' },
       ],

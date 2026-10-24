@@ -187,6 +187,21 @@ async function main() {
     node(path.join(__dirname, "verify-required-ads.mjs"), [], { budgetMs: 30_000 }),
   );
 
+  // 2.5. Prove the Rollup missing-export guard is wired into the production
+  //      config before starting the more expensive client and SSR builds.
+  await record(
+    "missing-export-guard",
+    node(path.join(__dirname, "test-missing-export-build.mjs"), [], {
+      budgetMs: 30_000,
+    }),
+  );
+  await record(
+    "topic-sitemap-paths",
+    node(path.join(__dirname, "test-topic-sitemap-path.mjs"), [], {
+      budgetMs: 30_000,
+    }),
+  );
+
   // 3. Client + SSR builds in parallel. They write to dist/ and
   //    dist-ssr/ respectively, no shared output.
   const clientStart = Date.now();
@@ -240,6 +255,22 @@ async function main() {
       budgetMs: 20 * 60_000,
     }),
   );
+
+  // Sitemap-listed curriculum pages are the public crawl contract. Verify
+  // each unique subject/chapter/topic URL has its own rendered artifact and
+  // route-specific metadata before this build can be released.
+  if (STRICT_CURRICULUM_BUILD) {
+    await record(
+      "verify:sitemap-rendered-html",
+      node(path.join(__dirname, "verify-sitemap-rendered-html.mjs"), [], {
+        budgetMs: 60_000,
+      }),
+    );
+  } else {
+    console.log(
+      "[build] ⏭ verify:sitemap-rendered-html (strict release builds only)",
+    );
+  }
 
   // 5a. Inject the Trustpilot aggregate-rating JSON-LD into every
   //     dist/ HTML (Task #729). Runs AFTER prerender so prerendered

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "syrabit-content-search",
+      "type": "skill-md",
+      "description": "Search and cite Syrabit's published curriculum through its public read-only API.",
+      "url": "https://syrabit.ai/.well-known/agent-skills/syrabit-content-search/SKILL.md",
+      "digest": "sha256:203c0cecaeeef1e9f37eeffff19e6da3ddd69e07a5f4ca8f2303f8b779ef8368"
+    }
+  ]
+}

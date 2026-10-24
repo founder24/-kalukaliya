@@ -125,7 +125,7 @@ export default function AdminSeoManager({ adminToken, onNavigate }) {
             topicSearch={s.topicSearch} setTopicSearch={s.setTopicSearch}
             selectedTopics={s.selectedTopics} toggleTopic={s.toggleTopic}
             extracting={s.extracting} handleExtract={s.handleExtract}
-            handleDeleteTopic={s.handleDeleteTopic} hubCtx={s.hubCtx}
+            handleDeleteTopic={s.handleDeleteTopic} onUpdateTopic={s.handleUpdateTopic} hubCtx={s.hubCtx}
             scopeSubjectOnly={s.scopeSubjectOnly} setScopeSubjectOnly={s.setScopeSubjectOnly}
             onNavigate={onNavigate} setTab={s.setTab} />
         )}

@@ -116,6 +116,8 @@ export default function PageMeta({
   pageType,
   pageData,
   hasAssamese = false,
+  language,
+  alternateUrl,
 }) {
   // Stable, content-derived signatures so the JSON-LD effect re-runs
   // only when the underlying schema content changes, not on every
@@ -135,6 +137,9 @@ export default function PageMeta({
     if (typeof document === "undefined") return;
 
     const finalTitle = title ? `${title} | ${SITE_NAME}` : SITE_NAME;
+    if (language) {
+      document.documentElement.lang = language === "as" ? "as" : "en";
+    }
     const absImage = image && image.startsWith("http")
       ? image
       : `https://syrabit.ai${image || ""}`;
@@ -151,7 +156,9 @@ export default function PageMeta({
     setLink("canonical", url);
 
     setMetaByProperty("og:site_name", SITE_NAME);
-    setMetaByProperty("og:locale", "en_IN");
+    if (language) {
+      setMetaByProperty("og:locale", language === "as" ? "as_IN" : "en_IN");
+    }
     setMetaByProperty("og:title", title);
     setMetaByProperty("og:description", description);
     setMetaByProperty("og:type", type);
@@ -206,10 +213,18 @@ export default function PageMeta({
     // document. Unlike RSS alternates, route alternates always have hreflang.
     removeRouteAlternates();
     if (hasAssamese && url) {
-      const asUrl = url.includes("?") ? `${url}&lang=as` : `${url}?lang=as`;
-      setLink("alternate", url, { hreflang: "en" });
-      setLink("alternate", asUrl, { hreflang: "as" });
-      setLink("alternate", url, { hreflang: "x-default" });
+      if (alternateUrl) {
+        const asUrl = language === "as" ? url : alternateUrl;
+        const enUrl = language === "as" ? alternateUrl : url;
+        setLink("alternate", enUrl, { hreflang: "en" });
+        setLink("alternate", asUrl, { hreflang: "as" });
+        setLink("alternate", enUrl, { hreflang: "x-default" });
+      } else {
+        const asUrl = url.includes("?") ? `${url}&lang=as` : `${url}?lang=as`;
+        setLink("alternate", url, { hreflang: "en" });
+        setLink("alternate", asUrl, { hreflang: "as" });
+        setLink("alternate", url, { hreflang: "x-default" });
+      }
     } else if (url) {
       setLink("alternate", url, { hreflang: "en-IN" });
     }
@@ -230,7 +245,8 @@ export default function PageMeta({
     ];
     syncJsonLd(allLd);
   }, [
-    title, description, url, image, keywords, type, section,
+    title, description, url, image, keywords, type, section, language,
+    alternateUrl,
     publishedTime, modifiedTime, hasAssamese, pageType,
     // Tags / jsonLd / pageData are intentionally NOT raw deps — each
     // render produces a referentially-new array/object that would

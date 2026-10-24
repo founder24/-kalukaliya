@@ -522,6 +522,10 @@ export function hasAssameseProseLeakage(text: string): boolean {
     || /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|কিন্তু|তবে|তাই|কারণ|যদি|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/u.test(text);
 }
 
+export function hasAssameseAssistantIdentityError(text: string): boolean {
+  return /(?:^|[।.!?]\s*)(?:আপুনি|তুমি)\s+Syrabit(?:\s+AI)?\s*[,।]/u.test(text);
+}
+
 function countBengaliDialectMarkers(text: string): number {
   return (text.match(
     /(?:^|[\s,.!?।])(?:এবং|একটি|হচ্ছে|হলো|জন্য|থেকে|আপনি|তবে|তাই|তখন|এটি|সেটি|করতে|হবে|বাংলা|শুধুমাত্র|যেমন|পদার্থ|ভাষায়|লেখা|সুন্দর|সাধারণ|বাক্য|আমার|তোমার|কী|কেন|কোথায়|নয়|করুন|দেওয়া|ব্যবহার)(?=$|[\s,.!?।])/gu,
@@ -529,6 +533,7 @@ function countBengaliDialectMarkers(text: string): number {
 }
 
 export function isReliableAssameseAnswer(text: string): boolean {
+  if (hasAssameseAssistantIdentityError(text)) return false;
   // U+0964/U+0965 danda punctuation is also standard in Assamese; reject
   // Devanagari letters/marks, not punctuation or digits.
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
@@ -555,6 +560,7 @@ export function isReliableAssameseAnswer(text: string): boolean {
  * script, not that its dialect is definitively Assamese.
  */
 export function isUsableAssameseAnswer(text: string): boolean {
+  if (hasAssameseAssistantIdentityError(text)) return false;
   if (/[\u0900-\u0963\u0970-\u097F]/u.test(text)) return false;
   const scriptChars = (text.match(/[\u0980-\u09FF]/g) ?? []).length;
   const latinChars = (text.match(/[A-Za-z]/g) ?? []).length;
@@ -1858,7 +1864,8 @@ export function buildSystemPrompt(opts: {
 
   if (lang === 'as') {
     const lines = [
-      `তুমি Syrabit AI, এজন বিশেষজ্ঞ শিক্ষা সহায়ক${boardInfo ? ` (${boardInfo})` : ''}।`,
+      `ভূমিকা: Syrabit AI, এজন বিশেষজ্ঞ শিক্ষা সহায়ক${boardInfo ? ` (${boardInfo})` : ''}।`,
+      'নিজৰ পৰিচয় প্ৰথম পুৰুষত দিবা: “মই Syrabit AI...”। “আপুনি” কেৱল শিক্ষাৰ্থীক সম্বোধন কৰিবলৈ ব্যৱহাৰ কৰিবা; “আপুনি Syrabit AI” বা “তুমি Syrabit AI” বুলি নিজৰ পৰিচয় নিদিবা।',
     ];
     if (subjectName) lines.push(`বিষয়: ${subjectName}${chapterName ? `, অধ্যায়: ${chapterName}` : ''}`);
     lines.push('');
