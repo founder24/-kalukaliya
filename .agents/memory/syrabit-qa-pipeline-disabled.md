@@ -3,12 +3,12 @@ name: AHSEC Q&A pipeline disabled
 description: Q&A generation and published_topics are disabled in ahsec_ingest.py; both fields are managed manually; notes-only ingestion is the current state.
 ---
 
-# AHSEC Q&A pipeline disabled
+# AHSEC Q&A pipeline status and review policy
 
-## The rule
-`ahsec_ingest.py` no longer generates Q&A pairs or writes `published_topics` during chapter ingestion. Both fields must be populated manually via the admin panel or a separate script.
+## Current state and policy
+The current AHSEC ingestion path is notes-only; it does not automatically write Q&A pairs or `published_topics`. For new chapters, the user wants question drafts generated from source content and held for staff approval. Generated questions must not be auto-published or marked reviewed. Topics should likewise remain drafts until approved.
 
-**Why:** Founder asked to clear all Q&A and remove the AI pipeline so they can write questions manually per chapter. The ingestion now does notes + RAG sections only.
+**Why:** The earlier manual-authoring policy has been superseded for new chapters by the user's choice to generate drafts for staff review, while retaining a human publication gate.
 
 ## What was cleared
 All 548 chapters had these fields zeroed in one DB update (Aug 2026):
@@ -23,6 +23,6 @@ All 548 chapters had these fields zeroed in one DB update (Aug 2026):
 - In `save_chapter_content()`: the `qa_rag_sections_en/as` write and the `published_topics` merge are commented out
 
 ## How to apply
-- Any future ingestion run will not touch Q&A or published_topics
-- To re-enable: un-comment the `generate_qa_from_notes()` call and restore the `qa_sections`/`published_topics` writes in `save_chapter_content()`
-- The `_QA_FROM_NOTES_SYSTEM_EN/AS` prompts and `generate_qa_from_notes()` function are still in the file and work — just not called
+- Keep existing ingestion behavior notes-only until a reviewed draft-generation path is implemented.
+- When adding that path, generate source-grounded question drafts and store them as pending for staff review; never publish them automatically.
+- Keep the topic publication rule separate: only reviewed, substantial topics may be promoted to public pages.

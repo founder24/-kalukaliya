@@ -1604,7 +1604,19 @@ async function handleChapterReindex(c: import('hono').Context<{ Bindings: Env }>
 }
 
 type RagJobItem = { chapter_id: string; scopes: RagScope[]; status: 'pending' | 'running' | 'done' | 'failed'; results?: unknown; error?: string };
-type Topic = { id: string; title: string; title_as?: string; content?: string; content_as?: string; status?: 'draft' | 'published'; [key: string]: unknown };
+type Topic = {
+  id: string;
+  title: string;
+  title_as?: string;
+  topic_slug?: string;
+  topic_slug_as?: string;
+  definition?: string;
+  definition_as?: string;
+  content?: string;
+  content_as?: string;
+  status?: 'draft' | 'published';
+  [key: string]: unknown;
+};
 type RagScope = 'notes' | 'qa' | 'pyq';
 
 export async function runRagJob(env: Env, jobId: string): Promise<void> {
@@ -1714,6 +1726,10 @@ staffRouter.post('/content/chapter/:chapterId/topics', async c => {
     id: crypto.randomUUID(),
     title,
     title_as: typeof body.title_as === 'string' ? body.title_as.trim() : '',
+    topic_slug: typeof body.topic_slug === 'string' ? body.topic_slug.trim() : '',
+    topic_slug_as: typeof body.topic_slug_as === 'string' ? body.topic_slug_as.trim() : '',
+    definition: typeof body.definition === 'string' ? body.definition : '',
+    definition_as: typeof body.definition_as === 'string' ? body.definition_as : '',
     content: typeof body.content === 'string' ? body.content : '',
     content_as: typeof body.content_as === 'string' ? body.content_as : '',
     status: 'draft',
@@ -1726,7 +1742,9 @@ staffRouter.patch('/content/chapter/:chapterId/topics/:topicId', async c => {
   const auth = await guard(c); if (!auth) return c.res; const denied = await capabilityDenied(c, auth, 'content:edit'); if (denied) return denied;
   const row = await topicChapter(c.env, c.req.param('chapterId')); if (!row) return c.json({ detail: 'Chapter not found' }, 404);
   const body = await safeBody(c); const topics = chapterTopics(row); const topic = topics.find(item => item.id === c.req.param('topicId')); if (!topic) return c.json({ detail: 'Topic not found' }, 404);
-  for (const key of ['title', 'title_as', 'content', 'content_as'] as const) if (typeof body[key] === 'string') topic[key] = body[key] as string;
+  for (const key of ['title', 'title_as', 'topic_slug', 'topic_slug_as', 'definition', 'definition_as', 'content', 'content_as'] as const) {
+    if (typeof body[key] === 'string') topic[key] = body[key] as string;
+  }
   await createDb(c.env.DB).update(chapters).set({ publishedTopics: JSON.stringify(topics), updatedAt: nowTs(), ragUpdatedAt: nowTs() }).where(eq(chapters.id, row.id));
   await auditLog(c.env, auth.sub ?? '', 'update_topic', 'topic', topic.id, { chapter_id: row.id });
   return c.json({ topic });

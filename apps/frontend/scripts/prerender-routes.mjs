@@ -54,6 +54,9 @@ import {
   chapterLookupRecovery,
   selectChapterCandidates,
 } from "./_prerender-chapter-policy.mjs";
+import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
+import { injectJsonLdIntoHead, topicPageSchema } from "../src/lib/jsonld.js";
+import { assertGovernmentSpendingMultiplierDefinition } from "./_government-spending-multiplier.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, "..", "dist");
@@ -159,7 +162,12 @@ function clean(obj) {
   return obj;
 }
 
-function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
+export function rewriteHead(html, { title, description, canonical, ogImageAlt, language, alternateUrl }) {
+  if (language) {
+    html = html.replace(/<html\b([^>]*)>/i, (tag, attrs) =>
+      `<html${attrs.replace(/\s+lang=["'][^"']*["']/i, "")} lang="${escapeHtml(language)}">`,
+    );
+  }
   html = html.replace(
     /<title>[^<]*<\/title>/,
     `<title>${escapeHtml(title)}</title>`,
@@ -174,12 +182,23 @@ function rewriteHead(html, { title, description, canonical, ogImageAlt }) {
   html = html.replace(
     /<\/head>/,
     `    <link rel="canonical" href="${canonical}" />\n` +
-    `    <link rel="alternate" hreflang="en-IN" href="${canonical}" />\n  </head>`,
+    (alternateUrl
+      ? `    <link rel="alternate" hreflang="en" href="${language === "as" ? alternateUrl : canonical}" />\n` +
+        `    <link rel="alternate" hreflang="as" href="${language === "as" ? canonical : alternateUrl}" />\n` +
+        `    <link rel="alternate" hreflang="x-default" href="${language === "as" ? alternateUrl : canonical}" />\n`
+      : `    <link rel="alternate" hreflang="${language === "as" ? "as" : "en-IN"}" href="${canonical}" />\n`) +
+    `  </head>`,
   );
   html = html.replace(
     /<meta property="og:url" content="[^"]*"\s*\/?>/,
     `<meta property="og:url" content="${canonical}" />`,
   );
+  if (language) {
+    html = html.replace(
+      /<meta property="og:locale" content="[^"]*"\s*\/?>/,
+      `<meta property="og:locale" content="${language === "as" ? "as_IN" : "en_IN"}" />`,
+    );
+  }
   html = html.replace(
     /<meta property="og:title" content="[^"]*"\s*\/?>/,
     `<meta property="og:title" content="${escapeHtml(title)}" />`,
@@ -542,9 +561,11 @@ async function fetchSubjectTopicIndex(subjectId) {
     const payload = await fetchJson(url);
     if (!payload || typeof payload !== "object") return null;
     const chapters = Array.isArray(payload.chapters) ? payload.chapters : [];
-    if (chapters.length === 0) return null;
+    const topics = Array.isArray(payload.topics) ? payload.topics : [];
+    if (chapters.length === 0 && topics.length === 0) return null;
     return {
       chapters,
+      topics,
       total_topics: Number(payload.total_topics || 0),
     };
   } catch {
@@ -597,6 +618,18 @@ function readPublishedChapterPaths() {
   }
   if (paths.size === 0) {
     throw new Error("[prerender-routes] chapter sitemap contains zero chapter URLs");
+  }
+  return paths;
+}
+
+function readPublishedTopicPaths() {
+  const sitemap = path.join(distDir, "sitemap-topics.xml");
+  if (!fs.existsSync(sitemap)) return new Set();
+  const xml = fs.readFileSync(sitemap, "utf-8");
+  const paths = new Set();
+  for (const match of xml.matchAll(/<loc>\s*(?:https?:\/\/[^/]+)?([^<\s]+)\s*<\/loc>/gi)) {
+    const pathname = match[1].replace(/\/+$/, "");
+    if (pathname.split("/").includes("topic")) paths.add(pathname);
   }
   return paths;
 }
@@ -739,6 +772,7 @@ async function main() {
   // is useful for recovering failed detail requests, but it can be incomplete
   // or use different subject IDs and must not prune listed routes.
   const publishedChapterPaths = new Set(readPublishedChapterPaths());
+  const publishedTopicPaths = readPublishedTopicPaths();
   const sitemapSubjectRoutes = enumerateSitemapSubjectRoutes(
     publishedChapterPaths,
     allSubjectRoutes,
@@ -853,6 +887,7 @@ async function main() {
   let chaptersFailed = 0;
   const subjectExpectedPaths = new Set(subjectRoutes.map(subjectPath));
   const chapterExpectedPaths = new Set(publishedChapterPaths);
+  const topicOutputPaths = new Set();
   const subjectOutputPaths = new Set();
   const chapterOutputPaths = new Set();
   let budgetExceeded = false;
@@ -1180,6 +1215,70 @@ async function main() {
         const out = writeRoute(chapterUrl, html);
         chapterOutputPaths.add(out);
         chaptersWritten = chapterOutputPaths.size;
+        for (const topic of publishedTopics || []) {
+          const locales = [
+            { path: `${chapterUrl}/topic/${topic.topic_slug}`, title: topic.title, definition: topic.definition },
+          ];
+          if (
+            topic.title_as?.trim() &&
+            topic.topic_slug_as?.trim() &&
+            topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40
+          ) {
+            locales.push({
+              path: `/as${chapterUrl}/topic/${topic.topic_slug_as}`,
+              title: topic.title_as,
+              definition: topic.definition_as,
+            });
+          }
+          for (const localized of locales) {
+            if (
+              !publishedTopicPaths.has(
+                canonicalTopicSitemapPath(localized.path),
+              )
+            ) continue;
+            try {
+              const topicTitle = localized.title || topic.title;
+              if (topic.topic_slug === "government-spending-multiplier") {
+                assertGovernmentSpendingMultiplierDefinition(localized.definition);
+              }
+              const topicLanguage = localized.path.startsWith("/as/") ? "as" : "en";
+              const topicSchema = topicPageSchema({
+                topic: { title: topicTitle, description: localized.definition },
+                chapter: {
+                  subject_name: subjName,
+                  board_name: bName,
+                  class_name: cName,
+                  chapter_title: chapterTitle,
+                },
+                language: topicLanguage,
+                url: `https://syrabit.ai${localized.path}`,
+                parentUrl: `https://syrabit.ai${localized.path.replace(/\/topic\/[^/]+$/, "")}`,
+              });
+              const topicHtml = await renderOne(renderRoute, htmlTemplate, {
+                url: localized.path,
+                seed: { chapterPreload: preload },
+                hydrateKind: "chapter",
+                inlineScripts: inlineChapterScripts,
+                head: {
+                  title: `${topicTitle} — ${chapterTitle}`,
+                  description: (localized.definition || topicTitle).slice(0, 280),
+                  canonical: `https://syrabit.ai${localized.path}`,
+                  ogImageAlt: `${topicTitle} — ${chapterTitle} | Syrabit.ai`,
+                  language: topicLanguage,
+                  alternateUrl: localized.path.startsWith("/as/")
+                    ? `https://syrabit.ai${localized.path.slice(3)}`
+                    : (topic.title_as?.trim() && topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40 && topic.topic_slug_as?.trim()
+                      ? `https://syrabit.ai/as${chapterUrl}/topic/${topic.topic_slug_as}`
+                      : null),
+                },
+              });
+              writeRoute(localized.path, injectJsonLdIntoHead(topicHtml, topicSchema));
+              topicOutputPaths.add(localized.path);
+            } catch (topicErr) {
+              console.warn(`[prerender-routes] topic render failed for ${localized.path}: ${topicErr.message}`);
+            }
+          }
+        }
         console.log(
           `[prerender-routes] chapter ${chapterUrl} → ${path.relative(distDir, out)}`,
         );
@@ -1225,6 +1324,8 @@ async function main() {
       sitemap_chapters_written: [...publishedChapterPaths].filter((chapterPath) =>
         fs.existsSync(path.join(distDir, chapterPath.replace(/^\//, ""), "index.html")),
       ).length,
+      sitemap_topics_selected: publishedTopicPaths.size,
+      sitemap_topics_written: topicOutputPaths.size,
     },
     budget_exceeded: budgetExceeded,
   };
@@ -1256,6 +1357,11 @@ async function main() {
     if (sitemapChaptersWritten !== publishedChapterPaths.size) {
       incomplete.push(
         `sitemap chapter coverage ${sitemapChaptersWritten}/${publishedChapterPaths.size}`,
+      );
+    }
+    if (topicOutputPaths.size !== publishedTopicPaths.size) {
+      incomplete.push(
+        `sitemap topic coverage ${topicOutputPaths.size}/${publishedTopicPaths.size}`,
       );
     }
     if (subjectsWritten === 0 || chaptersWritten === 0) {

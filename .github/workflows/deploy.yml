@@ -55,6 +55,21 @@ jobs:
       validate_live_chat: ${{ inputs.validate_live_chat == true }}
       validate_staff_auth: ${{ inputs.validate_staff_auth == true }}
     secrets:
+      # The reusable workflow's caller must explicitly pass even
+      # environment-backed secrets. Their consuming jobs remain gated by the
+      # protected production environment in deploy-cloudflare.yml.
+      ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      EDGE_SHARED_SECRET: ${{ secrets.EDGE_SHARED_SECRET }}
+      INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+      INDEXNOW_INTERNAL_SECRET: ${{ secrets.INDEXNOW_INTERNAL_SECRET }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      RESET_TOKEN_SECRET: ${{ secrets.RESET_TOKEN_SECRET }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      CUTOVER_RESET_EMAIL: ${{ secrets.CUTOVER_RESET_EMAIL }}
+      CUTOVER_RESET_LINK: ${{ secrets.CUTOVER_RESET_LINK }}
+      CUTOVER_RESET_PASSWORD: ${{ secrets.CUTOVER_RESET_PASSWORD }}
       CUTOVER_STUDENT_TOKEN: ${{ secrets.CUTOVER_STUDENT_TOKEN }}
       CUTOVER_STAFF_TOKEN: ${{ secrets.CUTOVER_STAFF_TOKEN }}
       CUTOVER_ADMIN_SESSION_TOKEN: ${{ secrets.CUTOVER_ADMIN_SESSION_TOKEN }}

@@ -47,11 +47,12 @@ export const JSON_ENDPOINTS = [
 ];
 
 // ── Sitemap XML endpoints ───────────────────────────────────────────────────
-const SITEMAP_ENDPOINTS = [
+export const SITEMAP_ENDPOINTS = [
   { gcsPath: "sitemaps/sitemap-index.xml", apiPath: "/seo/sitemap.xml", file: "sitemap-index.xml", rewrite: true },
   { gcsPath: "sitemaps/sitemap-static.xml", apiPath: "/seo/sitemap-static.xml", file: "sitemap-static.xml" },
   { gcsPath: "sitemaps/sitemap-subjects.xml", apiPath: "/seo/sitemap-subjects.xml", file: "sitemap-subjects.xml" },
   { gcsPath: "sitemaps/sitemap-chapters.xml", apiPath: "/seo/sitemap-chapters.xml", file: "sitemap-chapters.xml" },
+  { gcsPath: "sitemaps/sitemap-topics.xml", apiPath: "/seo/sitemap-topics.xml", file: "sitemap-topics.xml" },
 ];
 
 const REQUIRED_JSON_FILES = new Set(JSON_ENDPOINTS.map(({ file }) => file));
