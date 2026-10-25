@@ -486,27 +486,31 @@ function cfAnalyticsPlugin() {
   };
 }
 
-// Task #509: GA4 (Google Analytics 4) tag injection.
-// Only injects the gtag.js snippet when VITE_GA4_ID is a syntactically
-// valid measurement ID (`G-XXXXXXXXXX`). When the value is missing,
-// blank, or malformed (e.g. a legacy UA-* property ID or a numeric
-// account ID), the placeholder is stripped and `window.gtag` is never
-// defined — the analytics call sites in src/utils/{usePageTracking,
-// webVitals}.js already gate on `typeof window.gtag === 'function'`
-// so they no-op cleanly without throwing.
-//
-// Phase 6 (Task #110): VITE_GA4_ID MUST NOT be set in production.
-// Analytics are handled server-side by Cloudflare Zaraz. Setting
-// VITE_GA4_ID in the production build CI env will cause this plugin to
-// throw a hard build error so the error is caught before it reaches users.
+// Client-side GA4 is allowed only for local development. Production analytics
+// are intended to use consent-aware Cloudflare Zaraz configuration; the
+// measurement tool itself is configured and verified outside this bundle.
 const GA4_ID_RE = /^G-[A-Z0-9]{6,12}$/;
 function ga4Plugin() {
   const raw = (process.env.VITE_GA4_ID || '').trim();
+  const releaseEnvironment =
+    process.env.NODE_ENV === 'production' ||
+    process.env.CLOUDFLARE_RELEASE_BUILD === 'true' ||
+    process.env.CF_PAGES === '1';
+  if (releaseEnvironment && raw) {
+    throw new Error(
+      'VITE_GA4_ID must not be set in production; configure consent-aware analytics in Cloudflare Zaraz.',
+    );
+  }
   const id = GA4_ID_RE.test(raw) ? raw : '';
-  // Zaraz integration was removed — GA4 is now injected directly via gtag.js.
-  // VITE_GA4_ID=G-CXJJPSV096 must be set in CF Pages production env vars.
   return {
     name: 'syrabit-ga4',
+    configResolved(config) {
+      if (config.isProduction && raw) {
+        throw new Error(
+          'VITE_GA4_ID must not be set in production; configure consent-aware analytics in Cloudflare Zaraz.',
+        );
+      }
+    },
     transformIndexHtml(html) {
       if (!id) {
         if (raw) {

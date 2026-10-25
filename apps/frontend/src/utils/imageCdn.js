@@ -5,11 +5,11 @@
  *   • width=N      → properly-sized responses (saves 60–80% bytes on mobile)
  *   • quality=85   → near-lossless visual quality at a fraction of the bytes
  *
- * Requires Cloudflare Image Resizing (Pages Pro or Cloudflare Images add-on)
- * to be enabled on the zone. If it is not, set VITE_DISABLE_IMAGE_CDN=1 and
- * URLs will pass through unchanged.
+ * Transform URLs are used only when served through the Cloudflare zone.
+ * Local Vite development uses original URLs because its origin does not run
+ * Cloudflare's /cdn-cgi/image transformer.
  *
- * Plan-gated fallback: if Image Resizing is not active on the zone, calling
+ * Fallback: if Image Resizing is not active on the zone, calling
  * markImageResizerUnavailable() (or probeImageResizer()) silently falls back to
  * the original URL in production.  In development a console warning is logged.
  * No code changes are needed once the plan upgrade is purchased — the probe will
@@ -21,7 +21,7 @@
 const DISABLED =
   typeof import.meta !== 'undefined' &&
   import.meta.env &&
-  import.meta.env.VITE_DISABLE_IMAGE_CDN === '1';
+  (import.meta.env.VITE_DISABLE_IMAGE_CDN === '1' || import.meta.env.DEV === true);
 
 const IS_DEV =
   typeof import.meta !== 'undefined' &&
@@ -71,9 +71,9 @@ export function isImageResizerAvailable() {
  *
  * Cloudflare has used two different headers across versions:
  *   - Legacy:  Cf-Bgj: imgconvert
- *   - Current: cf-resized: internal=ok/...
- * Both are checked so the probe works regardless of which CF edge version
- * is serving the response.
+ *   - Current: cf-resized: internal=<cache/status details>
+ * The current header's internal value is not always "ok"; valid responses
+ * also use values such as "ram/h". Accept any internal= response.
  *
  * Call once at app startup (e.g. in App.jsx useEffect) to auto-detect plan
  * availability.  If Image Resizing is not active, falls back to original URLs
@@ -95,7 +95,7 @@ export async function probeImageResizer(testImageUrl) {
     // CF legacy header (pre-2024 edge versions): Cf-Bgj: imgconvert
     const legacyHeader = res.headers.get('Cf-Bgj') === 'imgconvert';
     // CF current header (2024+ edge versions): cf-resized: internal=ok/...
-    const currentHeader = (res.headers.get('cf-resized') || '').startsWith('internal=ok');
+    const currentHeader = (res.headers.get('cf-resized') || '').startsWith('internal=');
     if (!legacyHeader && !currentHeader) {
       markImageResizerUnavailable();
     }

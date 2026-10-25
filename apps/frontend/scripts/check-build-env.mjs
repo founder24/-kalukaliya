@@ -4,11 +4,8 @@
 //
 // Hard-fails on:
 //   * VITE_BACKEND_URL missing/blank
+//   * VITE_GA4_ID set in a production build (client-side GA4 is disabled there)
 //   * VITE_GA4_ID set but not matching ^G-[A-Z0-9]{6,12}$
-//
-// Warns (non-fatal) when VITE_GA4_ID is unset — the ga4 plugin
-// already strips the placeholder cleanly and the build succeeds, but
-// gtag won't load and Realtime traffic won't show up.
 
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
@@ -34,8 +31,6 @@ try {
 }
 
 const errors = [];
-const warnings = [];
-
 const backend = (process.env.VITE_BACKEND_URL || "").trim();
 if (!backend) {
   errors.push(
@@ -57,6 +52,16 @@ if (!backend) {
 
 const GA4_RE = /^G-[A-Z0-9]{6,12}$/;
 const ga4 = (process.env.VITE_GA4_ID || "").trim();
+const isProductionBuild =
+  process.env.NODE_ENV === "production" ||
+  process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
+  process.env.CF_PAGES === "1";
+if (ga4 && isProductionBuild) {
+  errors.push(
+    "VITE_GA4_ID must not be set in production. Client-side GA4 is disabled; " +
+      "configure consent-aware analytics in Cloudflare Zaraz.",
+  );
+}
 if (ga4 && !GA4_RE.test(ga4)) {
   errors.push(
     `VITE_GA4_ID="${ga4}" does not match the required Measurement ID ` +
@@ -64,15 +69,6 @@ if (ga4 && !GA4_RE.test(ga4)) {
       `not the Property ID or a UA-* legacy ID. The ga4 plugin would silently ` +
       `drop this value and ship a build with no analytics.`,
   );
-} else if (!ga4) {
-  warnings.push(
-    "VITE_GA4_ID is unset — gtag will not load and Realtime traffic will not appear. " +
-      "Set the GA4 Measurement ID on Pages to enable analytics.",
-  );
-}
-
-for (const w of warnings) {
-  console.warn(`[check-build-env] WARN: ${w}`);
 }
 
 if (errors.length) {
@@ -83,5 +79,5 @@ if (errors.length) {
 
 console.log(
   `[check-build-env] OK — VITE_BACKEND_URL=${backend}` +
-    (ga4 ? `, VITE_GA4_ID=${ga4}` : " (no GA4 ID)"),
+    (ga4 ? `, local GA4=${ga4}` : ", client GA4 omitted"),
 );

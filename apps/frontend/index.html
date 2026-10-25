@@ -90,13 +90,11 @@
     <link rel="preconnect" href="https://api.syrabit.ai" crossorigin />
     <link rel="dns-prefetch" href="https://api.syrabit.ai" />
 
-    <!-- GA4 (Google Analytics 4) — Phase 6 (Task #110): in production, do NOT
-         set VITE_GA4_ID. Analytics are handled server-side by Cloudflare Zaraz,
-         which intercepts window.gtag() calls from usePageTracking.js / webVitals.js
-         via its GA4 compatibility layer — no GA4 JavaScript runs on student devices.
-         For local dev/testing only: set VITE_GA4_ID=G-XXXXXXX in .env.local to
-         re-enable client-side injection (the vite htmlPlugin replaces the marker
-         below). The empty replacement below is the production path. -->
+    <!-- Client-side GA4 is intentionally omitted from production bundles.
+         Production analytics must be configured through consent-aware Cloudflare
+         Zaraz. The tool's presence and consent behavior must be verified in
+         Cloudflare; this placeholder alone does not mean analytics are active.
+         For local testing only, VITE_GA4_ID may be set to inject gtag.js. -->
     <!--GA4_TAG-->
 
     <!-- Task #391: trimmed preconnect list. Same-origin preconnect is a
