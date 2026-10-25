@@ -533,12 +533,6 @@ export const adminGetReviewPromptByReasonTrend = (token, reason, weeks = 8, comp
   });
 };
 
-export const adminGetRevenue = (token, days = 30) =>
-  axios.get(`${API_BASE}/admin/analytics/revenue`, { headers: adminHeaders(token), withCredentials: true, params: { days } });
-
-export const adminGetPredictor = (token) =>
-  axios.get(`${API_BASE}/admin/analytics/predictor`, { headers: adminHeaders(token), withCredentials: true });
-
 export const adminGetGA4Status = (token) =>
   axios.get(`${API_BASE}/admin/ga4/status`, { headers: adminHeaders(token), withCredentials: true });
 
@@ -554,38 +548,18 @@ export const adminTestGA4 = (token) =>
 export const adminGetContentCardViews = (token, days = 0) =>
   axios.get(`${API_BASE}/admin/analytics/content-card-views`, { headers: adminHeaders(token), withCredentials: true, params: { days } });
 
-// ── Ads (Task #551) ─────────────────────────────────────────────────────────
-export const adminGetAdsOverview = (token, days = 30) =>
-  axios.get(`${API_BASE}/admin/ads/overview`, { headers: adminHeaders(token), withCredentials: true, params: { days } });
-
-export const adminListAdEarnings = (token, days = 30, network) =>
-  axios.get(`${API_BASE}/admin/ads/earnings`, {
-    headers: adminHeaders(token), withCredentials: true,
-    params: network ? { days, network } : { days },
-  });
-
-export const adminAddAdEarning = (token, entry) =>
-  axios.post(`${API_BASE}/admin/ads/earnings`, entry, { headers: adminHeaders(token), withCredentials: true });
-
-export const adminDeleteAdEarning = (token, id) =>
-  axios.delete(`${API_BASE}/admin/ads/earnings/${id}`, { headers: adminHeaders(token), withCredentials: true });
-
-export const adminUploadAdEarningsCsv = (token, network, file) => {
-  const fd = new FormData();
-  fd.append('network', network);
-  fd.append('file', file);
-  return axios.post(`${API_BASE}/admin/ads/earnings/csv`, fd, {
-    headers: { ...adminHeaders(token), 'Content-Type': 'multipart/form-data' },
+// ── Provider-verified advertising revenue ───────────────────────────────────
+export const adminGetAdsRevenue = (token, days = 30) =>
+  axios.get(`${API_BASE}/admin/ads/revenue`, {
+    headers: adminHeaders(token),
     withCredentials: true,
+    params: { days },
   });
-};
 
-export const adminGetAdsenseStatus = (token) =>
-  axios.get(`${API_BASE}/admin/ads/adsense/status`, { headers: adminHeaders(token), withCredentials: true });
-
-export const adminAdsenseSync = (token, days = 7) =>
-  axios.post(`${API_BASE}/admin/ads/adsense/sync`, {}, {
-    headers: adminHeaders(token), withCredentials: true, params: { days },
+export const adminGetMonetizationFunnel = (token) =>
+  axios.get(`${API_BASE}/admin/monetization/funnel`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
   });
 
 export const adminGetSettings = (token) =>
@@ -609,12 +583,6 @@ export const adminCreateRoadmapItem = (token, data) =>
 export const adminDeleteRoadmapItem = (token, id) =>
   axios.delete(`${API_BASE}/admin/roadmap/${id}`, { headers: adminHeaders(token), withCredentials: true });
 
-
-export const adminGetPlanConfig = (token) =>
-  axios.get(`${API_BASE}/admin/plan-config`, { headers: adminHeaders(token), withCredentials: true });
-
-export const adminUpdatePlanConfig = (token, data) =>
-  axios.put(`${API_BASE}/admin/plan-config`, data, { headers: adminHeaders(token), withCredentials: true });
 
 export const adminGetApiConfig = (token) =>
   axios.get(`${API_BASE}/admin/api-config`, { headers: adminHeaders(token), withCredentials: true });

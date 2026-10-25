@@ -14,3 +14,9 @@ Deterministic release coverage must run against the production-shaped client bui
 **Why:** Live Google fills are nondeterministic, while a fixture can prove numeric placement metadata and distinguish a valid no-fill from a broken loader. Mixing the two makes release failures ambiguous.
 
 **How to apply:** Use unique numeric fixture IDs, assert fluid no-fill containers have zero layout height, and use a service-worker-blocked fresh context for the real production route so stale hashed assets remain visible as release failures.
+
+Live Cloudflare configuration was checked on 2026-10-25: `syrabit-api-prod` had no `ADSENSE_REPORT_URL` variable or secret and no `ADSENSE_REPORT_TOKEN` secret. The `syrabitfrontend` Pages production environment had valid numeric values for all 20 active slot keys, but only 13 distinct IDs; one additional unused legacy key was present.
+
+**Why:** These values live in Cloudflare rather than the repository, so comments and source configuration can become stale while the production importer remains skipped and placement reports remain merged.
+
+**How to apply:** Recheck Cloudflare before making claims about current production setup. A release must reject reused active slot IDs; never fill missing IDs with fabricated numbers. Keep report URLs and credentials out of logs and frontend responses.

@@ -2,9 +2,9 @@ import { lazy, Suspense, useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 
-const AdminMonetization = lazy(() => import('./AdminMonetization'));
-const AdminPlans        = lazy(() => import('./AdminPlans'));
-const AdminAds          = lazy(() => import('./AdminAds'));
+const AdminMonetization = lazy(() => import('./AdminMonetizationVerified'));
+const AdminPlans        = lazy(() => import('./AdminPlansCurrent'));
+const AdminAds          = lazy(() => import('./AdminAdsRevenue'));
 
 const TABS = [
   { id: 'monetization', label: 'Monetization' },

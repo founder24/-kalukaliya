@@ -39,15 +39,10 @@ const configured = Object.fromEntries(
     String(envVars[key]?.value || '').trim(),
   ]),
 );
-// TEMPORARY (2026-09-20): all 19 placements are currently configured on
-// Cloudflare Pages with the SAME real AdSense slot ID (one ad unit reused
-// everywhere) instead of one distinct unit per placement. The uniqueness
-// check below is correct and should be re-enabled — requireUnique: true —
-// as soon as distinct ad units are created in Google AdSense and the
-// Cloudflare Pages env vars are updated to unique numeric IDs. Until then,
-// relaxing this unblocks deploys; per-placement AdSense reporting will be
-// inaccurate (all impressions attribute to one unit) but ads still serve.
-const validation = validateAdsenseSlotEnv(configured, { requireUnique: false });
+// Duplicate values merge otherwise separate placements in AdSense reports.
+// Fail the release before building if any active placement is missing, invalid,
+// or reuses another placement's provider unit.
+const validation = validateAdsenseSlotEnv(configured, { requireUnique: true });
 
 if (!validation.valid) {
   const problems = [];
@@ -64,15 +59,6 @@ if (!validation.valid) {
     `Cloudflare Pages must define one unique numeric AdSense slot ID per declared placement (${problems.join(' | ')}).`,
   );
 }
-if (configured && Object.keys(configured).length) {
-  const distinctValues = new Set(Object.values(configured));
-  if (distinctValues.size === 1) {
-    console.warn(
-      'WARNING: all AdSense placements share the same slot ID. Per-placement ad performance cannot be measured until distinct slot IDs are configured on Cloudflare Pages.',
-    );
-  }
-}
-
 if (githubEnv) {
   const lines = Object.entries(configured).map(([key, value]) => `${key}=${value}`);
   await appendFile(githubEnv, `${lines.join('\n')}\n`, 'utf8');

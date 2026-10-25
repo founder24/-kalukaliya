@@ -1375,3 +1375,81 @@ describe('Worker-native admin publishing and seed dispatch', () => {
     }
   });
 });
+
+describe('Worker-native provider ad revenue reporting', () => {
+  it('requires admin access and exposes only finalized provider receipts with safe reconciliation failures', async () => {
+    const reportId = 'admin-ads-contract-report';
+    const statusId = 'singleton';
+    const createdAt = Math.floor(Date.now() / 1000);
+    const periodStart = createdAt - 14 * 86_400;
+    const periodEnd = createdAt - 7 * 86_400;
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM ad_revenue_reports WHERE id = ?').bind(reportId),
+      env.DB.prepare('DELETE FROM adsense_reconciliation_status WHERE id = ?').bind(statusId),
+    ]);
+    await env.DB.prepare(`
+      INSERT INTO ad_revenue_reports
+        (id, network, period_start, period_end, settlement_period, currency,
+         gross_revenue_paise, adjustments_paise, provider_fees_paise,
+         net_revenue_paise, monetized_impressions, finalized, finalized_through_at,
+         fetched_at, freshness_expires_at, source_reference, evidence_hash, imported_by)
+      VALUES (?, 'adsense', ?, ?, 'contract-week', 'INR',
+        25000, 1000, 2000, 22000, 432, 1, ?, ?, ?,
+        'adsense:contract-week', ?, 'admin-ads-contract-test')
+    `).bind(
+      reportId,
+      periodStart,
+      periodEnd,
+      periodEnd,
+      createdAt,
+      createdAt + 7 * 86_400,
+      'a'.repeat(64),
+    ).run();
+    await env.DB.prepare(`
+      INSERT INTO adsense_reconciliation_status
+        (id, status, started_at, completed_at, weeks, fetched, imported,
+         idempotent, calculated, failures_json)
+      VALUES ('singleton', 'completed', ?, ?, 1, 0, 0, 0, 1, ?)
+    `).bind(
+      createdAt - 60,
+      createdAt,
+      JSON.stringify(['Provider failed https://private.example/report with Bearer private-token']),
+    ).run();
+
+    try {
+      expect((await workerFetch(new Request('http://worker/api/v1/admin/ads/revenue'))).status).toBe(401);
+      const response = await workerFetch(adminRequest('/api/v1/admin/ads/revenue?days=30'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toContain('private');
+      const payload = await response.json() as Record<string, any>;
+      expect(payload).toMatchObject({
+        source: 'ad_revenue_reports',
+        revenue_basis: 'finalized_provider_receipts',
+        endpoint_configured: false,
+        totals: {
+          gross_revenue_paise: 25000,
+          adjustments_paise: 1000,
+          provider_fees_paise: 2000,
+          net_revenue_paise: 22000,
+          monetized_impressions: 432,
+        },
+        reconciliation: {
+          status: 'completed',
+          failures: ['Provider failed [provider] with Bearer [redacted]'],
+        },
+        receipts: [expect.objectContaining({
+          id: reportId,
+          finalized_through_at: periodEnd,
+          stale: false,
+        })],
+      });
+      expect(JSON.stringify(payload)).not.toContain('private-token');
+      expect(JSON.stringify(payload)).not.toContain('private.example');
+    } finally {
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM ad_revenue_reports WHERE id = ?').bind(reportId),
+        env.DB.prepare('DELETE FROM adsense_reconciliation_status WHERE id = ?').bind(statusId),
+      ]);
+    }
+  });
+});

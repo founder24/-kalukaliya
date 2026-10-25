@@ -75,6 +75,22 @@ function metricCount(value: number | string | null | undefined): number {
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
 }
 
+function parseAdSenseFailures(value: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(value ?? '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map(message => message
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+        .replace(/https?:\/\/\S+/gi, '[provider]')
+        .slice(0, 512))
+      .slice(0, 16);
+  } catch {
+    return [];
+  }
+}
+
 const DEFAULT_NOTIFICATION_PREFS = {
   sound_enabled: true,
   push_enabled: false,
@@ -1002,6 +1018,104 @@ adminContentRouter.get('/monetization/funnel', async c => {
     has_data: totalCount > 0,
     total_count: totalCount,
     funnel,
+  });
+});
+
+// These reporting endpoints deliberately expose finalized provider receipts
+// only. Browser ad beacons and manually entered estimates are not earnings.
+adminContentRouter.get('/ads/revenue', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  c.header('Cache-Control', 'private, no-store');
+
+  const requestedDays = Number(c.req.query('days') ?? 30);
+  const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 30;
+  const generatedAt = now();
+  const since = generatedAt - days * 86_400;
+  const [reportRows, reconciliation] = await Promise.all([
+    c.env.DB.prepare(`
+      SELECT id, period_start, period_end, settlement_period, currency,
+        gross_revenue_paise, adjustments_paise, provider_fees_paise,
+        net_revenue_paise, monetized_impressions, finalized,
+        finalized_through_at, fetched_at, freshness_expires_at,
+        source_reference, created_at
+      FROM ad_revenue_reports
+      WHERE network = 'adsense' AND finalized = 1 AND period_end >= ?
+      ORDER BY period_end DESC, fetched_at DESC
+      LIMIT 100
+    `).bind(since).all<Record<string, number | string>>(),
+    c.env.DB.prepare(`
+      SELECT status, started_at, completed_at, weeks, fetched, imported,
+        idempotent, calculated, failures_json
+      FROM adsense_reconciliation_status
+      WHERE id = 'singleton'
+    `).first<{
+      status: 'running' | 'completed' | 'skipped' | 'failed';
+      started_at: number;
+      completed_at: number | null;
+      weeks: number;
+      fetched: number;
+      imported: number;
+      idempotent: number;
+      calculated: number;
+      failures_json: string;
+    }>(),
+  ]);
+
+  const receipts = (reportRows.results ?? []).map(row => ({
+    id: row.id,
+    period_start: metricCount(row.period_start),
+    period_end: metricCount(row.period_end),
+    settlement_period: row.settlement_period,
+    currency: row.currency,
+    gross_revenue_paise: metricCount(row.gross_revenue_paise),
+    adjustments_paise: metricCount(row.adjustments_paise),
+    provider_fees_paise: metricCount(row.provider_fees_paise),
+    net_revenue_paise: Number(row.net_revenue_paise ?? 0),
+    monetized_impressions: metricCount(row.monetized_impressions),
+    finalized_through_at: metricCount(row.finalized_through_at),
+    fetched_at: metricCount(row.fetched_at),
+    freshness_expires_at: metricCount(row.freshness_expires_at),
+    source_reference: row.source_reference,
+    stale: metricCount(row.freshness_expires_at) <= generatedAt,
+  }));
+  const totals = receipts.reduce((sum, report) => ({
+    gross_revenue_paise: sum.gross_revenue_paise + report.gross_revenue_paise,
+    adjustments_paise: sum.adjustments_paise + report.adjustments_paise,
+    provider_fees_paise: sum.provider_fees_paise + report.provider_fees_paise,
+    net_revenue_paise: sum.net_revenue_paise + report.net_revenue_paise,
+    monetized_impressions: sum.monetized_impressions + report.monetized_impressions,
+  }), {
+    gross_revenue_paise: 0,
+    adjustments_paise: 0,
+    provider_fees_paise: 0,
+    net_revenue_paise: 0,
+    monetized_impressions: 0,
+  });
+
+  const failures = parseAdSenseFailures(reconciliation?.failures_json);
+  const endpointConfigured = Boolean(c.env.ADSENSE_REPORT_URL?.trim());
+  return c.json({
+    source: 'ad_revenue_reports',
+    revenue_basis: 'finalized_provider_receipts',
+    range_days: days,
+    generated_at: generatedAt,
+    endpoint_configured: endpointConfigured,
+    token_configured: Boolean(c.env.ADSENSE_REPORT_TOKEN?.trim()),
+    reconciliation: reconciliation ? {
+      status: reconciliation.status,
+      started_at: reconciliation.started_at,
+      completed_at: reconciliation.completed_at,
+      weeks: reconciliation.weeks,
+      fetched: reconciliation.fetched,
+      imported: reconciliation.imported,
+      idempotent: reconciliation.idempotent,
+      calculated: reconciliation.calculated,
+      failures,
+    } : null,
+    receipts,
+    totals,
+    note: 'Totals include finalized aggregate AdSense provider receipts only. They are not estimates and are not attributed by placement.',
   });
 });
 

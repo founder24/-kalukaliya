@@ -70,9 +70,14 @@ async function fulfillGoogleLoader(route: Route, mode: 'fill' | 'no-fill') {
   });
 }
 
-async function installFixture(page: Page, mode: 'fill' | 'no-fill') {
-  await page.addInitScript(() => {
-    localStorage.removeItem('syrabit_ads_optout');
+async function installFixture(
+  page: Page,
+  mode: 'fill' | 'no-fill',
+  { adOptOut = false }: { adOptOut?: boolean } = {},
+) {
+  await page.addInitScript((optOut) => {
+    if (optOut) localStorage.setItem('syrabit_ads_optout', '1');
+    else localStorage.removeItem('syrabit_ads_optout');
     // Make every lazy slot eligible immediately. This only affects the
     // deterministic fixture; the production smoke keeps the browser native.
     window.IntersectionObserver = class {
@@ -94,7 +99,7 @@ async function installFixture(page: Page, mode: 'fill' | 'no-fill') {
       rootMargin = '0px';
       thresholds = [0];
     } as unknown as typeof IntersectionObserver;
-  });
+  }, adOptOut);
 
   await page.route(GOOGLE_LOADER, (route) => fulfillGoogleLoader(route, mode));
   await page.route('**/api/v1/**', (route) => route.fulfill({
@@ -162,6 +167,7 @@ async function expectFixtureTab(
 
   const slots = await readSlots(page);
   expect(slots.map((slot) => slot.placement)).toEqual(expectedPlacements);
+  expect(new Set(slots.map((slot) => slot.slot)).size).toBe(slots.length);
   for (const slot of slots) {
     expect(slot.slot, `${tab} ${slot.placement} slot metadata`).toMatch(/^\d{5,20}$/);
     expect(slot.format, `${tab} ${slot.placement} format metadata`).toBeTruthy();
@@ -212,6 +218,13 @@ test.describe('deterministic AdSense release fixture', () => {
       ['chapter.notes.top', 'chapter.notes.inContent', 'chapter.notes.end', 'chapter.sidebar'],
       'fill',
     );
+  });
+
+  test('honors advertising opt-out without loading the provider or rendering manual slots', async ({ page }) => {
+    await installFixture(page, 'no-fill', { adOptOut: true });
+    await page.goto(`${FIXTURE_ROUTE}?tab=notes`);
+    await expect(page.locator('[data-ad-placement]')).toHaveCount(0);
+    await expect(page.locator('script[src*="adsbygoogle.js"]')).toHaveCount(0);
   });
 });
 
