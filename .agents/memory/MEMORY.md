@@ -99,6 +99,7 @@
 - [Cloudflare release provenance](cloudflare-release-provenance.md) — release builds must keep generated curriculum, review cache, and browser output out of tracked source
 - [Cloudflare Agent Readiness policy](cloudflare-agent-readiness-policy.md) — advertise only working services; leave unsupported agent protocols unscored rather than fabricate discovery metadata
 - [Production AdSense verification](production-ads-verification.md) — a live Google loader is not enough; verify compiled slot IDs, DOM metadata, fills, and stale hashed assets separately
+- [AdSense finalization boundary](adsense-finalization-boundary.md) — Google performance reports are estimates; do not treat monthly finalized totals as weekly referral revenue without an approved allocation policy
 - [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
 - [GitHub Actions runner context in job env](github-actions-runner-context-job-env.md) — job-level env can't use `runner` context; causes whole workflow to fail to start (0 jobs), not just a lint warning
