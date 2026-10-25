@@ -12,6 +12,13 @@ export function buildStaffChapterPatchPayload(form = {}) {
   return payload;
 }
 
+export function buildStaffChapterCreateTopics(topicTitles = []) {
+  if (!Array.isArray(topicTitles)) return [];
+  return topicTitles
+    .filter((title) => typeof title === 'string' && title.trim())
+    .map((title) => ({ title: title.trim() }));
+}
+
 export function normalizeStaffChapterCreateStatus(status, canPublish) {
   return canPublish && status === 'published' ? 'published' : 'draft';
 }

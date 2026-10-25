@@ -1,0 +1,2395 @@
+{
+  "version": 1,
+  "benchmark": "chat-rag",
+  "manifest_status": "pending_approval",
+  "snapshot_date": "2026-10-25",
+  "snapshot_source": "Cloudflare D1 published-curriculum metadata; read-only; chat/conversation tables were not queried",
+  "approval": {
+    "scope_approved_by": null,
+    "scope_approved_at": null,
+    "reviewers_approved": false
+  },
+  "source_policy": {
+    "included": "Only chapters whose chapter, subject, and any hierarchy parents are published at the snapshot date.",
+    "canonical_source_id_format": "chapter:<chapters.id>",
+    "evidence_fields": {
+      "en": [
+        "notes_en",
+        "rag_text",
+        "rag_sections_en",
+        "qa_en",
+        "published_topics[status=published].title",
+        "published_topics[status=published].content"
+      ],
+      "as": [
+        "notes_as",
+        "rag_text_as",
+        "rag_sections_as",
+        "qa_as",
+        "published_topics[status=published].title_as",
+        "published_topics[status=published].content_as"
+      ]
+    },
+    "unpublished_or_unapproved_materials_included": false,
+    "private_student_conversations_used": false
+  },
+  "supported_languages": [
+    {
+      "code": "en",
+      "application_supported": true
+    },
+    {
+      "code": "as",
+      "application_supported": true
+    }
+  ],
+  "inventory_summary": {
+    "board_class_stream_subject_scopes": 35,
+    "published_chapters": 213,
+    "chapters_with_english_evidence": 204,
+    "chapters_with_assamese_evidence": 47
+  },
+  "source_family_inventory": {
+    "chapter_notes": {
+      "chapters_with_english_evidence": 204,
+      "chapters_with_assamese_evidence": 47
+    },
+    "chapter_qa": {
+      "chapters_with_english_evidence": 16,
+      "chapters_with_assamese_evidence": 17
+    },
+    "published_topic_cards": {
+      "chapters_with_english_evidence": 101,
+      "chapters_with_assamese_evidence": 14
+    },
+    "pyq": {
+      "included_as_rag_evidence": false,
+      "reason": "File-only PYQ material is not indexed by the current RAG pipeline."
+    }
+  },
+  "scopes": [
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 1st Year",
+      "class_slug": "hs-1st-year",
+      "stream_name": "Arts",
+      "stream_slug": "arts",
+      "subject_id": "6a19e0ec4d8e6ddb2deb7d51",
+      "subject_name": "Economics",
+      "subject_slug": "economics",
+      "published_chapter_count": 17,
+      "english_evidence_chapter_count": 17,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f19facee3667f3ecc3bd8",
+          "title": "THEORY OF CONSUMER BEHAVIOUR",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bd9",
+          "title": "Production and Costs",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bda",
+          "title": "THE THEORY OF THE FIRM UNDER PERFECT COMPETITION",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be0",
+          "title": "Market Equilibrium",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bdb",
+          "title": "Production",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bdc",
+          "title": "Cost",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bdd",
+          "title": "Revenue",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bde",
+          "title": "Profit Maximisation",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bdf",
+          "title": "Supply",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be1",
+          "title": "Applications of Demand and Supply",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be2",
+          "title": "Statistics in Economics",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0ec4d8e6ddb2deb7d52",
+          "title": "Collection of Data",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0ec4d8e6ddb2deb7d53",
+          "title": "Organisation of Data",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0ed4d8e6ddb2deb7d54",
+          "title": "Presentation of Data",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0ed4d8e6ddb2deb7d55",
+          "title": "Measures of Central Tendency",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0ee4d8e6ddb2deb7d57",
+          "title": "Correlation",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0ee4d8e6ddb2deb7d58",
+          "title": "Index Numbers",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 1st Year",
+      "class_slug": "hs-1st-year",
+      "stream_name": "Arts",
+      "stream_slug": "arts",
+      "subject_id": "6a19e0ec4d8e6ddb2deb7d50",
+      "subject_name": "History",
+      "subject_slug": "history",
+      "published_chapter_count": 7,
+      "english_evidence_chapter_count": 7,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bea",
+          "title": "Writing and City Life",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3beb",
+          "title": "An Empire Across Three Continents",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bec",
+          "title": "Nomadic Empires",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bed",
+          "title": "The Three Orders",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bee",
+          "title": "Changing Cultural Traditions",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bef",
+          "title": "Displacing Indigenous Peoples",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3bf0",
+          "title": "Paths to Modernisation",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 1st Year",
+      "class_slug": "hs-1st-year",
+      "stream_name": "Arts",
+      "stream_slug": "arts",
+      "subject_id": "6a19e0eb4d8e6ddb2deb7d4f",
+      "subject_name": "Political Science",
+      "subject_slug": "political-science",
+      "published_chapter_count": 7,
+      "english_evidence_chapter_count": 7,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be3",
+          "title": "Political Theory: An Introduction",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be4",
+          "title": "Freedom",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be5",
+          "title": "Equality",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be6",
+          "title": "Social Justice",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be7",
+          "title": "Rights",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be8",
+          "title": "Citizenship",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f19fbcee3667f3ecc3be9",
+          "title": "Nationalism",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 1st Year",
+      "class_slug": "hs-1st-year",
+      "stream_name": "Commerce",
+      "stream_slug": "commerce",
+      "subject_id": "6a19e0f34d8e6ddb2deb7d6d",
+      "subject_name": "Business Studies",
+      "subject_slug": "business-studies",
+      "published_chapter_count": 10,
+      "english_evidence_chapter_count": 10,
+      "assamese_evidence_chapter_count": 10,
+      "sources": [
+        {
+          "source_id": "chapter:6a19e0f44d8e6ddb2deb7d6f",
+          "title": "Forms of Business Organisation",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f44d8e6ddb2deb7d70",
+          "title": "Public, Private and Global Enterprises",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f44d8e6ddb2deb7d71",
+          "title": "Business Services",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f54d8e6ddb2deb7d72",
+          "title": "Emerging Modes of Business",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f54d8e6ddb2deb7d73",
+          "title": "Social Responsibilities of Business and Business Ethics",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f54d8e6ddb2deb7d74",
+          "title": "Formation of a Company",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f64d8e6ddb2deb7d75",
+          "title": "Sources of Business Finance",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f64d8e6ddb2deb7d76",
+          "title": "MSME and Business Entrepreneurship",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0f64d8e6ddb2deb7d77",
+          "title": "Internal Trade",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a25e929473568d758063f8f",
+          "title": "International Business",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 1st Year",
+      "class_slug": "hs-1st-year",
+      "stream_name": "Science",
+      "stream_slug": "science",
+      "subject_id": "6a19e0d74d8e6ddb2deb7d04",
+      "subject_name": "Physics",
+      "subject_slug": "physics",
+      "published_chapter_count": 7,
+      "english_evidence_chapter_count": 7,
+      "assamese_evidence_chapter_count": 7,
+      "sources": [
+        {
+          "source_id": "chapter:6a19e0d84d8e6ddb2deb7d05",
+          "title": "Units and Measurements",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0d84d8e6ddb2deb7d06",
+          "title": "Motion in a Straight Line",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0d84d8e6ddb2deb7d07",
+          "title": "Motion in a Plane",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0d84d8e6ddb2deb7d08",
+          "title": "Laws of Motion",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0d94d8e6ddb2deb7d09",
+          "title": "Work, Energy and Power",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0d94d8e6ddb2deb7d0a",
+          "title": "System of Particles and Rotational Motion",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a19e0d94d8e6ddb2deb7d0b",
+          "title": "Gravitation",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 2nd Year",
+      "class_slug": "hs-2nd-year",
+      "stream_name": "Arts",
+      "stream_slug": "arts",
+      "subject_id": "6a19e1094d8e6ddb2deb7db9",
+      "subject_name": "History",
+      "subject_slug": "history",
+      "published_chapter_count": 20,
+      "english_evidence_chapter_count": 20,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3f5",
+          "title": "Bricks, Beads and Bones — The Harappan Civilisation",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c2",
+          "title": "From the Beginning of Time",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c1",
+          "title": "Early Cities",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3f6",
+          "title": "Kings, Farmers and Towns — Early States and Economies",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3f7",
+          "title": "Kinship, Caste and Class — Early Societies",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c3",
+          "title": "The Central Islamic Lands",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3f8",
+          "title": "Thinkers, Beliefs and Buildings — Cultural Developments",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3f9",
+          "title": "Through the Eyes of Travellers — Perceptions of Society",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3fa",
+          "title": "Bhakti–Sufi Traditions — Changes in Religious Beliefs",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3fb",
+          "title": "An Imperial Capital — Vijayanagara",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c4",
+          "title": "Confrontation of Cultures",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3fc",
+          "title": "Peasants, Zamindars and the State — Agrarian Society",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3fd",
+          "title": "Kings and Chronicles — The Mughal Courts",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c5",
+          "title": "The Industrial Revolution",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3fe",
+          "title": "Colonialism and the Countryside",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3ff",
+          "title": "Rebels and the Raj — 1857 Revolt",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de400",
+          "title": "Colonial Cities — Urbanisation Planning and Architecture",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de401",
+          "title": "Mahatma Gandhi and the Nationalist Movement",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de402",
+          "title": "Understanding Partition",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de403",
+          "title": "Framing the Constitution",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 2nd Year",
+      "class_slug": "hs-2nd-year",
+      "stream_name": "Arts",
+      "stream_slug": "arts",
+      "subject_id": "6a19e1084d8e6ddb2deb7db8",
+      "subject_name": "Political Science",
+      "subject_slug": "political-science",
+      "published_chapter_count": 12,
+      "english_evidence_chapter_count": 12,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de404",
+          "title": "Challenges of Nation Building",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de405",
+          "title": "Era of One-Party Dominance",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de406",
+          "title": "Politics of Planned Development",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de407",
+          "title": "India's External Relations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de408",
+          "title": "Challenges to and Restoration of Congress System",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de409",
+          "title": "Crisis of Democratic Order",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de40a",
+          "title": "Rise of Popular Movements",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de40b",
+          "title": "Regional Aspirations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c6",
+          "title": "Secularism",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c7",
+          "title": "Peace",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de40c",
+          "title": "Recent Developments in Indian Politics",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3c8",
+          "title": "Development",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 2nd Year",
+      "class_slug": "hs-2nd-year",
+      "stream_name": "Commerce",
+      "stream_slug": "commerce",
+      "subject_id": "6a19e10b4d8e6ddb2deb7dc2",
+      "subject_name": "Economics",
+      "subject_slug": "economics",
+      "published_chapter_count": 14,
+      "english_evidence_chapter_count": 14,
+      "assamese_evidence_chapter_count": 2,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de425",
+          "title": "Introduction to Statistics",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de40d",
+          "title": "National Income Accounting",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de40e",
+          "title": "Money and Banking",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de40f",
+          "title": "Determination of Income and Employment",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de410",
+          "title": "Government Budget and the Economy",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de411",
+          "title": "Balance of Payments",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de412",
+          "title": "Indian Economy 1950–1990",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de413",
+          "title": "Economic Reforms Since 1991",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de414",
+          "title": "Environment and Sustainable Development",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de426",
+          "title": "Introduction to Microeconomics",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de415",
+          "title": "Comparative Development Experiences of India and its Neighbours",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de427",
+          "title": "Consumer's Equilibrium and Demand",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de428",
+          "title": "Producer Behaviour and Supply",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de429",
+          "title": "Forms of Market and Price Determination",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 2nd Year",
+      "class_slug": "hs-2nd-year",
+      "stream_name": "Science",
+      "stream_slug": "science",
+      "subject_id": "6a19e1074d8e6ddb2deb7db2",
+      "subject_name": "Biology",
+      "subject_slug": "biology",
+      "published_chapter_count": 16,
+      "english_evidence_chapter_count": 16,
+      "assamese_evidence_chapter_count": 3,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3d6",
+          "title": "Reproduction in Organisms",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3d7",
+          "title": "Sexual Reproduction in Flowering Plants",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3d8",
+          "title": "Human Reproduction",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3d9",
+          "title": "Reproductive Health",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3da",
+          "title": "Principles of Inheritance and Variation",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3db",
+          "title": "Molecular Basis of Inheritance",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3dc",
+          "title": "Evolution",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3dd",
+          "title": "Human Health and Disease",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3de",
+          "title": "Strategies for Enhancement in Food Production",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3df",
+          "title": "Microbes in Human Welfare",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3e0",
+          "title": "Biotechnology — Principles and Processes",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3e1",
+          "title": "Biotechnology and its Applications",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de42a",
+          "title": "Organisms and Populations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87832c1a19d2142de3eb",
+          "title": "Ecosystem",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3e2",
+          "title": "Biodiversity and Conservation",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3e3",
+          "title": "Environmental Issues",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 2nd Year",
+      "class_slug": "hs-2nd-year",
+      "stream_name": "Science",
+      "stream_slug": "science",
+      "subject_id": "6a19e0fe4d8e6ddb2deb7d93",
+      "subject_name": "Chemistry",
+      "subject_slug": "chemistry",
+      "published_chapter_count": 3,
+      "english_evidence_chapter_count": 3,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3ea",
+          "title": "The Solid State",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3b3",
+          "title": "Classification of Elements and Periodicity in Properties",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3b4",
+          "title": "Organic Chemistry — Some Basic Principles and Techniques",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "AHSEC",
+      "board_slug": "ahsec",
+      "class_name": "HS 2nd Year",
+      "class_slug": "hs-2nd-year",
+      "stream_name": "Science",
+      "stream_slug": "science",
+      "subject_id": "6a19e0fa4d8e6ddb2deb7d84",
+      "subject_name": "Physics",
+      "subject_slug": "physics",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3b2",
+          "title": "Physical World",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "1st Semester",
+      "class_slug": "1st-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "d6140f1e-b264-4f10-a943-9345d145ec13",
+      "subject_name": "Makers of Modern Assam (MDC-01013)",
+      "subject_slug": "makers-of-modern-assam-mdc-01013",
+      "published_chapter_count": 6,
+      "english_evidence_chapter_count": 6,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:586be1bf-5260-44d1-b535-c3df816a5ad2",
+          "title": "Unit I: Language, Literature & Culture",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:c4e76bc8-9bd1-4b0f-9ddf-1d9c7a97b9ee",
+          "title": "Unit II: Framers of the Political Foundations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:4926a92f-6567-469f-989d-035615fdc7f1",
+          "title": "Unit III: Women’s Education, Politics and Literature",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:561b0610-02f8-4665-884a-75c672e399b9",
+          "title": "Question Bank — Units I–III",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:7f45c840-3a5b-4020-8cff-98849c596776",
+          "title": "2024 Exam Paper — MDC-05 / Paper MDC0100503",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a90409b-3488-47ef-b443-e4c2f1bdf469",
+          "title": "Course Syllabus: MDC-01013 – Makers of Modern Assam (Semester 1)",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "1st Semester",
+      "class_slug": "1st-semester",
+      "stream_name": "B.Com",
+      "stream_slug": "bcom",
+      "subject_id": "181f185b-cbf2-4bd0-a412-994d09286b71",
+      "subject_name": "Makers of Modern Assam (MDC-01013)",
+      "subject_slug": "makers-of-modern-assam-mdc-01013",
+      "published_chapter_count": 5,
+      "english_evidence_chapter_count": 5,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:18da023f-768c-4647-ad99-65e97a707a40",
+          "title": "Unit I: Language, Literature & Culture",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:c1b743e4-1ed4-4e7d-aaed-1c72b25a7128",
+          "title": "Unit II: Framers of the Political Foundations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:8ee85d17-f2bb-4941-a741-ad9b805d97b7",
+          "title": "Unit III: Women’s Education, Politics and Literature",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:1e887423-8a16-40c4-9495-730cb1836f64",
+          "title": "Question Bank — Units I–III",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:b652b034-852e-4628-a945-4e07fbe9bac0",
+          "title": "2024 Exam Paper — MDC-05 / Paper MDC0100503",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "1st Semester",
+      "class_slug": "1st-semester",
+      "stream_name": "B.Sc",
+      "stream_slug": "bsc",
+      "subject_id": "6cce092a-49c5-4f68-8a25-f8b0e3d50052",
+      "subject_name": "Makers of Modern Assam (MDC-01013)",
+      "subject_slug": "makers-of-modern-assam-mdc-01013",
+      "published_chapter_count": 5,
+      "english_evidence_chapter_count": 5,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6d2779e1-252c-417d-a429-8c6f28d70d4b",
+          "title": "Unit I: Language, Literature & Culture",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:d59e8d08-cae8-433a-a994-1ae726a95e94",
+          "title": "Unit II: Framers of the Political Foundations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:2c992f2f-091d-42f9-a730-3f0b60740b12",
+          "title": "Unit III: Women’s Education, Politics and Literature",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:ba6687d0-c0c4-42e6-8eab-c3a1c4f4bd87",
+          "title": "Question Bank — Units I–III",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:5ac58226-8680-44a3-b7ad-bae3f26f3b42",
+          "title": "2024 Exam Paper — MDC-05 / Paper MDC0100503",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab0731945021",
+      "subject_name": "AEC Question Paper (NEP-2nd Semester)",
+      "subject_slug": "aec-question-paper-nep-2nd-semester",
+      "published_chapter_count": 2,
+      "english_evidence_chapter_count": 2,
+      "assamese_evidence_chapter_count": 2,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de36c",
+          "title": "English Communication AEC Question Paper 2024",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de388",
+          "title": "English Communication AEC Question Paper 2025",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab0731945022",
+      "subject_name": "Assamese 2nd Sem NEP",
+      "subject_slug": "assamese-2nd-sem-nep",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de36b",
+          "title": "BA 2nd Sem- ASS (FYUGP)-2025 - ASS 0200104  Question Paper 2025",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab0731945028",
+      "subject_name": "ENGLISH COMMUNICATION-I",
+      "subject_slug": "english-communication-i",
+      "published_chapter_count": 11,
+      "english_evidence_chapter_count": 9,
+      "assamese_evidence_chapter_count": 2,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f8283700cab073194505a",
+          "title": "Unit 1  : Understanding Communication (Credit 1 )",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de35f",
+          "title": "Unit 1  : Understanding Communication (Credit 1 )",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de37a",
+          "title": "Unit 2 Listening and Speaking",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8283700cab073194505b",
+          "title": "Unit 2 Listening and Speaking",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:4d3b9433-3a37-451c-9e38-a282332bd429",
+          "title": "The Communication Process & Foundations",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:654f9773-e9fc-4460-b0fb-4d4a5d22a714",
+          "title": "Types, Forms & Channels of Communication",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:433c4809-837f-450b-815b-3c39dedcb761",
+          "title": "Qualities of Effective Communication & Barriers",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:9a26cd7f-1e4a-46f1-a04d-4f3444880707",
+          "title": "Attributes of Effective Speech & Listening Skills",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:bb2c547e-0230-4770-bf51-672836bfd5e5",
+          "title": "Functional & Situational English",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:b359891a-8502-4cda-8a31-f66f10010978",
+          "title": "Group Discussion (GD) & Interview Skills",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:26c4a8fd-5950-4df4-9b19-be450875fc16",
+          "title": "Public Speaking & Modern Oral Presentations (ICT / PPT)",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab073194502a",
+      "subject_name": "Economics 2nd Sem NEP",
+      "subject_slug": "economics-2nd-sem-nep",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de36e",
+          "title": "BA 2nd Sem- ECO (FYUGP)-2025 - ECO 0200104 Question Paper 2025",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab073194502b",
+      "subject_name": "Education 2nd Sem NEP",
+      "subject_slug": "education-2nd-sem-nep",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de376",
+          "title": "BA 2nd Sem- EDU (FYUGP)-2025 - EDU 0200104 Question Paper 2025",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab073194502c",
+      "subject_name": "English 2nd Sem NEP",
+      "subject_slug": "english-2nd-sem-nep",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de36a",
+          "title": "BA 2nd Sem- ENG (FYUGP)-2025 - ENG 0200104 Question Paper 2025",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab073194502d",
+      "subject_name": "Essence of Democracy and Indian Constitution",
+      "subject_slug": "essence-of-democracy-and-indian-constitution",
+      "published_chapter_count": 4,
+      "english_evidence_chapter_count": 3,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de35a",
+          "title": "Unit 1: Essence of Democracy",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de36f",
+          "title": "Unit 2: Constitution, Citizenship & Federalism",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8283700cab0731945063",
+          "title": "Unit 3: Democracy and People's Rights in India",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de384",
+          "title": "Unit 3: Democracy and People's Rights in India",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab073194502f",
+      "subject_name": "Geography of India",
+      "subject_slug": "geography-of-india",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de35c",
+          "title": "(Geography of India)  Question Paper 2024",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab0731945032",
+      "subject_name": "INDIAN KNOWLEDGE SYSTEM",
+      "subject_slug": "indian-knowledge-system",
+      "published_chapter_count": 7,
+      "english_evidence_chapter_count": 4,
+      "assamese_evidence_chapter_count": 3,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f8284700cab073194506b",
+          "title": "Essence of Indian Knowledge",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de37b",
+          "title": "Essence of Indian Knowledge",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3ad",
+          "title": "Introduction to Ayurveda",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de38a",
+          "title": "Introduction to Indian Philosophical Systems",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de359",
+          "title": "Introduction to the Vedas and Upaniṣads",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8284700cab073194506d",
+          "title": "Introduction to Indian Philosophical Systems",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8284700cab073194506e",
+          "title": "Introduction to the Vedas and Upaniṣads",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab0731945036",
+      "subject_name": "Philosophy 2nd Sem NEP",
+      "subject_slug": "philosophy-2nd-sem-nep",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de372",
+          "title": "BA 2nd Sem- PHI (FYUGP)-2025 - PHI 0200104 Question Paper 2025",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab073194503b",
+      "subject_name": "Sociology 2nd Sem NEP",
+      "subject_slug": "sociology-2nd-sem-nep",
+      "published_chapter_count": 2,
+      "english_evidence_chapter_count": 2,
+      "assamese_evidence_chapter_count": 1,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de385",
+          "title": "Sociology (Understanding Society in India) FYUGP (NEP) 2nd sem. 2024",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de378",
+          "title": "Sociology (Understanding Society in India) FYUGP (NEP) 2nd sem. 2025",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab0731945040",
+      "subject_name": "VAC 2nd Sem NEP",
+      "subject_slug": "vac-2nd-sem-nep",
+      "published_chapter_count": 2,
+      "english_evidence_chapter_count": 2,
+      "assamese_evidence_chapter_count": 2,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de386",
+          "title": "Tourism Management 2023",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de373",
+          "title": "VAC (Yoga and Wellness) Question Paper 2024",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab0731945041",
+      "subject_name": "YOGA AND WELLNESS",
+      "subject_slug": "yoga-and-wellness",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de389",
+          "title": "Unit III",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.Com",
+      "stream_slug": "bcom",
+      "subject_id": "6a1f8283700cab0731945031",
+      "subject_name": "INDIAN FINANCIAL SYSTEM",
+      "subject_slug": "indian-financial-system",
+      "published_chapter_count": 3,
+      "english_evidence_chapter_count": 3,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de361",
+          "title": "UNIT I : Introduction to Indian Financial System ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de37f",
+          "title": "UNIT II : Financial Markets & Instruments ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de38b",
+          "title": "UNIT III : Financial Institutions & Services ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.Com",
+      "stream_slug": "bcom",
+      "subject_id": "6a1f8283700cab0731945035",
+      "subject_name": "OFFICE MANAGEMENT",
+      "subject_slug": "office-management",
+      "published_chapter_count": 9,
+      "english_evidence_chapter_count": 6,
+      "assamese_evidence_chapter_count": 3,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de395",
+          "title": "Office Management COM-SEC-02013  Skill Enhancement Course (SEC)  Question Paper 2023",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de390",
+          "title": "Office Management COM-SEC-02013  Skill Enhancement Course (SEC)  Question Paper 2024",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de35e",
+          "title": "Unit I : Fundamentals of Office Management ( 15 Marks ) ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de37c",
+          "title": "Unit-II  Office Layout and Environment  (20 marks )",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de38c",
+          "title": "Unit-III  Record Management (20 marks)",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de39e",
+          "title": "Unit-IV  Office Communication and use of Technology (20 marks)",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8284700cab0731945076",
+          "title": "Unit I : Fundamentals of Office Management ( 15 Marks )",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8284700cab0731945078",
+          "title": "Unit-III  Record Management (20 marks)",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f8284700cab0731945079",
+          "title": "Unit-IV  Office Communication and use of Technology (20 marks)",
+          "evidence_languages": [
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.Com",
+      "stream_slug": "bcom",
+      "subject_id": "6a1f8283700cab073194503a",
+      "subject_name": "Principles and Practices Of Management",
+      "subject_slug": "principles-and-practices-of-management",
+      "published_chapter_count": 4,
+      "english_evidence_chapter_count": 4,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de374",
+          "title": " Unit-I   : Management Trends  (25 marks) ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de387",
+          "title": "Unit-II Planning (15 marks)",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3a9",
+          "title": "Unit-III Motivation and Leadership (30 marks) ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de398",
+          "title": "Unit-IV Indian Ethos in Management (30 marks) ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "2nd Semester",
+      "class_slug": "2nd-semester",
+      "stream_name": "B.Com",
+      "stream_slug": "bcom",
+      "subject_id": "6a1f8283700cab073194503e",
+      "subject_name": "TOURISM MANAGEMENT",
+      "subject_slug": "tourism-management",
+      "published_chapter_count": 3,
+      "english_evidence_chapter_count": 3,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de35b",
+          "title": "Unit -I",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de367",
+          "title": "Unit -II",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de396",
+          "title": "Unit -IV",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "3rd Semester",
+      "class_slug": "3rd-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "c8515542-e9b1-416c-9d1c-74ca48f6ecbc",
+      "subject_name": "ALTERNATIVE ENGLISH-II",
+      "subject_slug": "alternative-english-ii",
+      "published_chapter_count": 7,
+      "english_evidence_chapter_count": 7,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:27305d30-8df3-4003-abd7-c632e44e4b0a",
+          "title": "Unit 1: Charles Lamb — “Dream Children: A Reverie”",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:e881460d-4ee3-4229-b04f-fb8bffa61a33",
+          "title": "Unit 1: Ruskin Bond — “Coming Home to Dehra”",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:8c9e1274-fefc-48d5-9f03-2fa17cd37fa4",
+          "title": "Unit 1: Muhammad Yunus — “Towards Creating a Poverty Free World”",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:4a1d0f9b-c999-40af-9b13-c5d5fca15c5b",
+          "title": "Unit 2: Applied Grammar — Voice Change",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:34c90849-b186-43bd-afc4-cb41a19f91e5",
+          "title": "Unit 2: Applied Grammar — Question Tags",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:3952f838-40e3-4015-8962-8860eaadbea3",
+          "title": "Unit 2: Applied Grammar — Common Errors",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:5b96bdcc-a723-4ecd-a803-1709a8fc03b6",
+          "title": "Unit 2: Applied Composition — Precis Writing",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "4th Semester",
+      "class_slug": "4th-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8282700cab0731945029",
+      "subject_name": "ENGLISH COMMUNICATION-II",
+      "subject_slug": "english-communication-ii",
+      "published_chapter_count": 10,
+      "english_evidence_chapter_count": 10,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de35d",
+          "title": "Unit 1 Reading ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de37d",
+          "title": "Unit 2 Writing ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:d96f6fea-24eb-44ef-801a-d2399a87f129",
+          "title": "Unit 1: Book Review Writing",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:952aaa7b-4419-49be-b47c-51150a7e1a37",
+          "title": "Unit 1: Right to Information (RTI) Applications",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:2830106b-d7ab-4d1c-94e7-e7e1f065333f",
+          "title": "Unit 1: Resume, CV & Cover Letter Writing",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:10506fc0-48a7-4d27-bc34-4d55113d7c90",
+          "title": "Unit 1: Professional & Technical Formats (Letters, Notices, Memos & Reports)",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:8d84ed89-dd3a-4b3e-94a0-70945e141567",
+          "title": "Unit 2: Professional Email Writing & Digital Etiquette",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:eb95e266-dc55-4336-b554-58dcfbad7ae6",
+          "title": "Unit 2: Microblogging & Social Media Communication",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:fbf4ffe5-615a-412d-a37d-ea4f9ba6c41e",
+          "title": "Unit 2: Professional Networking & LinkedIn Profile Development",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:e95ccd7d-3481-4d41-8231-0687748540b3",
+          "title": "Unit 2: Ethical Use of Artificial Intelligence (AI) in Communication",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "4th Semester",
+      "class_slug": "4th-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab0731945039",
+      "subject_name": "Political Science 4th Sem NEP",
+      "subject_slug": "political-science-4th-sem-nep",
+      "published_chapter_count": 1,
+      "english_evidence_chapter_count": 1,
+      "assamese_evidence_chapter_count": 0,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de36d",
+          "title": "POLITICAL SCIENCE ( Minor ) Paper : MINPSC1 ( Concepts and Debates in Political Theory )2024",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        }
+      ]
+    },
+    {
+      "board_name": "Degree",
+      "board_slug": "degree",
+      "class_name": "4th Semester",
+      "class_slug": "4th-semester",
+      "stream_name": "B.A.",
+      "stream_slug": "ba",
+      "subject_id": "6a1f8283700cab073194503c",
+      "subject_name": "Sociology 4th Sem NEP",
+      "subject_slug": "sociology-4th-sem-nep",
+      "published_chapter_count": 11,
+      "english_evidence_chapter_count": 11,
+      "assamese_evidence_chapter_count": 6,
+      "sources": [
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3aa",
+          "title": "Rural Sociology Question Paper 2022",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de394",
+          "title": "Rural Sociology Question Paper 2023",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de391",
+          "title": "Rural Sociology Question Paper 2024",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de397",
+          "title": "Rural Sociology Question Paper 2025  ",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de39d",
+          "title": "Sociological Research Methods 2025",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de39b",
+          "title": "Sociology of Family , Marriage and Kinship Question Paper 2022",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3a3",
+          "title": "Sociology of Family , Marriage and Kinship Question Paper 2023",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de383",
+          "title": "Sociology of Family , Marriage and Kinship Question Paper 2024",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87822c1a19d2142de3a0",
+          "title": "Sociology of Family , Marriage and Kinship Question Paper 2025",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de392",
+          "title": "Sociology of Religion 2022",
+          "evidence_languages": [
+            "en"
+          ],
+          "answerable_source": true
+        },
+        {
+          "source_id": "chapter:6a1f87812c1a19d2142de375",
+          "title": "Techniques of doing Social Research 2024",
+          "evidence_languages": [
+            "en",
+            "as"
+          ],
+          "answerable_source": true
+        }
+      ]
+    }
+  ],
+  "reviewer_assignments": {
+    "curriculum_reviewers": [],
+    "language_reviewers": {
+      "en": [],
+      "as": []
+    },
+    "independent_output_reviewer": null,
+    "output_run_environment": null,
+    "approval_status": "pending"
+  },
+  "benchmark_cases": {
+    "status": "blocked_until_scope_and_reviewer_approval",
+    "case_count": 0,
+    "observations_count": 0,
+    "minimum_case_count": 100,
+    "planned_action_types": [
+      "answer",
+      "clarify",
+      "abstain"
+    ]
+  }
+}

@@ -439,6 +439,7 @@ describe('Staff chapter edit round-trip through D1', () => {
         title:      'Round-trip Test Chapter',
         subject_id: subjectId,
         status:     'draft',
+        topics:     [{ title: 'Round-trip starter topic' }],
       }),
     }));
 
@@ -446,6 +447,20 @@ describe('Staff chapter edit round-trip through D1', () => {
     const body = await res.json() as { id: string };
     expect(typeof body.id).toBe('string');
     chapterId = body.id;
+
+    const detailRes = await workerFetch(new Request(`http://worker/api/v1/staff/content/chapter/${chapterId}`, {
+      headers: authHeaders(token),
+    }));
+    expect(detailRes.status).toBe(200);
+    const detail = await detailRes.json() as {
+      published_topics: Array<{ id: string; title: string; status: string }>;
+    };
+    expect(detail.published_topics).toHaveLength(1);
+    expect(detail.published_topics[0]).toMatchObject({
+      title: 'Round-trip starter topic',
+      status: 'draft',
+    });
+    expect(detail.published_topics[0]?.id).toBeTruthy();
   });
 
   it('returns the chapter-list fields consumed by the staff dashboard', async () => {
@@ -460,8 +475,8 @@ describe('Staff chapter edit round-trip through D1', () => {
       has_qa_rag_sections: false,
       has_pyq_pdf: false,
       has_pyq_papers: false,
-      qa_rag_stale: false,
-      pyq_rag_stale: false,
+      qa_rag_stale: true,
+      pyq_rag_stale: true,
     });
   });
 
@@ -512,6 +527,7 @@ describe('Staff chapter edit round-trip through D1', () => {
       keywords_as: string;
       rag_sections_en: Array<{ title: string; content: string }>;
       qa_en: Array<{ question: string; answer: string }>;
+      published_topics: Array<{ id: string; title: string; status: string }>;
     };
 
     // notes_en must reflect the written value, not '' or null.
@@ -535,6 +551,12 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(Array.isArray(body.qa_en)).toBe(true);
     expect(body.qa_en).toHaveLength(1);
     expect(body.qa_en[0]?.question).toBe('What is this chapter about?');
+    expect(body.published_topics).toEqual([
+      expect.objectContaining({
+        title: 'Round-trip starter topic',
+        status: 'draft',
+      }),
+    ]);
   });
 
   // ── Step 4: PATCH with empty values explicitly clears content ───────────────

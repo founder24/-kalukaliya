@@ -8,6 +8,9 @@ const DEFAULT_CASES = fileURLToPath(new URL('../evals/chat-rag/cases.json', impo
 const DEFAULT_OBSERVATIONS = fileURLToPath(
   new URL('../evals/chat-rag/observations.json', import.meta.url),
 );
+const DEFAULT_MANIFEST = fileURLToPath(
+  new URL('../evals/chat-rag/manifest.json', import.meta.url),
+);
 const CERTIFICATION_MINIMUM_CASES = 100;
 
 const RESPONSE_WEIGHTS = {
@@ -61,7 +64,7 @@ function assertReview(review, fields, label) {
   }
 }
 
-function validateCases(cases) {
+function validateCases(cases, allowedSourceIds = null) {
   if (!Array.isArray(cases)) fail('cases must be an array');
   const ids = new Set();
 
@@ -83,14 +86,25 @@ function validateCases(cases) {
     }
     assertUniqueStrings(item.expected_source_ids, `case ${item.id} expected_source_ids`);
     assertUniqueStrings(item.required_facts, `case ${item.id} required_facts`);
+    if (allowedSourceIds) {
+      for (const sourceId of item.expected_source_ids) {
+        if (!allowedSourceIds.has(sourceId)) {
+          fail(`case ${item.id} references source outside the approved manifest: ${sourceId}`);
+        }
+      }
+    }
     if (item.expected_action === 'answer'
       && (item.expected_source_ids.length === 0 || item.required_facts.length === 0)) {
       fail(`answer case ${item.id} needs expected_source_ids and required_facts`);
     }
     if (!item.gold_review
       || item.gold_review.curriculum_verified !== true
-      || item.gold_review.language_verified !== true) {
-      fail(`case ${item.id} needs curriculum and language gold review`);
+      || item.gold_review.language_verified !== true
+      || typeof item.gold_review.curriculum_reviewer_id !== 'string'
+      || !item.gold_review.curriculum_reviewer_id.trim()
+      || typeof item.gold_review.language_reviewer_id !== 'string'
+      || !item.gold_review.language_reviewer_id.trim()) {
+      fail(`case ${item.id} needs named curriculum and language gold reviewers`);
     }
   }
   return ids;
@@ -110,6 +124,9 @@ function validateObservations(observations, caseIds) {
     if (observedIds.has(item.case_id)) fail(`duplicate observation for case ${item.case_id}`);
     observedIds.add(item.case_id);
     if (typeof item.answer !== 'string') fail(`observation ${item.case_id} needs answer text`);
+    if (typeof item.review?.reviewer_id !== 'string' || !item.review.reviewer_id.trim()) {
+      fail(`observation ${item.case_id} needs an independent output reviewer_id`);
+    }
     assertUniqueStrings(item.retrieved_source_ids, `observation ${item.case_id} retrieved_source_ids`);
     assertUniqueStrings(item.source_card_source_ids, `observation ${item.case_id} source_card_source_ids`);
 
@@ -173,11 +190,20 @@ export function scoreBenchmark({
   cases,
   observations,
   minimumCases = CERTIFICATION_MINIMUM_CASES,
+  allowedSourceIds = null,
+  certificationBlockers = [],
 }) {
   if (!Number.isInteger(minimumCases) || minimumCases < 1) {
     fail('minimumCases must be a positive integer');
   }
-  const caseIds = validateCases(cases);
+  if (!Array.isArray(certificationBlockers)
+    || certificationBlockers.some((item) => typeof item !== 'string' || !item.trim())) {
+    fail('certificationBlockers must be an array of non-empty strings');
+  }
+  if (allowedSourceIds !== null && !(allowedSourceIds instanceof Set)) {
+    fail('allowedSourceIds must be a Set or null');
+  }
+  const caseIds = validateCases(cases, allowedSourceIds);
   const observedIds = validateObservations(observations, caseIds);
   const caseById = new Map(cases.map((item) => [item.id, item]));
   const observationById = new Map(observations.map((item) => [item.case_id, item]));
@@ -246,7 +272,8 @@ export function scoreBenchmark({
     && round(retrievalRecallAt5) === 1
     && round(sourceCardPrecision) === 1
     && round(sourceCardRecall) === 1
-    && criticalFailureCaseIds.size === 0;
+    && criticalFailureCaseIds.size === 0
+    && certificationBlockers.length === 0;
 
   let status = 'complete_below_target';
   if (caseCount === 0) status = 'not_scored';
@@ -266,6 +293,21 @@ export function scoreBenchmark({
     retrieval_recall_at_5: round(retrievalRecallAt5),
     source_card_source_precision: round(sourceCardPrecision),
     source_card_source_recall: round(sourceCardRecall),
+    metric_denominators: {
+      review_coverage: { numerator: observationCount, denominator: caseCount },
+      response_quality_score_10: observationCount,
+      source_card_quality_score_10: observationCount,
+      retrieval_recall_at_5: observationCount,
+      source_card_source_precision: observationCount,
+      source_card_source_recall: observationCount,
+      critical_failure_rate: observationCount,
+      response_review_dimensions: Object.fromEntries(
+        RESPONSE_REVIEW_FIELDS.map((key) => [key, observationCount]),
+      ),
+      source_card_review_dimensions: Object.fromEntries(
+        SOURCE_CARD_REVIEW_FIELDS.map((key) => [key, observationCount]),
+      ),
+    },
     response_review_averages_0_to_5: Object.fromEntries(
       Object.entries(responseDimensions).map(([key, values]) => [key, round(average(values))]),
     ),
@@ -274,6 +316,7 @@ export function scoreBenchmark({
     ),
     critical_failure_count: criticalFailureCaseIds.size,
     critical_failure_case_ids: [...criticalFailureCaseIds].sort(),
+    certification_blockers: [...certificationBlockers],
     target_met: targetMet,
   };
 }
@@ -282,6 +325,7 @@ function parseArgs(args) {
   const options = {
     cases: DEFAULT_CASES,
     observations: DEFAULT_OBSERVATIONS,
+    manifest: DEFAULT_MANIFEST,
     output: null,
     help: false,
   };
@@ -291,7 +335,7 @@ function parseArgs(args) {
       continue;
     } else if (arg === '--help' || arg === '-h') {
       options.help = true;
-    } else if (['--cases', '--observations', '--out'].includes(arg)) {
+    } else if (['--cases', '--observations', '--manifest', '--out'].includes(arg)) {
       const value = args[index + 1];
       if (!value || value.startsWith('--')) fail(`${arg} requires a path`);
       const optionName = arg === '--out' ? 'output' : arg.slice(2);
@@ -323,13 +367,73 @@ async function readDocument(path, arrayKey) {
   return document[arrayKey];
 }
 
+async function readJsonFile(path) {
+  let text;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    fail(`cannot read ${path}: ${error.message}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    fail(`invalid JSON in ${path}: ${error.message}`);
+  }
+}
+
+function getManifestApprovalBlockers(manifest) {
+  const blockers = [];
+  if (manifest?.manifest_status !== 'approved'
+    || !manifest?.approval?.scope_approved_by
+    || !manifest?.approval?.scope_approved_at) {
+    blockers.push('published curriculum scope and source materials are not approved');
+  }
+  if (manifest?.approval?.reviewers_approved !== true) {
+    blockers.push('reviewer assignments are not approved');
+  }
+  if (!Array.isArray(manifest?.reviewer_assignments?.curriculum_reviewers)
+    || manifest.reviewer_assignments.curriculum_reviewers.length === 0) {
+    blockers.push('no curriculum reviewer is assigned');
+  }
+  for (const language of ['en', 'as']) {
+    if (!Array.isArray(manifest?.reviewer_assignments?.language_reviewers?.[language])
+      || manifest.reviewer_assignments.language_reviewers[language].length === 0) {
+      blockers.push(`no ${language} language reviewer is assigned`);
+    }
+  }
+  if (typeof manifest?.reviewer_assignments?.independent_output_reviewer !== 'string'
+    || !manifest.reviewer_assignments.independent_output_reviewer.trim()) {
+    blockers.push('no independent output reviewer is assigned');
+  }
+  if (!['local', 'staging'].includes(manifest?.reviewer_assignments?.output_run_environment)) {
+    blockers.push('no local or staging output review environment is recorded');
+  }
+  return blockers;
+}
+
+function summarizeManifest(manifest) {
+  const summary = manifest?.inventory_summary ?? {};
+  return {
+    status: manifest?.manifest_status ?? 'missing',
+    snapshot_date: manifest?.snapshot_date ?? null,
+    approval: manifest?.approval ?? null,
+    supported_languages: manifest?.supported_languages?.map(({ code }) => code) ?? [],
+    scope_count: summary.board_class_stream_subject_scopes ?? 0,
+    published_chapter_count: summary.published_chapters ?? 0,
+    english_evidence_chapter_count: summary.chapters_with_english_evidence ?? 0,
+    assamese_evidence_chapter_count: summary.chapters_with_assamese_evidence ?? 0,
+    reviewer_assignments: manifest?.reviewer_assignments ?? null,
+  };
+}
+
 const HELP = `Local Chat RAG benchmark scorer (offline; makes no HTTP or AI-provider calls)
 
 Usage:
   pnpm --filter syrabit-api eval:chat-rag
   pnpm --filter syrabit-api eval:chat-rag -- --cases path/to/cases.json --observations path/to/observations.json --out report.json
 
-The default benchmark files are apps/api/evals/chat-rag/cases.json and observations.json.
+The default benchmark files are apps/api/evals/chat-rag/cases.json, observations.json,
+and manifest.json. Use --manifest to score against another approved manifest.
 Certification requires at least ${CERTIFICATION_MINIMUM_CASES} curriculum-reviewed cases.
 `;
 
@@ -339,11 +443,26 @@ async function main(args = process.argv.slice(2)) {
     console.log(HELP);
     return;
   }
-  const [cases, observations] = await Promise.all([
+  const [cases, observations, manifest] = await Promise.all([
     readDocument(options.cases, 'cases'),
     readDocument(options.observations, 'observations'),
+    readJsonFile(options.manifest),
   ]);
-  const report = scoreBenchmark({ cases, observations });
+  const scopeApproved = manifest?.manifest_status === 'approved'
+    && Boolean(manifest?.approval?.scope_approved_by)
+    && Boolean(manifest?.approval?.scope_approved_at);
+  const allowedSourceIds = scopeApproved
+    ? new Set((manifest.scopes ?? []).flatMap((scope) => scope.sources ?? [])
+      .map((source) => source.source_id))
+    : new Set();
+  const report = scoreBenchmark({
+    cases,
+    observations,
+    allowedSourceIds,
+    certificationBlockers: getManifestApprovalBlockers(manifest),
+  });
+  report.report_date = new Date().toISOString().slice(0, 10);
+  report.corpus_scope = summarizeManifest(manifest);
   const json = `${JSON.stringify(report, null, 2)}\n`;
   if (options.output) await writeFile(options.output, json, 'utf8');
   console.log(json.trimEnd());

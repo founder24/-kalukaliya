@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildStaffChapterCreateTopics,
   buildStaffChapterPatchPayload,
   normalizeStaffChapterCreateStatus,
 } from './staffChapterPayload';
@@ -22,5 +23,11 @@ describe('Staff chapter write payloads', () => {
     expect(normalizeStaffChapterCreateStatus('published', false)).toBe('draft');
     expect(normalizeStaffChapterCreateStatus('draft', false)).toBe('draft');
     expect(normalizeStaffChapterCreateStatus('published', true)).toBe('published');
+  });
+
+  it('serializes initial topic titles for the chapter-create API', () => {
+    expect(buildStaffChapterCreateTopics(['  Cell structure ', '', ' ', 'Mitosis']))
+      .toEqual([{ title: 'Cell structure' }, { title: 'Mitosis' }]);
+    expect(buildStaffChapterCreateTopics(null)).toEqual([]);
   });
 });

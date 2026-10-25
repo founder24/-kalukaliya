@@ -4,7 +4,10 @@ import { toast } from 'sonner';
 import axios from 'axios';
 import { isDegreeBoard } from '@/utils/courseTypes';
 import { API, authHeaders, autoSlug } from '@/utils/adminHelpers';
-import { buildStaffChapterPatchPayload } from '@/utils/staffChapterPayload';
+import {
+  buildStaffChapterCreateTopics,
+  buildStaffChapterPatchPayload,
+} from '@/utils/staffChapterPayload';
 
 import ContentViewerPopup from './content-editor/ContentViewerPopup';
 import InlineCreator from './content-editor/InlineCreator';
@@ -272,8 +275,26 @@ export default function AdminContentEditor({ adminToken, user, onNavigate, hubCo
     setSaving(true);
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
-      const topics = (contentForm.topics || []).filter(Boolean);
-      const createPayload = { subject_id: selSubject, title: contentForm.title, title_as: contentForm.title_as, slug, slug_as: contentForm.slug_as, meta_description: contentForm.meta_description || contentForm.description, meta_description_as: contentForm.meta_description_as, keywords: contentForm.keywords, content: contentForm.notes_en || contentForm.content, notes_en: contentForm.notes_en, notes_as: contentForm.notes_as, content_as: contentForm.notes_as || contentForm.content_as, qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as, content_type: contentForm.content_type, chapter_number: Number(contentForm.order) || undefined, status: 'draft', published_topics: topics.map(title => ({ title })) };
+      const createPayload = {
+        subject_id: selSubject,
+        title: contentForm.title,
+        title_as: contentForm.title_as,
+        slug,
+        slug_as: contentForm.slug_as,
+        meta_description: contentForm.meta_description || contentForm.description,
+        meta_description_as: contentForm.meta_description_as,
+        keywords: contentForm.keywords,
+        content: contentForm.notes_en || contentForm.content,
+        notes_en: contentForm.notes_en,
+        notes_as: contentForm.notes_as,
+        content_as: contentForm.notes_as || contentForm.content_as,
+        qa_text_en: contentForm.qa_text_en,
+        qa_text_as: contentForm.qa_text_as,
+        content_type: contentForm.content_type,
+        chapter_number: Number(contentForm.order) || undefined,
+        status: 'draft',
+        topics: buildStaffChapterCreateTopics(contentForm.topics),
+      };
       await axios.post(`${API}/staff/content/chapters`, createPayload, authHeaders(adminToken));
       toast.success('Chapter created successfully'); setEditView(null); setContentForm({ title: '', title_as: '', slug: '', slug_as: '', description: '', meta_description: '', meta_description_as: '', keywords: '', notes_en: '', notes_as: '', content: '', content_type: 'notes', order: 1, topics: [], content_as: '', rag_text_en: '', rag_text_as: '', qa_text_en: '', qa_text_as: '', qa_rag_text_en: '', qa_rag_text_as: '', pyq_pdf_url: '' }); setChapterStats(null); refreshChapters(selSubject);
     } catch (error) { toast.error(error?.response?.data?.detail || 'Failed to create chapter'); }
@@ -285,13 +306,11 @@ export default function AdminContentEditor({ adminToken, user, onNavigate, hubCo
     setSaving(true);
     try {
       const slug = contentForm.slug || autoSlug(contentForm.title);
-      const topics = (contentForm.topics || []).filter(Boolean);
       // Only send fields staff can edit; RAG data remains outside this form.
       const updatePayload = buildStaffChapterPatchPayload({ title: contentForm.title, title_as: contentForm.title_as || '', slug, slug_as: contentForm.slug_as || '', meta_description: contentForm.meta_description ?? contentForm.description ?? '', meta_description_as: contentForm.meta_description_as || '', keywords: contentForm.keywords || '', content_type: contentForm.content_type, chapter_number: Number(contentForm.order) || undefined,
         content_en: contentForm.notes_en, content_as: contentForm.notes_as,
         notes_en: contentForm.notes_en, notes_as: contentForm.notes_as,
-        qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as,
-        published_topics: topics.map(title => ({ title })) });
+        qa_text_en: contentForm.qa_text_en, qa_text_as: contentForm.qa_text_as });
       if (!force) updatePayload.version = contentForm.version ?? 0;
       const res = await axios.patch(`${API}/staff/content/chapter/${editTarget.id}`, updatePayload, authHeaders(adminToken));
       const newVersion = res.data?.version ?? (contentForm.version + 1);

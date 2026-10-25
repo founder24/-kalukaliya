@@ -15,7 +15,12 @@ function makeBenchmark(count = 100) {
       expected_action: 'answer',
       expected_source_ids: [sourceId],
       required_facts: [`fact-${index + 1}`],
-      gold_review: { curriculum_verified: true, language_verified: true },
+      gold_review: {
+        curriculum_verified: true,
+        language_verified: true,
+        curriculum_reviewer_id: 'curriculum-reviewer',
+        language_reviewer_id: 'language-reviewer',
+      },
     });
     observations.push({
       case_id: id,
@@ -23,6 +28,7 @@ function makeBenchmark(count = 100) {
       retrieved_source_ids: [sourceId],
       source_card_source_ids: [sourceId],
       review: {
+        reviewer_id: 'independent-output-reviewer',
         response: {
           grounding: 5,
           relevance: 5,
@@ -62,6 +68,15 @@ describe('local Chat RAG benchmark scorer', () => {
       critical_failure_count: 0,
       target_met: true,
     });
+    expect(report.metric_denominators).toMatchObject({
+      review_coverage: { numerator: 100, denominator: 100 },
+      response_quality_score_10: 100,
+      source_card_quality_score_10: 100,
+      retrieval_recall_at_5: 100,
+      source_card_source_precision: 100,
+      source_card_source_recall: 100,
+      critical_failure_rate: 100,
+    });
   });
 
   it('reports retrieval misses and critical grounding errors without certifying', () => {
@@ -88,7 +103,31 @@ describe('local Chat RAG benchmark scorer', () => {
     expect(report.status).toBe('not_scored');
     expect(report.response_quality_score_10).toBeNull();
     expect(report.source_card_quality_score_10).toBeNull();
+    expect(report.metric_denominators.review_coverage).toEqual({
+      numerator: 0,
+      denominator: 0,
+    });
+    expect(report.metric_denominators.response_quality_score_10).toBe(0);
     expect(report.target_met).toBe(false);
+  });
+
+  it('never certifies a perfect score while manifest approval blockers remain', () => {
+    const report = scoreBenchmark({
+      ...makeBenchmark(),
+      certificationBlockers: ['scope approval missing'],
+    });
+
+    expect(report.response_quality_score_10).toBe(10);
+    expect(report.status).toBe('complete_below_target');
+    expect(report.certification_blockers).toEqual(['scope approval missing']);
+    expect(report.target_met).toBe(false);
+  });
+
+  it('rejects gold sources outside the approved manifest', () => {
+    expect(() => scoreBenchmark({
+      ...makeBenchmark(1),
+      allowedSourceIds: new Set(['chapter-approved']),
+    })).toThrow(/outside the approved manifest/);
   });
 
   it('keeps small, fully reviewed sets as pilots rather than certification', () => {

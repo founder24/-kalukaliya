@@ -251,25 +251,31 @@ export default function ChapterEditForm({
           </div>
         </div>
 
-        <div className="flex-shrink-0">
-          <label className="text-xs text-gray-500 block mb-1">Topics <span className="text-gray-400">(comma-separated)</span></label>
-          <input
-            value={(contentForm.topics || []).join(', ')}
-            onChange={(e) => setContentForm(f => ({ ...f, topics: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }))}
-            placeholder="e.g. Photosynthesis, Carbon cycle"
-            className="w-full h-10 px-3.5 rounded-lg text-sm text-gray-900 bg-gray-50 border border-gray-200 outline-none focus:border-violet-500 transition-colors"
-          />
-          {(contentForm.topics || []).length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {contentForm.topics.map((topic, i) => (
-                <span key={i} className="px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-500/20 flex items-center gap-1">
-                  {topic}
-                  <button onClick={() => setContentForm(f => ({ ...f, topics: f.topics.filter((_, j) => j !== i) }))} className="text-gray-400 hover:text-red-400 transition-colors">×</button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        {editView === 'edit-chapter' ? (
+          <div className="flex-shrink-0 rounded-lg border border-violet-200 bg-violet-50/60 p-3" data-testid="chapter-topic-cards-guidance">
+            <label className="text-xs font-medium text-gray-800 block mb-1">Topic answer cards</label>
+            <p className="text-xs text-gray-600">
+              {(contentForm.topics || []).length
+                ? `This chapter has ${contentForm.topics.length} topic card${contentForm.topics.length === 1 ? '' : 's'}.`
+                : 'This chapter has no topic cards yet.'}
+              {' '}They are saved separately to protect their answers and review status. Save chapter edits first, then use “Manage question answer cards” from the chapter list to edit them.
+            </p>
+          </div>
+        ) : (
+          <div className="flex-shrink-0">
+            <label className="text-xs text-gray-500 block mb-1">Topic titles <span className="text-gray-400">(comma-separated)</span></label>
+            <input
+              value={(contentForm.topics || []).join(', ')}
+              onChange={(e) => setContentForm(f => ({ ...f, topics: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }))}
+              placeholder="e.g. Photosynthesis, Carbon cycle"
+              className="w-full h-10 px-3.5 rounded-lg text-sm text-gray-900 bg-gray-50 border border-gray-200 outline-none focus:border-violet-500 transition-colors"
+              data-testid="chapter-initial-topic-titles"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              New titles are saved as draft topic cards. Add their answers and source details from the chapter list after saving.
+            </p>
+          </div>
+        )}
 
         {chapterStats && (
           <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[11px] flex-wrap">

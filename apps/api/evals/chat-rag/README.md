@@ -4,15 +4,19 @@ This benchmark separates answer quality from source-card quality. The scorer rea
 
 The repository starts with empty case and observation files. There is no approved curriculum gold set in the local fixtures, so the initial report is **not scored**. Do not fill the set with guessed source IDs or the existing three keyword-smoke questions. Each gold case needs curriculum and language review before it can count.
 
-## Current prerequisite: approved evidence and reviewers
+## Approval gate and curriculum inventory
 
-The 100-case corpus is intentionally blocked until its evidence and review scope are explicitly approved. This repository currently contains no evaluation-specific approval manifest listing curriculum materials and canonical evidence identifiers, and no reviewer assignment for the required case and output reviews. Authoring cases or observations before those inputs exist would require guessing, so `cases.json` and `observations.json` must remain empty and the scorer must report `not_scored`.
+`manifest.json` is a dated production-curriculum inventory prepared for approval, not an approved evaluation scope. It contains published chapter metadata and canonical IDs only; the inventory query did not read chat or conversation records. It excludes chapters whose chapter, subject, or hierarchy parent is unpublished. Canonical IDs use `chapter:<chapters.id>`; included RAG material is limited to chapter notes, Q&A, and published topic-card text that the current indexer can retrieve.
+
+The read-only D1 refresh on 2026-10-25 confirms 35 board/class/stream/subject strata and 213 published chapters (114 AHSEC, 99 Degree). The product supports English (`en`) and Assamese (`as`) responses. Chapter notes/RAG fields are present in 204 chapters for English and 47 for Assamese; Q&A appears in 16/17 chapters respectively, and published topic-card text in 101/14. These source-family counts overlap and describe available material, not reviewer approval or gold-set coverage. File-only PYQ material is excluded because the current RAG indexer does not index it.
+
+The 100+ case corpus remains blocked while `manifest.json` has `manifest_status: "pending_approval"` and reviewer assignments are empty. Keep `cases.json` and `observations.json` empty until the exact scope, source materials, and named reviewers have been approved.
 
 Before populating either file:
 
-1. Approve the exact curriculum materials, canonical source identifiers, board/class/subject scope, and evaluation languages for this benchmark. Do not infer approval from material merely being present in the product.
-2. Assign reviewers with capacity to verify curriculum correctness and language quality for at least 100 authored answer, clarify, and abstain cases.
-3. Specify a local or staging run and an independent reviewer with capacity to assess both response quality and source-card quality. Do not use production traffic.
+1. Approve the exact curriculum materials, canonical source identifiers, board/class/subject scope, and evaluation languages in the manifest. Do not infer approval from material merely being present in the product.
+2. Record named curriculum reviewers, English and Assamese language reviewers, and an independent output reviewer; then record the approval and the local or staging review environment.
+3. Do not use production traffic or private student conversations.
 
 ## Add a reviewed case
 
@@ -33,7 +37,9 @@ Append an object to `cases.json`:
   },
   "gold_review": {
     "curriculum_verified": true,
-    "language_verified": true
+    "language_verified": true,
+    "curriculum_reviewer_id": "assigned-reviewer",
+    "language_reviewer_id": "assigned-reviewer"
   }
 }
 ```
@@ -51,6 +57,7 @@ Append one observation per case to `observations.json`. `retrieved_source_ids` m
   "retrieved_source_ids": ["chapter:<verified-id>"],
   "source_card_source_ids": ["chapter:<verified-id>"],
   "review": {
+    "reviewer_id": "independent-output-reviewer",
     "response": {
       "grounding": 5,
       "relevance": 5,
@@ -86,3 +93,7 @@ pnpm --filter syrabit-api test:chat-rag-eval
 The scorer reports response quality, source-card quality, Recall@5, source-card source precision/recall, review coverage, and critical-failure case IDs. A score is provisional until **100 or more** reviewed cases and matching reviewed observations are present.
 
 The 10/10 target is met only when the complete 100+ case set has response and source-card scores of 10.00, Recall@5 and source precision/recall are 1.00, and there are no critical failures. A smaller set may show pilot scores but can never certify the target.
+
+The scorer reads the manifest by default, reports exact case denominators and the dated curriculum snapshot, and blocks certification while scope or reviewer approvals are incomplete. After scope approval, every expected source ID must exist in that manifest.
+
+The current inventory and blocked run are recorded in `manifest.json` and `report-2026-10-25.json`. Re-run the scorer with `--out` after each reviewed local or staging evaluation to produce a fresh dated report.

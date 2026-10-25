@@ -1,0 +1,93 @@
+{
+  "benchmark": "chat-rag",
+  "status": "not_scored",
+  "certification_minimum_cases": 100,
+  "case_count": 0,
+  "reviewed_observation_count": 0,
+  "review_coverage": 0,
+  "response_quality_score_10": null,
+  "source_card_quality_score_10": null,
+  "retrieval_recall_at_5": null,
+  "source_card_source_precision": null,
+  "source_card_source_recall": null,
+  "metric_denominators": {
+    "review_coverage": {
+      "numerator": 0,
+      "denominator": 0
+    },
+    "response_quality_score_10": 0,
+    "source_card_quality_score_10": 0,
+    "retrieval_recall_at_5": 0,
+    "source_card_source_precision": 0,
+    "source_card_source_recall": 0,
+    "critical_failure_rate": 0,
+    "response_review_dimensions": {
+      "grounding": 0,
+      "relevance": 0,
+      "completeness": 0,
+      "curriculum_scope": 0,
+      "language_clarity": 0,
+      "behavior": 0
+    },
+    "source_card_review_dimensions": {
+      "passage_fidelity": 0,
+      "hierarchy_accuracy": 0,
+      "confidence_honesty": 0,
+      "navigation": 0
+    }
+  },
+  "response_review_averages_0_to_5": {
+    "grounding": null,
+    "relevance": null,
+    "completeness": null,
+    "curriculum_scope": null,
+    "language_clarity": null,
+    "behavior": null
+  },
+  "source_card_review_averages_0_to_5": {
+    "passage_fidelity": null,
+    "hierarchy_accuracy": null,
+    "confidence_honesty": null,
+    "navigation": null
+  },
+  "critical_failure_count": 0,
+  "critical_failure_case_ids": [],
+  "certification_blockers": [
+    "published curriculum scope and source materials are not approved",
+    "reviewer assignments are not approved",
+    "no curriculum reviewer is assigned",
+    "no en language reviewer is assigned",
+    "no as language reviewer is assigned",
+    "no independent output reviewer is assigned",
+    "no local or staging output review environment is recorded"
+  ],
+  "target_met": false,
+  "report_date": "2026-10-25",
+  "corpus_scope": {
+    "status": "pending_approval",
+    "snapshot_date": "2026-10-25",
+    "approval": {
+      "scope_approved_by": null,
+      "scope_approved_at": null,
+      "reviewers_approved": false
+    },
+    "supported_languages": [
+      "en",
+      "as"
+    ],
+    "scope_count": 35,
+    "published_chapter_count": 213,
+    "english_evidence_chapter_count": 204,
+    "assamese_evidence_chapter_count": 47,
+    "reviewer_assignments": {
+      "curriculum_reviewers": [],
+      "language_reviewers": {
+        "en": [],
+        "as": []
+      },
+      "independent_output_reviewer": null,
+      "output_run_environment": null,
+      "approval_status": "pending"
+    }
+  }
+}

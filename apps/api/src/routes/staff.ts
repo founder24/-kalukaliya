@@ -1005,6 +1005,14 @@ staffRouter.post('/content/chapters', async (c) => {
   if ('status' in body && (!CHAPTER_STATUSES.has(String(body.status)))) return c.json({ detail: 'Invalid chapter status' }, 422);
   if ('content_type' in body && (!CHAPTER_TYPES.has(String(body.content_type)))) return c.json({ detail: 'Invalid chapter content type' }, 422);
   if ('chapter_number' in body && !validChapterNumber(body.chapter_number)) return c.json({ detail: 'chapter_number must be a positive integer' }, 422);
+  if (Array.isArray(body.topics) && body.topics.some(entry => {
+    const source = typeof entry === 'string'
+      ? { title: entry }
+      : entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? entry as Record<string, unknown>
+        : null;
+    return typeof source?.title === 'string' && source.title.trim().length > 300;
+  })) return c.json({ detail: 'Topic titles must be 300 characters or fewer' }, 422);
   const subject = await db.select({ id: subjects.id }).from(subjects).where(eq(subjects.id, subjectId)).get();
   if (!subject) return c.json({ detail: 'Subject not found' }, 404);
   let chapterNumber = validChapterNumber(body['chapter_number']) ? body['chapter_number'] : undefined;
@@ -1017,6 +1025,7 @@ staffRouter.post('/content/chapters', async (c) => {
 
   const slug = makeSlug(String(body['slug'] ?? title));
   const id   = crypto.randomUUID();
+  const initialTopics = createDraftTopics(body.topics);
 
   await db.insert(chapters).values({
     id, title, titleAs: typeof body.title_as === 'string' ? body.title_as.trim() || null : null,
@@ -1034,11 +1043,11 @@ staffRouter.post('/content/chapters', async (c) => {
     ragTextAs: typeof body.rag_text_as === 'string' ? body.rag_text_as : null,
     ragSectionsEn: Array.isArray(body.rag_sections_en) ? JSON.stringify(body.rag_sections_en) : '[]',
     ragSectionsAs: Array.isArray(body.rag_sections_as) ? JSON.stringify(body.rag_sections_as) : '[]',
-    publishedTopics: Array.isArray(body.topics) ? JSON.stringify(body.topics) : '[]',
+    publishedTopics: JSON.stringify(initialTopics),
     qaEn: Array.isArray(body.qa_en) ? JSON.stringify(body.qa_en) : (typeof body.qa_rag_text_en === 'string' || typeof body.qa_text_en === 'string' ? JSON.stringify([{ content: body.qa_rag_text_en ?? body.qa_text_en ?? '' }]) : '[]'),
     qaAs: Array.isArray(body.qa_as) ? JSON.stringify(body.qa_as) : (typeof body.qa_rag_text_as === 'string' || typeof body.qa_text_as === 'string' ? JSON.stringify([{ content: body.qa_rag_text_as ?? body.qa_text_as ?? '' }]) : '[]'),
     pyqPdfUrl: null,
-    ragUpdatedAt: ['notes_en', 'notes_as', 'content', 'content_as', 'rag_text_en', 'rag_text_as', 'rag_sections_en', 'rag_sections_as', 'qa_en', 'qa_as', 'qa_text_en', 'qa_text_as', 'qa_rag_text_en', 'qa_rag_text_as'].some(key => key in body) ? now : null,
+    ragUpdatedAt: ['notes_en', 'notes_as', 'content', 'content_as', 'rag_text_en', 'rag_text_as', 'rag_sections_en', 'rag_sections_as', 'qa_en', 'qa_as', 'qa_text_en', 'qa_text_as', 'qa_rag_text_en', 'qa_rag_text_as', 'topics'].some(key => key in body) ? now : null,
     createdAt: now, updatedAt: now,
   });
 
@@ -1618,6 +1627,36 @@ type Topic = {
   [key: string]: unknown;
 };
 type RagScope = 'notes' | 'qa' | 'pyq';
+
+function createDraftTopics(value: unknown): Topic[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): Topic[] => {
+    const source = typeof entry === 'string'
+      ? { title: entry }
+      : entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? entry as Record<string, unknown>
+        : null;
+    const title = typeof source?.title === 'string' ? source.title.trim() : '';
+    if (!title || title.length > 300) return [];
+
+    const text = (key: string) => {
+      const field = source?.[key];
+      return typeof field === 'string' ? field : '';
+    };
+    return [{
+      id: crypto.randomUUID(),
+      title,
+      title_as: text('title_as').trim(),
+      topic_slug: text('topic_slug').trim(),
+      topic_slug_as: text('topic_slug_as').trim(),
+      definition: text('definition'),
+      definition_as: text('definition_as'),
+      content: text('content'),
+      content_as: text('content_as'),
+      status: 'draft',
+    }];
+  });
+}
 
 export async function runRagJob(env: Env, jobId: string): Promise<void> {
   const token = crypto.randomUUID();

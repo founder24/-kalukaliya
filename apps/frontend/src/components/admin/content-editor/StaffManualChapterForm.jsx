@@ -45,7 +45,6 @@ export default function StaffManualChapterForm({
 }) {
   const [activeTab, setActiveTab] = useState('info');
   const update = (field, value) => setContentForm(previous => ({ ...previous, [field]: value }));
-  const topicsValue = Array.isArray(contentForm.topics) ? contentForm.topics.join(', ') : '';
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-white" data-testid="staff-manual-chapter-form">
@@ -152,15 +151,30 @@ export default function StaffManualChapterForm({
               </Field>
             </div>
 
-            <Field label="Topics (comma-separated)">
-              <input
-                value={topicsValue}
-                onChange={(event) => update('topics', event.target.value.split(',').map(topic => topic.trim()).filter(Boolean))}
-                className={inputClass}
-                placeholder="e.g. Photosynthesis, Carbon cycle"
-                data-testid="staff-chapter-topics"
-              />
-            </Field>
+            {editView === 'edit-chapter' ? (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3" data-testid="staff-chapter-topic-guidance">
+                <p className="text-xs font-medium text-gray-800">Topic answer cards are managed separately.</p>
+                <p className="mt-1 text-xs text-gray-600">
+                  {Array.isArray(contentForm.topics) && contentForm.topics.length
+                    ? `This chapter has ${contentForm.topics.length} topic card${contentForm.topics.length === 1 ? '' : 's'}.`
+                    : 'This chapter has no topic cards yet.'}
+                  {' '}Save chapter edits first, then use “Manage question answer cards” from the chapter list to edit them.
+                </p>
+              </div>
+            ) : (
+              <Field label="Topic titles (comma-separated)">
+                <input
+                  value={Array.isArray(contentForm.topics) ? contentForm.topics.join(', ') : ''}
+                  onChange={(event) => update('topics', event.target.value.split(',').map(topic => topic.trim()).filter(Boolean))}
+                  className={inputClass}
+                  placeholder="e.g. Photosynthesis, Carbon cycle"
+                  data-testid="staff-chapter-topics"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  New titles are saved as draft topic cards. Add their answers and source details from the chapter list after saving.
+                </p>
+              </Field>
+            )}
           </div>
         )}
 
