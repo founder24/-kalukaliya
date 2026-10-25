@@ -22,20 +22,21 @@ import Analytics from '@/utils/analytics';
 import { injectAdScript } from '@/utils/adScriptRegistry';
 import { shouldCollapseEmptyAdSlot } from '@/utils/emptyAdSlotPolicy';
 
-// AdSense queue pushes are also session-scoped. The module survives React
-// unmounts caused by ChapterPage tab switches, but is recreated on a full
-// browser page visit. Keying by the actual slot ID (rather than placement)
-// also protects against multiple in-content components sharing one unit.
-const _pushedAdsenseSlotIds = new Set();
+// Track the actual rendered element, not its provider slot ID. Distinct
+// placements can temporarily share a unit while ad ops replaces duplicate
+// IDs; de-duping by ID silently prevented every later placement from making
+// its AdSense request. A WeakSet still prevents re-queueing the same element
+// if its effect is re-run, without retaining unmounted DOM nodes.
+const _pushedAdsenseSlots = new WeakSet();
 
-function pushAdsenseSlot(slotId) {
-  if (!slotId || _pushedAdsenseSlotIds.has(slotId)) return;
+function pushAdsenseSlot(slot) {
+  if (!slot || _pushedAdsenseSlots.has(slot)) return;
 
   try {
     (window.adsbygoogle = window.adsbygoogle || []).push({});
-    // Only remember the ID after push succeeds. A transient or hostile
-    // replacement of the global can therefore retry safely on a later mount.
-    _pushedAdsenseSlotIds.add(slotId);
+    // Only remember the element after push succeeds so a failed queue
+    // operation can retry safely on a later effect run.
+    _pushedAdsenseSlots.add(slot);
   } catch {
     /* ignore */
   }
@@ -102,7 +103,7 @@ export default function AdSlot({ placement, className = '', style = {} }) {
     // safe to call before the script tag has executed. Wrapped in a
     // try/catch purely as a defensive guard against a hostile global.
     if (cfg.network === 'adsense') {
-      pushAdsenseSlot(cfg.slotId);
+      pushAdsenseSlot(ref.current?.querySelector('ins.adsbygoogle'));
     }
   }, [shouldLoad, cfg.enabled, cfg.scriptUrl, cfg.network, cfg.publisherId, cfg.slotId, cfg.crossorigin]);
 

@@ -38,7 +38,7 @@ describe('AdSlot AdSense queue protection', () => {
     document.head.innerHTML = '';
   });
 
-  it('does not re-queue Notes after a rapid Notes → Q&A → PYQ → Notes sequence', async () => {
+  it('re-queues a slot when its tab unmounts and later creates a new element', async () => {
     const push = vi.spyOn(window.adsbygoogle, 'push');
     const notes = render(<AdSlot placement="chapter.notes.top" />);
 
@@ -54,10 +54,10 @@ describe('AdSlot AdSense queue protection', () => {
     pyq.unmount();
 
     render(<AdSlot placement="chapter.notes.top" />);
-    await waitFor(() => expect(push).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(4));
   });
 
-  it('does not queue duplicate in-content instances that share a slot ID', async () => {
+  it('queues each distinct ad element even when placements share a slot ID', async () => {
     const push = vi.spyOn(window.adsbygoogle, 'push');
 
     render(
@@ -67,6 +67,6 @@ describe('AdSlot AdSense queue protection', () => {
       </>,
     );
 
-    await waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(2));
   });
 });
