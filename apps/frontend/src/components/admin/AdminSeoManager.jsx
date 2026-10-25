@@ -15,6 +15,7 @@ import PipelineTab from './seo-manager/PipelineTab';
 import QualityTab from './seo-manager/QualityTab';
 import SchedulePanel from './seo-manager/SchedulePanel';
 import TopicDiscoveryTab from './seo-manager/TopicDiscoveryTab';
+import TopicTrafficTab from './seo-manager/TopicTrafficTab';
 import RemediationTab from './seo-manager/RemediationTab';
 import EntitySeoTab from './seo-manager/EntitySeoTab';
 import useSeoManager from './seo-manager/useSeoManager';
@@ -28,6 +29,7 @@ export default function AdminSeoManager({ adminToken, onNavigate }) {
     { id: 'review',   label: '🔍 Review',  count: s.reviewQueue.length || null },
     { id: 'pages',    label: 'SEO Pages',  count: s.pages.length },
     { id: 'topics',   label: 'Topics',     count: s.topics.length },
+    { id: 'traffic',  label: 'Topic Traffic', count: null },
     { id: 'insights', label: '✦ Insights', count: s.insights?.insights?.length ?? null },
     { id: 'generate', label: 'Generate',   count: null },
     { id: 'pilot',    label: 'Pilot',      count: null },
@@ -128,6 +130,10 @@ export default function AdminSeoManager({ adminToken, onNavigate }) {
             handleDeleteTopic={s.handleDeleteTopic} onUpdateTopic={s.handleUpdateTopic} hubCtx={s.hubCtx}
             scopeSubjectOnly={s.scopeSubjectOnly} setScopeSubjectOnly={s.setScopeSubjectOnly}
             onNavigate={onNavigate} setTab={s.setTab} />
+        )}
+
+        {s.tab === 'traffic' && (
+          <TopicTrafficTab adminToken={adminToken} />
         )}
 
         {s.tab === 'insights' && (

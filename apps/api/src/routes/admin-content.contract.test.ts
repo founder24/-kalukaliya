@@ -124,6 +124,177 @@ function adminRequest(pathname: string, method = 'GET', body?: unknown): Request
 }
 
 describe('Worker-native admin publishing and seed dispatch', () => {
+  it('reports topic candidates and keeps observed discovery separate from unavailable source metrics', async () => {
+    const topicDefinition = Array.from({ length: 45 }, (_, index) => `evidence${index}`).join(' ');
+    const topicPath = '/board/class/physics/topic-evidence/topic/verified-measures';
+    await env.DB.prepare(`
+      INSERT INTO chapters (id, subject_id, title, slug, status, published_topics)
+      VALUES (?, 'subject', 'Topic evidence chapter', 'topic-evidence', 'published', ?)
+    `).bind('topic-traffic-contract', JSON.stringify([{
+      id: 'verified-measures',
+      title: 'Verified measures',
+      topic_slug: 'verified-measures',
+      definition_status: 'ok',
+      definition: topicDefinition,
+    }, {
+      id: 'legacy-measure',
+      title: 'Legacy measure',
+      topic_slug: 'legacy-measure',
+      definition_status: 'ok',
+      definition: topicDefinition.replace('evidence0', 'legacy0'),
+    }])).run();
+
+    const createdAt = Math.floor(Date.now() / 1000);
+    const legacyPath = '/board/class/physics/topic-evidence/topic/legacy-measure';
+    const events: Array<{
+      id: string;
+      sessionId: string;
+      referrer: string;
+      userAgent: string;
+      isSessionEntry: boolean;
+      path?: string;
+    }> = [
+      ...Array.from({ length: 10 }, (_, index) => ({
+        id: `topic-traffic-organic-${index}`,
+        sessionId: `topic-traffic-organic-session-${index}`,
+        referrer: 'https://www.google.com/search?q=verified',
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+        isSessionEntry: true,
+      })),
+      {
+        id: 'topic-traffic-ai',
+        sessionId: 'topic-traffic-ai-session',
+        referrer: 'https://www.perplexity.ai/',
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+        isSessionEntry: true,
+      },
+      {
+        id: 'topic-traffic-ua-only-bot',
+        sessionId: 'topic-traffic-ua-only-session',
+        referrer: 'https://www.google.com/',
+        userAgent: 'Googlebot/2.1',
+        isSessionEntry: true,
+      },
+      {
+        id: 'topic-traffic-non-entry',
+        sessionId: 'topic-traffic-non-entry-session',
+        referrer: 'https://www.google.com/',
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+        isSessionEntry: false,
+      },
+      {
+        id: 'topic-traffic-legacy-no-entry-marker',
+        sessionId: 'topic-traffic-legacy-session',
+        referrer: 'https://www.google.com/',
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+        isSessionEntry: false,
+        path: legacyPath,
+      },
+    ];
+    await env.DB.batch(events.map(event => env.DB.prepare(`
+      INSERT INTO analytics_events
+        (id, event_name, event_subtype, classification, payload, route_path, created_at)
+      VALUES (?, 'page-view', 'page_view', 'optional_analytics', ?, ?, ?)
+    `).bind(
+      event.id,
+      JSON.stringify({
+        path: event.path ?? topicPath,
+        session_id: event.sessionId,
+        referrer: event.referrer,
+        user_agent: event.userAgent,
+        is_session_entry: event.isSessionEntry,
+        analytics_consent: 'granted',
+      }),
+      event.path ?? topicPath,
+      createdAt,
+    )));
+
+    const unauthorized = await workerFetch(new Request('http://worker/api/v1/admin/seo/topic-traffic'));
+    expect(unauthorized.status).toBe(401);
+
+    const response = await workerFetch(adminRequest('/api/v1/admin/seo/topic-traffic?page=1&page_size=20'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    const report = await response.json() as {
+      inventory: { version: string; candidate_url_count: number; eligible_url_count: number; excluded_url_count: number };
+      topics: Array<{
+        canonical_path: string | null;
+        eligible: boolean;
+        language: string;
+        metrics: {
+          daily: Array<Record<string, unknown>>;
+          rolling_7d: Record<string, unknown>;
+          search_console: Record<string, unknown>;
+          crawler_response_outcomes: Record<string, unknown>;
+        };
+      }>;
+      source_coverage: Record<string, Record<string, unknown>>;
+    };
+    expect(report.inventory.version).toBe('topic-url-inventory-v1');
+    expect(report.inventory.candidate_url_count).toBeGreaterThanOrEqual(2);
+    expect(report.inventory.eligible_url_count).toBeGreaterThanOrEqual(1);
+    expect(report.inventory.excluded_url_count).toBeGreaterThanOrEqual(1);
+
+    const english = report.topics.find(topic => topic.canonical_path === topicPath);
+    expect(english?.eligible).toBe(true);
+    expect(english?.language).toBe('en');
+    const currentDay = english?.metrics.daily.at(-1);
+    expect(currentDay).toMatchObject({
+      page_view_events: 13,
+      site_sessions: 13,
+      organic_search_landings: 10,
+      ai_referral_landings: 1,
+      human_discovery_visits: 11,
+      human_target_status: 'in_progress',
+      server_page_requests: null,
+      verified_crawler_fetches: null,
+      crawler_target_per_day: 10,
+    });
+    expect(english?.metrics.rolling_7d).toMatchObject({
+      page_view_events: 13,
+      site_sessions: 13,
+      organic_search_landings: 10,
+      ai_referral_landings: 1,
+      human_discovery_visits: 11,
+      human_target_status: 'not_available',
+      verified_crawler_fetches: null,
+      crawler_target_status: 'not_available',
+    });
+    expect(english?.metrics.search_console).toMatchObject({ clicks: null, impressions: null });
+    expect(english?.metrics.crawler_response_outcomes).toMatchObject({
+      successful_html: null,
+      blocked: null,
+      failed: null,
+      non_html: null,
+      unverified_identity: null,
+    });
+    expect(report.source_coverage.first_party_analytics).toMatchObject({
+      status: 'partial',
+      coverage_start: null,
+      rolling_7d_complete: false,
+    });
+    expect(report.source_coverage.search_console).toMatchObject({ status: 'not_connected', clicks: null, impressions: null });
+    expect(report.source_coverage.cloudflare_request_logs).toMatchObject({
+      status: 'not_ingested',
+      successful_html_fetches: null,
+    });
+    expect(report.source_coverage.tollbit).toMatchObject({
+      status: 'unverified',
+      attributed_requests: null,
+      paid_requests: null,
+      revenue: null,
+    });
+    const legacyTopic = report.topics.find(topic => topic.canonical_path === legacyPath);
+    expect(legacyTopic?.metrics.rolling_7d).toMatchObject({
+      page_view_events: 1,
+      site_sessions: 1,
+      organic_search_landings: null,
+      ai_referral_landings: null,
+      human_discovery_visits: null,
+      human_target_status: 'not_available',
+    });
+  });
+
   it('persists authenticated Cloudflare analytics health results for the admin surface', async () => {
     const healthy = {
       status: 'healthy',

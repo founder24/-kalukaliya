@@ -15,6 +15,16 @@ import { generate } from '../services/ai';
 import { enforceAuthRateLimit } from '../services/auth-rate-limit';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
+import {
+  buildTopicUrlInventory,
+  classifyDiscoveryReferrer,
+  TOPIC_TRAFFIC_INVENTORY_VERSION,
+  TOPIC_TRAFFIC_REPORT_VERSION,
+  TOPIC_TRAFFIC_TARGET_PER_7D,
+  TOPIC_TRAFFIC_TARGET_PER_DAY,
+  type TopicInventorySourceRow,
+  type TopicUrlInventoryItem,
+} from '../services/topic-traffic';
 import type { Env } from '../types';
 import { runRagJob } from './staff';
 import type { CloudflareAnalyticsHealthResult } from '../types';
@@ -360,6 +370,448 @@ adminContentRouter.get('/dashboard/metrics', async c => {
       sessions_today: metricCount(traffic?.sessions_today),
       daily,
     },
+  });
+});
+
+const DISCOVERY_AUTOMATION_UA = /bot|crawler|spider|slurp|fetcher|preview|monitor|headless/i;
+
+function eventCount(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+
+function dateIso(seconds: number): string {
+  return new Date(seconds * 1000).toISOString();
+}
+
+type TopicPageEvent = {
+  route_path: string | null;
+  date: string;
+  page_view_events: number | string | null;
+  sessions: number | string | null;
+};
+
+type TopicLandingEvent = {
+  route_path: string | null;
+  session_id: string | null;
+  created_at: number | string | null;
+  referrer: string | null;
+  user_agent: string | null;
+};
+
+function metricMapKey(path: string, date: string): string {
+  return `${path}\n${date}`;
+}
+
+adminContentRouter.get('/seo/topic-traffic', async c => {
+  const actor = await requireAdmin(c);
+  if (actor instanceof Response) return actor;
+  c.header('Cache-Control', 'private, no-store');
+
+  const page = Math.max(1, Math.trunc(Number(c.req.query('page')) || 1));
+  const pageSize = Math.min(250, Math.max(1, Math.trunc(Number(c.req.query('page_size')) || 100)));
+  const generatedAtSeconds = now();
+  const todayStart = Math.floor(generatedAtSeconds / 86_400) * 86_400;
+  const dailyStart = todayStart - 6 * 86_400;
+  const rollingStart = generatedAtSeconds - 7 * 86_400;
+  const todayDate = new Date(todayStart * 1000).toISOString().slice(0, 10);
+  const dateKeys = Array.from({ length: 7 }, (_, index) =>
+    new Date((dailyStart + index * 86_400) * 1000).toISOString().slice(0, 10));
+  const dates = dateKeys.map((date, index) => ({
+    date,
+    partial_day: date === todayDate,
+    day_start: dailyStart + index * 86_400,
+  }));
+
+  const inventoryRows = await c.env.DB.prepare(`
+    SELECT c.id AS chapter_id, c.title AS chapter_title, c.slug AS chapter_slug,
+           c.status AS chapter_status, c.published_topics,
+           s.id AS subject_id, s.name AS subject_name, s.slug AS subject_slug,
+           s.is_published AS subject_published,
+           b.slug AS board_slug, cl.slug AS class_slug
+    FROM chapters c
+    LEFT JOIN subjects s ON s.id = c.subject_id
+    LEFT JOIN streams str ON str.id = s.stream_id
+    LEFT JOIN classes cl ON cl.id = str.class_id
+    LEFT JOIN boards b ON b.id = cl.board_id
+    ORDER BY s.name, c.title, c.id
+  `).all<TopicInventorySourceRow>();
+  const inventory = buildTopicUrlInventory(inventoryRows.results ?? []);
+  const eligiblePathSet = new Set(
+    inventory.filter(item => item.eligible && item.canonical_path).map(item => item.canonical_path as string),
+  );
+
+  let analyticsQueryAvailable = true;
+  let earliestEvent: number | null = null;
+  let latestEvent: number | null = null;
+  const dailyPageViews = new Map<string, { page_view_events: number; sessions: number }>();
+  const rollingPageViews = new Map<string, { page_view_events: number; sessions: number }>();
+  const dailyEntryCounts = new Map<string, number>();
+  const rollingEntryCounts = new Map<string, number>();
+  const dailyLandings = new Map<string, { organic: number; ai: number }>();
+  const rollingLandings = new Map<string, { organic: number; ai: number }>();
+
+  try {
+    const [coverage, dailyRows, rollingRows, firstLandingRows] = await Promise.all([
+      c.env.DB.prepare(`
+        SELECT MIN(created_at) AS earliest, MAX(created_at) AS latest
+        FROM analytics_events
+        WHERE event_subtype = 'page_view' AND classification = 'optional_analytics'
+      `).first<{ earliest: number | string | null; latest: number | string | null }>(),
+      c.env.DB.prepare(`
+        SELECT route_path, date(created_at, 'unixepoch') AS date,
+               COUNT(*) AS page_view_events,
+               COUNT(DISTINCT json_extract(payload, '$.session_id')) AS sessions
+        FROM analytics_events
+        WHERE event_subtype = 'page_view'
+          AND classification = 'optional_analytics'
+          AND created_at >= ?
+          AND route_path LIKE '%/topic/%'
+        GROUP BY route_path, date(created_at, 'unixepoch')
+      `).bind(dailyStart).all<TopicPageEvent>(),
+      c.env.DB.prepare(`
+        SELECT route_path, '' AS date,
+               COUNT(*) AS page_view_events,
+               COUNT(DISTINCT json_extract(payload, '$.session_id')) AS sessions
+        FROM analytics_events
+        WHERE event_subtype = 'page_view'
+          AND classification = 'optional_analytics'
+          AND created_at >= ?
+          AND route_path LIKE '%/topic/%'
+        GROUP BY route_path
+      `).bind(rollingStart).all<TopicPageEvent>(),
+      c.env.DB.prepare(`
+        WITH ranked_entries AS (
+          SELECT route_path, created_at,
+                 json_extract(payload, '$.session_id') AS session_id,
+                 json_extract(payload, '$.referrer') AS referrer,
+                 json_extract(payload, '$.user_agent') AS user_agent,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY json_extract(payload, '$.session_id')
+                   ORDER BY created_at ASC, id ASC
+                 ) AS entry_rank
+          FROM analytics_events
+          WHERE event_subtype = 'page_view'
+            AND classification = 'optional_analytics'
+            AND created_at >= ?
+            AND json_extract(payload, '$.is_session_entry') = 1
+            AND NULLIF(json_extract(payload, '$.session_id'), '') IS NOT NULL
+        )
+        SELECT route_path, session_id, created_at, referrer, user_agent
+        FROM ranked_entries
+        WHERE entry_rank = 1
+      `).bind(rollingStart).all<TopicLandingEvent>(),
+    ]);
+
+    earliestEvent = coverage?.earliest == null ? null : eventCount(coverage.earliest);
+    latestEvent = coverage?.latest == null ? null : eventCount(coverage.latest);
+    for (const row of dailyRows.results ?? []) {
+      if (!row.route_path || !eligiblePathSet.has(row.route_path)) continue;
+      dailyPageViews.set(metricMapKey(row.route_path, row.date), {
+        page_view_events: eventCount(row.page_view_events),
+        sessions: eventCount(row.sessions),
+      });
+    }
+    for (const row of rollingRows.results ?? []) {
+      if (!row.route_path || !eligiblePathSet.has(row.route_path)) continue;
+      rollingPageViews.set(row.route_path, {
+        page_view_events: eventCount(row.page_view_events),
+        sessions: eventCount(row.sessions),
+      });
+    }
+    for (const row of firstLandingRows.results ?? []) {
+      if (!row.route_path || !eligiblePathSet.has(row.route_path)) continue;
+      const date = row.created_at == null
+        ? ''
+        : new Date(eventCount(row.created_at) * 1000).toISOString().slice(0, 10);
+      const dailyEntryKey = metricMapKey(row.route_path, date);
+      dailyEntryCounts.set(dailyEntryKey, (dailyEntryCounts.get(dailyEntryKey) ?? 0) + 1);
+      rollingEntryCounts.set(row.route_path, (rollingEntryCounts.get(row.route_path) ?? 0) + 1);
+      if (DISCOVERY_AUTOMATION_UA.test(row.user_agent ?? '')) continue;
+      const source = classifyDiscoveryReferrer(row.referrer);
+      if (source !== 'organic_search' && source !== 'ai_referral') continue;
+      const dailyKey = metricMapKey(row.route_path, date);
+      const dailyCounts = dailyLandings.get(dailyKey) ?? { organic: 0, ai: 0 };
+      const rollingCounts = rollingLandings.get(row.route_path) ?? { organic: 0, ai: 0 };
+      if (source === 'organic_search') {
+        dailyCounts.organic += 1;
+        rollingCounts.organic += 1;
+      } else {
+        dailyCounts.ai += 1;
+        rollingCounts.ai += 1;
+      }
+      dailyLandings.set(dailyKey, dailyCounts);
+      rollingLandings.set(row.route_path, rollingCounts);
+    }
+  } catch (error) {
+    analyticsQueryAvailable = false;
+    console.warn('Topic traffic analytics source unavailable:', error);
+  }
+
+  // The event ledger has no verified collection-start marker. Report directly
+  // observed values, but do not turn a missing URL/day into zero or evaluate a
+  // full-window target without proof that the source covered that window.
+  const rollingHistoryComplete = false;
+  const topics = inventory.map(item => {
+    const path = item.canonical_path;
+    const rollingPage = path ? rollingPageViews.get(path) : undefined;
+    const rollingLanding = path ? rollingLandings.get(path) : undefined;
+    const rollingPageObserved = item.eligible && analyticsQueryAvailable && rollingPage !== undefined;
+    const rollingObserved = item.eligible && analyticsQueryAvailable && path !== null
+      && rollingEntryCounts.has(path);
+    const rollingOrganic = rollingObserved ? (rollingLanding?.organic ?? 0) : null;
+    const rollingAi = rollingObserved ? (rollingLanding?.ai ?? 0) : null;
+    const rollingHuman = rollingOrganic === null || rollingAi === null
+      ? null
+      : rollingOrganic + rollingAi;
+    const rollingStatus = item.eligible ? 'not_available' : 'not_eligible';
+
+    const daily = dates.map(({ date, partial_day }) => {
+      const page = path ? dailyPageViews.get(metricMapKey(path, date)) : undefined;
+      const landings = path ? dailyLandings.get(metricMapKey(path, date)) : undefined;
+      const entryObserved = item.eligible && analyticsQueryAvailable && path !== null
+        && dailyEntryCounts.has(metricMapKey(path, date));
+      const organic = entryObserved ? (landings?.organic ?? 0) : null;
+      const ai = entryObserved ? (landings?.ai ?? 0) : null;
+      const human = organic === null || ai === null ? null : organic + ai;
+      const pageObserved = item.eligible && analyticsQueryAvailable && page !== undefined;
+      return {
+        date,
+        partial_day,
+        page_view_events: pageObserved ? page.page_view_events : null,
+        site_sessions: pageObserved ? page.sessions : null,
+        organic_search_landings: organic,
+        ai_referral_landings: ai,
+        human_discovery_visits: human,
+        human_target_per_day: TOPIC_TRAFFIC_TARGET_PER_DAY,
+        human_target_status: !item.eligible
+          ? 'not_eligible'
+          : partial_day && human !== null ? 'in_progress' : 'not_available',
+        server_page_requests: null,
+        verified_crawler_fetches: null,
+        crawler_target_per_day: TOPIC_TRAFFIC_TARGET_PER_DAY,
+        crawler_target_status: 'not_available',
+      };
+    });
+
+    return {
+      ...item,
+      metrics: {
+        daily,
+        rolling_7d: {
+          window_start: dateIso(rollingStart),
+          window_end: dateIso(generatedAtSeconds),
+          page_view_events: rollingPageObserved ? rollingPage.page_view_events : null,
+          site_sessions: rollingPageObserved ? rollingPage.sessions : null,
+          organic_search_landings: rollingOrganic,
+          ai_referral_landings: rollingAi,
+          human_discovery_visits: rollingHuman,
+          human_target: TOPIC_TRAFFIC_TARGET_PER_7D,
+          human_target_status: rollingStatus,
+          server_page_requests: null,
+          verified_crawler_fetches: null,
+          crawler_target: TOPIC_TRAFFIC_TARGET_PER_7D,
+          crawler_target_status: 'not_available',
+        },
+        search_console: {
+          clicks: null,
+          impressions: null,
+          status: 'not_connected',
+        },
+        crawler_response_outcomes: {
+          successful_html: null,
+          blocked: null,
+          failed: null,
+          non_html: null,
+          unverified_identity: null,
+          response_status_counts: null,
+          status: 'not_ingested',
+        },
+      },
+      diagnostics: [
+        ...(!item.eligible ? [{
+          code: item.exclusion_reason,
+          message: `Excluded from the eligible URL denominator: ${item.exclusion_reason}.`,
+        }] : []),
+        ...(item.eligible ? [{
+          code: 'human_telemetry_coverage_unverified',
+          message: 'Observed consented sessions are shown, but the collection start is not recorded, so a complete daily or 7-day target result cannot be confirmed.',
+        }] : []),
+      ],
+    };
+  }).sort((left, right) =>
+    (left.subject_name ?? '').localeCompare(right.subject_name ?? '') ||
+    left.chapter_title.localeCompare(right.chapter_title) ||
+    (left.topic_title ?? '').localeCompare(right.topic_title ?? '') ||
+    left.language.localeCompare(right.language));
+
+  const byExclusionReason: Record<string, number> = {};
+  for (const item of inventory) {
+    if (!item.eligible && item.exclusion_reason) {
+      byExclusionReason[item.exclusion_reason] = (byExclusionReason[item.exclusion_reason] ?? 0) + 1;
+    }
+  }
+
+  const subjectGroups = new Map<string, {
+    subject_id: string | null;
+    subject_name: string | null;
+    language: string;
+    candidate_urls: number;
+    eligible_urls: number;
+    excluded_urls: number;
+    human_discovery_visits_7d: number | null;
+    human_discovery_coverage: 'partial_unverified';
+    verified_crawler_fetches_7d: null;
+  }>();
+  for (const topic of topics) {
+    const key = `${topic.subject_id ?? 'unknown'}\n${topic.language}`;
+    const group = subjectGroups.get(key) ?? {
+      subject_id: topic.subject_id,
+      subject_name: topic.subject_name,
+      language: topic.language,
+      candidate_urls: 0,
+      eligible_urls: 0,
+      excluded_urls: 0,
+      human_discovery_visits_7d: null,
+      human_discovery_coverage: 'partial_unverified',
+      verified_crawler_fetches_7d: null,
+    };
+    group.candidate_urls += 1;
+    if (topic.eligible) {
+      group.eligible_urls += 1;
+      const observedHuman = topic.metrics.rolling_7d.human_discovery_visits;
+      if (observedHuman !== null) {
+        group.human_discovery_visits_7d = (group.human_discovery_visits_7d ?? 0) + observedHuman;
+      }
+    } else {
+      group.excluded_urls += 1;
+    }
+    subjectGroups.set(key, group);
+  }
+
+  const total = topics.length;
+  const start = (page - 1) * pageSize;
+  return c.json({
+    schema_version: TOPIC_TRAFFIC_REPORT_VERSION,
+    generated_at: dateIso(generatedAtSeconds),
+    timezone: 'UTC',
+    inventory: {
+      version: TOPIC_TRAFFIC_INVENTORY_VERSION,
+      source: 'D1 chapters.published_topics joined to the public curriculum hierarchy',
+      candidate_url_count: total,
+      eligible_url_count: inventory.filter(item => item.eligible).length,
+      excluded_url_count: inventory.filter(item => !item.eligible).length,
+      exclusions_by_reason: byExclusionReason,
+      pages: { page, page_size: pageSize, total_pages: Math.ceil(total / pageSize) },
+    },
+    definitions: {
+      organic_search_landings: 'Distinct consented page-view beacons explicitly marked by the browser as the first recorded page in that session, with a referrer hostname matching a known search provider.',
+      ai_referral_landings: 'Distinct consented page-view beacons explicitly marked by the browser as the first recorded page in that session, with a referrer hostname matching a known AI answer provider.',
+      human_discovery_visits: 'Organic-search plus AI-referral landing sessions. Browser telemetry is a proxy, not a verified-human count.',
+      site_sessions: 'Distinct consented session IDs with a page-view event on this URL; not added to page-view events, Search Console clicks, or HTTP requests.',
+      page_view_events: 'Consent-based browser page-view beacons for this URL; not server-side HTTP page requests.',
+      search_console: 'Impressions and clicks are separate Search Console measurements and are N/A until Search Console reporting is connected.',
+      verified_crawler_fetches: 'Requires authoritative Cloudflare verified-bot identity, a successful final HTTP response, text/html content, and an eligible canonical topic URL. User-Agent alone is insufficient.',
+    },
+    targets: {
+      human_discovery_visits_per_eligible_url_per_day: TOPIC_TRAFFIC_TARGET_PER_DAY,
+      verified_crawler_fetches_per_eligible_url_per_day: TOPIC_TRAFFIC_TARGET_PER_DAY,
+      rolling_7d_per_eligible_url: TOPIC_TRAFFIC_TARGET_PER_7D,
+      status: 'aspirational',
+    },
+    window: {
+      daily_dates: dateKeys,
+      daily_window_start: dateIso(dailyStart),
+      daily_window_end: dateIso(generatedAtSeconds),
+      rolling_7d_start: dateIso(rollingStart),
+      rolling_7d_end: dateIso(generatedAtSeconds),
+      current_day_is_partial: true,
+    },
+    source_coverage: {
+      first_party_analytics: {
+        status: !analyticsQueryAvailable ? 'unavailable' : earliestEvent === null ? 'no_data' : 'partial',
+        source: 'D1 analytics_events (optional_analytics page_view)',
+        coverage_start: null,
+        coverage_start_verified: false,
+        earliest_observed_event_at: earliestEvent === null ? null : dateIso(earliestEvent),
+        latest_event_at: latestEvent === null ? null : dateIso(latestEvent),
+        rolling_7d_complete: rollingHistoryComplete,
+        freshness: latestEvent === null
+          ? 'unknown'
+          : latestEvent < generatedAtSeconds - 86_400 ? 'stale_over_24h' : 'recent',
+        note: !analyticsQueryAvailable
+          ? 'D1 page-view telemetry could not be queried; no traffic values are inferred.'
+          : earliestEvent === null
+            ? 'No consented page-view history is available. Metrics are N/A, not zero.'
+            : 'Counts show only observed page-view beacons from visitors who granted optional analytics consent. Discovery attribution uses the new first-consented-page marker; older beacons without it remain N/A. The ledger has no verified collection-start marker, so full-window targets are not evaluated. Human identity is not independently verified.',
+      },
+      search_console: {
+        status: 'not_connected',
+        clicks: null,
+        impressions: null,
+        latest_data_at: null,
+        freshness: 'unknown',
+        note: 'Connect Search Console reporting for the verified syrabit.ai property. The existing indexing-stats stub does not provide search-performance clicks or impressions.',
+      },
+      cloudflare_request_logs: {
+        status: 'not_ingested',
+        source: null,
+        latest_event_at: null,
+        freshness: 'unknown',
+        successful_html_fetches: null,
+        blocked: null,
+        failed: null,
+        non_html: null,
+        unverified_identity: null,
+        response_status_counts: null,
+        note: 'Connect request-level Logpush records to a privacy-safe Worker/D1 aggregation path. Count only Cloudflare VerifiedBotCategory evidence plus final 200 text/html responses for eligible canonical URLs; do not infer success from aggregate bot totals or User-Agent.',
+      },
+      tollbit: {
+        status: 'unverified',
+        attributed_requests: null,
+        paid_requests: null,
+        revenue: null,
+        note: 'No Tollbit attribution or paid-access claim is made without verified publisher integration and supported request-identity evidence.',
+      },
+    },
+    subject_language_breakdown: [...subjectGroups.values()].sort((left, right) =>
+      (left.subject_name ?? '').localeCompare(right.subject_name ?? '') ||
+      left.language.localeCompare(right.language)),
+    diagnostics: [
+      ...Object.entries(byExclusionReason).map(([reason, count]) => ({
+        code: reason,
+        count,
+        priority: reason === 'topic_not_reviewed' || reason.includes('incomplete') || reason.includes('under_40')
+          ? 'content_review'
+          : 'inventory_review',
+        message: `${count} topic URL candidate(s) are excluded because of ${reason}. Review content or curriculum metadata; no pages are auto-published.`,
+      })),
+      ...(!analyticsQueryAvailable || earliestEvent === null || !rollingHistoryComplete ? [{
+        code: 'human_telemetry_incomplete',
+        priority: 'measurement_setup',
+        message: !analyticsQueryAvailable
+          ? 'First-party page-view telemetry is unavailable; repair the D1 analytics_events query path.'
+          : earliestEvent === null
+            ? 'No first-party page-view history is available; verify consented browser analytics ingestion before evaluating discovery targets.'
+            : 'First-party events exist, but no source collection-start marker is stored. Observed counts are partial and target status remains N/A until full-window coverage can be established.',
+      }] : []),
+      {
+        code: 'search_console_not_connected',
+        priority: 'measurement_setup',
+        message: 'Connect Search Console search-performance reporting to evaluate impressions, clicks, and indexing gaps by canonical topic URL.',
+      },
+      {
+        code: 'crawler_logs_not_ingested',
+        priority: 'measurement_setup',
+        message: 'Route request-level Logpush evidence into a safe aggregation path before evaluating verified crawler fetches or response failures.',
+      },
+      {
+        code: 'tollbit_unverified',
+        priority: 'policy_verification',
+        message: 'Do not report Tollbit or paid access until the publisher integration and request identity are verified against supported requirements.',
+      },
+    ],
+    topics: topics.slice(start, start + pageSize),
   });
 });
 

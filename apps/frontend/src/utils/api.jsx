@@ -846,6 +846,13 @@ export const adminSeoRefreshMeta = (token) =>
 export const adminSeoGoogleIndexingStats = (token) =>
   axios.get(`${API_BASE}/admin/seo/google-indexing-stats`, { headers: adminHeaders(token), withCredentials: true });
 
+export const adminTopicTraffic = (token, page = 1, pageSize = 100) =>
+  axios.get(`${API_BASE}/admin/seo/topic-traffic`, {
+    headers: adminHeaders(token),
+    withCredentials: true,
+    params: { page, page_size: pageSize },
+  });
+
 export const adminTopicDiscoveryRuns = (token, limit = 20) =>
   axios.get(`${API_BASE}/admin/seo/topic-discovery/runs`, {
     headers: adminHeaders(token), withCredentials: true, params: { limit },

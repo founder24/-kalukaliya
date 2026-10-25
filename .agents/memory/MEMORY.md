@@ -115,3 +115,4 @@
 - [Tollbit crawler integration](tollbit-crawler-integration.md) — Use verified Tollbit-supported ingestion/configuration, not a raw User-Agent proxy; validate the supplied bot list before use.
 - [AI readiness review evidence](ai-readiness-evidence.md) — Separate page-internal claim support from official curriculum verification; keep composite scores N/A when required evidence is missing.
 - [SSR route heading audits](ssr-route-heading-audits.md) — Shared shell H1 may precede route H1; score page content against the route-specific heading.
+- [Topic traffic measurement](topic-traffic-measurement.md) — distinguish consented discovery proxies from authoritative verified crawler fetches; missing coverage stays N/A.

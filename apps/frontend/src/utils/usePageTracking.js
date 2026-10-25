@@ -5,6 +5,7 @@ import { Analytics } from './analytics';
 import { API_BASE } from './api';
 import { incrementVisitIfNewSession } from './visitTracker';
 import { hasAnalyticsConsent } from './analyticsConsent';
+import { claimSessionEntry, resetSessionEntryClaim } from './sessionEntryTracking';
 
 const KNOWN_PATTERNS = [
   '/',
@@ -165,21 +166,24 @@ function usePageTracking() {
           const actualEndTime = Date.now() - elapsed;
           sendSessionEnd(sessionIdRef.current, visitorIdRef.current, actualEndTime);
           try { sessionStorage.removeItem('syrabit:session_id'); } catch {}
+          resetSessionEntryClaim();
           const newSid = getOrCreateSessionId();
           sessionIdRef.current = newSid;
           lastSessionId = newSid;
 
           const currentPath = window.location.pathname;
+          const isSessionEntry = claimSessionEntry();
           axios.post(
             `${API_BASE}/analytics/page-view`,
             {
               path: currentPath,
               visitor_id: visitorIdRef.current,
               session_id: newSid,
-              referrer: document.referrer || null,
+              referrer: null,
               user_agent: navigator.userAgent,
               screen_width: window.screen.width,
               is_404_hint: detectIs404(currentPath),
+              is_session_entry: isSessionEntry,
               analytics_consent: 'granted',
             },
             { withCredentials: true, timeout: 5000 }
@@ -209,6 +213,7 @@ function usePageTracking() {
     const referrer = document.referrer || null;
     const is404Hint = detectIs404(path);
     if (!claimPageView(sessionId, path)) return;
+    const isSessionEntry = claimSessionEntry();
 
     axios.post(
       `${API_BASE}/analytics/page-view`,
@@ -220,6 +225,7 @@ function usePageTracking() {
         user_agent: navigator.userAgent,
         screen_width: window.screen.width,
         is_404_hint: is404Hint,
+        is_session_entry: isSessionEntry,
         analytics_consent: 'granted',
       },
       { withCredentials: true, timeout: 5000 }
