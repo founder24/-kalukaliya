@@ -307,31 +307,23 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
               >
                 {displayName}
               </h3>
-              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
+              <div className="mt-1 flex min-h-5 flex-wrap items-center gap-x-2 gap-y-1 leading-5">
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded" style={{
                   background: 'rgba(139,92,246,0.12)',
                   color: 'hsl(var(--primary))',
                 }}>
                   {displayBoardName}
                 </span>
-                <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                <span className="whitespace-nowrap text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
                   {displayClassName}
                 </span>
-        {displayStreamNames.length > 0 && (
-                  <>
-                    <span className="text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>·</span>
-                    <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                      {displayStreamName}
-                    </span>
-                  </>
-                )}
               </div>
             </div>
           </div>
         </Link>
 
         {displayDescription && (
-          <p className="text-[12px] sm:text-[13px] leading-snug mb-2 line-clamp-3 font-medium"
+          <p className="mt-1 text-[12px] sm:text-[13px] leading-relaxed mb-2 line-clamp-3 font-medium"
             style={{ color: 'hsl(var(--muted-foreground))' }}
             itemProp={sub.slug === MAKERS_SUBJECT_SLUG ? 'description' : undefined}>
             {displayDescription}
