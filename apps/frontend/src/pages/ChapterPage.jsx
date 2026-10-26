@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { apiClient, seoRelatedByChapter } from '@/utils/api';
+import { apiClient } from '@/utils/api';
 import { useShare, SerpPreviewModal } from '@/hooks/useShare';
 import Analytics from '@/utils/analytics';
 import { useContentLang } from '@/context/LanguageContext';
@@ -338,7 +338,6 @@ export default function ChapterPage() {
   // prerendering select the same localized topic record as the browser.
   const isAssamesePath = routerLocation.pathname.startsWith('/as/');
   const [activeId, setActiveId] = useState('');
-  const [relatedChapterTopics, setRelatedChapterTopics] = useState([]);
   // Task #914 Step 3 — published topics with `definition_status=ok`
   // that power the visible AI answer cards. Seeded from the
   // prerender preload (so SSR / curl-no-JS already ships the cards
@@ -366,21 +365,6 @@ export default function ChapterPage() {
   const [topicNotFound, setTopicNotFound] = useState(false);
   const [topicPageData, setTopicPageData] = useState(initialChapterData?.topic_page_content || null);
   const [topicPageLoading, setTopicPageLoading] = useState(Boolean(topicSlugParam && !initialChapterData?.topic_page_content));
-
-  // Fetch related topics across the chapter for in-content internal links.
-  useEffect(() => {
-    let cancelled = false;
-    if (!data?.chapter_id) { setRelatedChapterTopics([]); return; }
-    seoRelatedByChapter(data.chapter_id, null, 6)
-      .then((rows) => {
-        if (cancelled) return;
-        const payload = rows?.data ?? rows;
-        const list = Array.isArray(payload) ? payload : (payload?.related || payload?.items || []);
-        setRelatedChapterTopics(Array.isArray(list) ? list : []);
-      })
-      .catch(() => { if (!cancelled) setRelatedChapterTopics([]); });
-    return () => { cancelled = true; };
-  }, [data?.chapter_id]);
 
   // Task #914 Step 3 — fetch the topics-published list for this
   // chapter's AI answer cards. Skipped when the prerender preload
@@ -1700,19 +1684,8 @@ export default function ChapterPage() {
                 title: (isAssamesePath && next.title_as) ? next.title_as : (next.title || next.slug),
                 path: `${_navBase}/${isAssamesePath ? (next.slug_as || next.slug) : next.slug}${_tabSuffix}`,
               } : null;
-              const seedRelated = relatedChapterTopics || [];
               const siblings = siblingsAsRelated(subjChapters, data?.chapter_id, chapterSlug, _navBase, 8, isAssamesePath);
-              const related = (() => {
-                const out = [...seedRelated];
-                if (out.length < 4) {
-                  const seenPaths = new Set(out.map((r) => r.seo_path));
-                  for (const s of siblings) {
-                    if (out.length >= 6) break;
-                    if (!seenPaths.has(s.seo_path)) out.push(s);
-                  }
-                }
-                return out.slice(0, 6);
-              })();
+              const related = siblings.slice(0, 6);
               return (
                 <>
                   <RelatedTopicsNav

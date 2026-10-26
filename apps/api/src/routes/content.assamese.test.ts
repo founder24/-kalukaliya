@@ -38,6 +38,16 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('class', 'board', 'Class 12', 'class-12')`),
     env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('stream', 'class', 'Science', 'science')`),
     env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES ('subject', 'stream', 'Physics', 'physics', 1)`),
+    env.DB.prepare(`UPDATE subjects SET pyq_papers = ? WHERE id = 'subject'`).bind(JSON.stringify([{
+      id: 'paper-1',
+      name: 'Physics Annual Final',
+      class_name: 'Class 12',
+      year: 2025,
+      description: 'A sample paper',
+      pages: [{ id: 'page-1', url: '/papers/physics-2025/page-1', text: 'Question text' }],
+      rag_text: 'Long question paper transcription that must not be duplicated in the slim catalog.',
+      rag_text_as: 'দীঘল প্ৰশ্নকাকতৰ পাঠ',
+    }])),
     env.DB.prepare(`
       INSERT INTO chapters (
         id, subject_id, title, title_as, slug, slug_as,
@@ -231,6 +241,8 @@ describe('Assamese public content metadata', () => {
         definition_status: 'ok',
         definition: 'দিশসহ গতি।',
         topic_slug: 'velocity',
+        topic_page_available_en: false,
+        topic_page_available_as: false,
       }],
       total: 1,
     });
@@ -331,10 +343,15 @@ describe('Assamese public content metadata', () => {
     expect(slimResponse.status).toBe(200);
 
     const full = await fullResponse.json() as {
-      subjects: Array<{ id: string; chapter_count: number }>;
+      subjects: Array<{ id: string; chapter_count: number; pyq_papers: Array<Record<string, unknown>> }>;
     };
     const slim = await slimResponse.json() as {
-      subjects: Array<{ id: string; chapter_count: number; chapters?: unknown[] }>;
+      subjects: Array<{
+        id: string;
+        chapter_count: number;
+        chapters?: unknown[];
+        pyq_papers: Array<Record<string, unknown>>;
+      }>;
     };
     const fullSubject = full.subjects.find(subject => subject.id === 'subject');
     const slimSubject = slim.subjects.find(subject => subject.id === 'subject');
@@ -342,5 +359,10 @@ describe('Assamese public content metadata', () => {
     expect(fullSubject?.chapter_count).toBeGreaterThan(0);
     expect(slimSubject?.chapter_count).toBe(fullSubject?.chapter_count);
     expect(slimSubject).not.toHaveProperty('chapters');
+    expect(fullSubject?.pyq_papers[0]).not.toHaveProperty('rag_text');
+    expect(slimSubject?.pyq_papers[0]).not.toHaveProperty('rag_text');
+    expect(slimSubject?.pyq_papers[0]?.pages).toEqual([
+      { id: 'page-1', url: '/papers/physics-2025/page-1' },
+    ]);
   });
 });

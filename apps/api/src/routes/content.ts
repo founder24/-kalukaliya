@@ -830,6 +830,25 @@ contentRouter.get('/library-bundle', async (c) => {
   // Build subject list (flat + with chapter_count)
   const buildSubject = (sub: typeof allSubjects[0], includeChapters: boolean) => {
     const chaps = chaptersBySubject.get(sub.id) ?? [];
+    const storedPyqPapers = safeParse<Array<Record<string, unknown>>>(sub.pyqPapers) ?? [];
+    // The library catalog only needs paper metadata to render subject-card
+    // labels and page links. Full transcriptions are served by dedicated
+    // content routes, not duplicated in nested and flat catalog hierarchies.
+    const pyqPapers = storedPyqPapers.map((paper) => ({
+      id: paper.id ?? null,
+      name: paper.name ?? null,
+      name_as: paper.name_as ?? null,
+      class_name: paper.class_name ?? null,
+      year: paper.year ?? null,
+      description: paper.description ?? null,
+      pages: Array.isArray(paper.pages)
+        ? paper.pages.flatMap((page) => {
+            if (!page || typeof page !== 'object') return [];
+            const pageRecord = page as Record<string, unknown>;
+            return [{ id: pageRecord.id ?? null, url: pageRecord.url ?? null }];
+          })
+        : [],
+    }));
     return {
       id: sub.id,
       name: sub.name,
@@ -844,7 +863,7 @@ contentRouter.get('/library-bundle', async (c) => {
       thumbnail_url: sub.imageUrl ?? null,
       tags: [],
       chapter_count: slim ? (chapterCountBySubject.get(sub.id) ?? 0) : chaps.length,
-      pyq_papers: safeParse(sub.pyqPapers) ?? [],
+      pyq_papers: pyqPapers,
       ...(includeChapters ? { chapters: chaps } : {}),
     };
   };

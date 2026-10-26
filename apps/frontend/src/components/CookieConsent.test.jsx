@@ -17,8 +17,8 @@ describe('CookieConsent with blocked browser storage', () => {
     });
 
     render(<CookieConsent />);
-    await waitFor(() => expect(screen.getByText('Cookie Notice')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Cookie preferences')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
-    expect(screen.queryByText('Cookie Notice')).not.toBeInTheDocument();
+    expect(screen.queryByText('Cookie preferences')).not.toBeInTheDocument();
   });
 });

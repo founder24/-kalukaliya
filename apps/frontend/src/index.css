@@ -685,7 +685,7 @@
     color: #1a1a1a;
     font-family: Georgia, 'Times New Roman', 'Noto Serif', serif;
     font-size: 1rem;
-    line-height: 1.75;
+    line-height: 1.8;
     letter-spacing: 0;
     box-shadow: 0 1px 6px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
   }
@@ -693,13 +693,13 @@
   .chapter-textbook h2 { font-size: 1.22rem; line-height: 1.4; font-weight: 650; margin: 1.5rem 0 0.55rem; color: #222; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   .chapter-textbook h3 { font-size: 1.08rem; line-height: 1.45; font-weight: 600; margin: 1.15rem 0 0.4rem; color: #292929; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   .chapter-textbook h4, .chapter-textbook h5, .chapter-textbook h6 { font-size: 1rem; font-weight: 600; margin: 0.9rem 0 0.35rem; color: #333; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  .chapter-textbook p { margin: 0.55rem 0 0.9rem; color: #292929; }
+  .chapter-textbook p { margin: 0.7rem 0 1rem; color: #292929; }
   .chapter-textbook strong { font-weight: 600; color: inherit; }
   .chapter-textbook em { font-style: italic; color: inherit; }
   .chapter-textbook ul { list-style: disc; padding-left: 1.35rem; margin: 0.45rem 0 1rem; color: #292929; }
   .chapter-textbook ol { list-style: decimal; padding-left: 1.35rem; margin: 0.45rem 0 1rem; color: #292929; }
-  .chapter-textbook li { margin: 0.4rem 0; padding-left: 0.1rem; }
-  .chapter-textbook li > ul, .chapter-textbook li > ol { margin: 0.3rem 0 0.45rem; }
+  .chapter-textbook li { margin: 0.48rem 0; padding-left: 0.1rem; }
+  .chapter-textbook li > ul, .chapter-textbook li > ol { margin: 0.35rem 0 0.55rem; }
   .chapter-textbook blockquote { border-left: 2px solid #c4b5fd; padding: 0.35rem 0 0.35rem 0.9rem; margin: 1rem 0; color: #444; font-style: italic; background: transparent; }
   .chapter-textbook code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.83em; background: #f3f4f6; padding: 0.1em 0.4em; border-radius: 4px; color: #7c3aed; }
   .chapter-textbook pre { background: #1e1e2e; color: #cdd6f4; border-radius: 10px; padding: 1rem 1.2rem; margin: 0.8rem 0; overflow-x: auto; }
