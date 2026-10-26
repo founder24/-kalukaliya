@@ -22,7 +22,7 @@
     "bcryptjs": "^3.0.2",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
-    "jose": "^5.10.0"
+    "jose": "^6.2.13"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
