@@ -539,10 +539,10 @@ async function resolveChapterBySlug(
   const streamIds = targetStreams.map(s => s.id);
   const placeholders = streamIds.map(() => '?').join(',');
   const subjectRows = await c.env.DB
-    .prepare(`SELECT id, name, slug, stream_id FROM subjects
+    .prepare(`SELECT id, name, name_as, slug, stream_id FROM subjects
               WHERE is_published=1 AND stream_id IN (${placeholders})`)
     .bind(...streamIds)
-    .all<{ id: string; name: string; slug: string; stream_id: string | null }>();
+    .all<{ id: string; name: string; name_as: string | null; slug: string; stream_id: string | null }>();
 
   const subjectRow = (subjectRows.results ?? []).find(
     s => s.slug === subjectSlug,
@@ -652,6 +652,7 @@ async function resolveChapterBySlug(
     // Dedicated topic deep links resolve their own heading on the client.
     topic_title:    displayTitle,
     subject_name:   subjectRow.name,
+    subject_name_as: subjectRow.name_as ?? null,
     subject_slug:   subjectRow.slug,
     board_name:     boardRow.name,
     board_slug:     boardRow.slug,

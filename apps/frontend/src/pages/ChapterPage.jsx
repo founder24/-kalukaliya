@@ -29,6 +29,34 @@ import { ReadAloudButton } from '@/components/study/ReadAloudButton';
 import AdSlot from '@/components/ads/AdSlot';
 import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
 
+function excerptForMeta(markdown, maxLength = 150) {
+  if (typeof markdown !== 'string') return '';
+  const text = markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/[*_~`>#|]/g, ' ')
+    .replace(/^\s*[-+]\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  const boundary = text.lastIndexOf(' ', maxLength - 1);
+  return `${text.slice(0, boundary > 80 ? boundary : maxLength).trim()}…`;
+}
+
+function assameseStudyLevel(value) {
+  if (value === 'Degree') return 'স্নাতক';
+  const semester = String(value || '').match(/^(\d+)(?:st|nd|rd|th)\s+semester$/i);
+  if (!semester) return value || '';
+  const ordinals = ['', 'প্ৰথম', 'দ্বিতীয়', 'তৃতীয়', 'চতুৰ্থ', 'পঞ্চম', 'ষষ্ঠ', 'সপ্তম', 'অষ্টম'];
+  return ordinals[Number(semester[1])]
+    ? `${ordinals[Number(semester[1])]} ষাণ্মাসিক`
+    : value;
+}
+
 function ChapterJsonLd({ data, url, basePath }) {
   useEffect(() => {
     if (!data) return;
@@ -1167,10 +1195,18 @@ export default function ChapterPage() {
     );
   }
 
-  const chapterTitle = data.chapter_title || data.title || data.topic_title || chapterSlug;
-  const subjectName = data.subject_name || subjectSlug;
-  const boardName = data.board_name || board;
-  const className = data.class_name || classSlug;
+  const useAssameseMetadata = contentLang === 'as' && hasAssamese;
+  const chapterTitle = useAssameseMetadata
+    ? (data.title_as || data.chapter_title_as || data.chapter_title || data.title || chapterSlug)
+    : (data.chapter_title || data.title || data.topic_title || chapterSlug);
+  const subjectName = (useAssameseMetadata && data.subject_name_as)
+    || data.subject_name || subjectSlug;
+  const boardName = useAssameseMetadata
+    ? (data.board_name_as || assameseStudyLevel(data.board_name || board))
+    : (data.board_name || board);
+  const className = useAssameseMetadata
+    ? (data.class_name_as || assameseStudyLevel(data.class_name || classSlug))
+    : (data.class_name || classSlug);
   const streamName = data.stream_name || '';
 
   // Task #333: Bing-keyword-aware title + description.
@@ -1182,10 +1218,13 @@ export default function ChapterPage() {
     .filter(Boolean);
   // Exact-match keyword optimization: append subject + board + class to title
   // when total length allows (under 60 chars for optimal SERP display)
+  const modeLabel = contentLang === 'as'
+    ? (contentMode === 'qa' ? 'প্ৰশ্ন আৰু উত্তৰ' : contentMode === 'pyq' ? 'বিগত বৰ্ষৰ প্ৰশ্ন' : 'টোকা')
+    : (contentMode === 'qa' ? 'Questions and Answers' : contentMode === 'pyq' ? 'Previous Year Questions' : 'Notes');
   const _titleSuffix = [subjectName, boardName, className].filter(Boolean).join(' ');
   const _baseTitle = _titleSuffix && (chapterTitle.length + _titleSuffix.length + 3) <= 60
-    ? `${chapterTitle} | ${_titleSuffix}`
-    : `${chapterTitle} — ${subjectName} | ${boardName} ${className} Notes`;
+    ? `${chapterTitle} | ${modeLabel} | ${_titleSuffix}`
+    : `${chapterTitle} — ${modeLabel} | ${subjectName} ${boardName} ${className}`;
   // If the top Bing search differs from what's already in the title,
   // append it parenthetically so we surface real search demand without
   // breaking the deterministic fallback. Cap at 70 chars for SERP.
@@ -1198,8 +1237,31 @@ export default function ChapterPage() {
   const seoTitle = (_topBingForTitle && (_baseTitle.length + _topBingForTitle.length + 3) <= 70)
     ? `${_baseTitle} (${_topBingForTitle})`
     : _baseTitle;
-  const _baseDesc = data.meta_description
-    || `${chapterTitle} notes for ${subjectName}. Complete study material for ${boardName} ${className} students.`;
+  const localizedContent = useAssameseMetadata ? data.content_as : data.content;
+  const localizedDescription = useAssameseMetadata
+    ? (data.meta_description_as || '')
+    : (data.meta_description || '');
+  const answerExcerpt = Array.isArray(faqEntries) && faqEntries.length > 0
+    ? excerptForMeta(`${faqEntries[0].question || ''} ${faqEntries[0].answer || ''}`)
+    : '';
+  const topicSummary = publishedTopics
+    .filter((topic) => !useAssameseMetadata || topic.language === 'Assamese')
+    .map((topic) => useAssameseMetadata
+      ? (topic.title_as || topic.title || '')
+      : (topic.title || ''))
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('၊ ');
+  const contentExcerpt = excerptForMeta(localizedContent);
+  const _baseDesc = localizedDescription.length >= 105
+    ? localizedDescription
+    : contentMode === 'qa' && answerExcerpt
+      ? answerExcerpt
+      : contentMode === 'qa' && topicSummary
+        ? excerptForMeta(`${chapterTitle}: ${topicSummary}`)
+      : contentMode === 'notes' && contentExcerpt
+        ? contentExcerpt
+        : `${chapterTitle} — ${modeLabel}. ${subjectName}, ${boardName} ${className}.`;
   const _bingDescTerms = bingTopTerms
     .filter(t => !_baseDesc.toLowerCase().includes(t.toLowerCase()))
     .slice(0, 3);
@@ -1281,11 +1343,15 @@ export default function ChapterPage() {
             : seoTitle
         }
         description={
-          topicSlugParam && activeDeepLinkTopic && activeDeepLinkTopic.definition
+          topicSlugParam && activeDeepLinkTopic && (isAssamesePath
+            ? (activeDeepLinkTopic.definition_as || activeDeepLinkTopic.definition)
+            : activeDeepLinkTopic.definition)
             // Trim the definition to ~280 chars so the meta
             // description stays within Google's snippet budget while
             // surfacing the topic-specific answer text.
-            ? activeDeepLinkTopic.definition.slice(0, 280)
+            ? (isAssamesePath
+              ? (activeDeepLinkTopic.definition_as || activeDeepLinkTopic.definition)
+              : activeDeepLinkTopic.definition).slice(0, 280)
             : seoDesc
         }
         url={canonical}
@@ -1320,6 +1386,10 @@ export default function ChapterPage() {
           // Both fall back gracefully when the source data is absent.
           data: {
             ...data,
+            title: chapterTitle,
+            chapter_title: chapterTitle,
+            meta_description: seoDesc,
+            language: useAssameseMetadata ? 'as' : 'en',
             ...(faqEntries && faqEntries.length > 0 ? { faq_entries: faqEntries } : {}),
             // `publishedTopics` is the runtime/SPA source; preload
             // already baked it onto `data.published_topics` for SSR.

@@ -479,20 +479,42 @@ export function chapterSchema(data, url, basePath = '') {
     articleNode.hasPart = topicLearningResources.map(t => ({ '@type': 'LearningResource', '@id': t['@id'] }));
   }
 
-  // citation array — reference NCERT and board official curriculum
-  if (subjectName || boardName) {
-    articleNode.citation = [
-      { '@type': 'CreativeWork', name: 'NCERT Textbook - ' + subjectName, url: 'https://ncert.nic.in/', publisher: { '@type': 'Organization', name: 'NCERT' } },
-      { '@type': 'CreativeWork', name: (boardName || 'AHSEC') + ' Official Curriculum', url: 'https://ahsec.assam.gov.in/', publisher: { '@type': 'Organization', name: boardName || 'AHSEC' } },
-    ];
-  }
+  // Cite only sources explicitly attached to this published record. A
+  // generic NCERT/AHSEC citation is inaccurate for university courses and
+  // can make an AI/search result appear officially verified when it is not.
+  const citations = Array.isArray(data.citations) ? data.citations : [];
+  const verifiedCitations = citations
+    .filter((citation) => citation && typeof citation.name === 'string' && citation.name.trim())
+    .map((citation) => ({
+      '@type': 'CreativeWork',
+      name: citation.name.trim(),
+      ...(typeof citation.url === 'string' && /^https:\/\//i.test(citation.url)
+        ? { url: citation.url }
+        : {}),
+      ...(citation.publisher
+        ? { publisher: typeof citation.publisher === 'string'
+          ? { '@type': 'Organization', name: citation.publisher }
+          : citation.publisher }
+        : {}),
+    }));
+  if (verifiedCitations.length > 0) articleNode.citation = verifiedCitations;
 
-  // sourceOrganization — the educational board that owns the curriculum
-  articleNode.sourceOrganization = {
-    '@type': 'Organization',
-    name: boardName || 'AHSEC',
-    url: boardName && boardName.toLowerCase().includes('seba') ? 'https://sebaonline.org/' : 'https://ahsec.assam.gov.in/',
-  };
+  const sourceOrganization = data.source_organization;
+  const sourceName = typeof sourceOrganization === 'string'
+    ? sourceOrganization
+    : sourceOrganization?.name || data.university_name || boardName;
+  const sourceUrl = typeof sourceOrganization === 'object'
+    ? sourceOrganization?.url
+    : data.source_url;
+  if (sourceName) {
+    articleNode.sourceOrganization = {
+      '@type': 'Organization',
+      name: sourceName,
+      ...(typeof sourceUrl === 'string' && /^https:\/\//i.test(sourceUrl)
+        ? { url: sourceUrl }
+        : {}),
+    };
+  }
 
   // lastReviewed — signals review freshness to AI crawlers
   if (dateModified) articleNode.lastReviewed = dateModified;
