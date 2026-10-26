@@ -28,12 +28,65 @@ export function getSubjectLandingPath(sub = {}) {
     : `/subject/${sub.id}`;
 }
 
+const MAKERS_SUBJECT_SLUG = 'makers-of-modern-assam-mdc-01013';
+const MAKERS_ASSAMESE_TEXT = {
+  name: 'আধুনিক অসমৰ নিৰ্মাতা সকল',
+  description: 'গুৱাহাটী বিশ্ববিদ্যালয়ৰ FYUGP প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা-সাহিত্য, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা। ইংৰাজী আৰু অসমীয়াত অধ্যয়ন কৰক।',
+};
+const ASSAMESE_UNIT_TITLES = {
+  'unit-1-language-literature-culture': 'গোট ১: ভাষা, সাহিত্য আৰু সংস্কৃতি',
+  'unit-2-political-foundations': 'গোট ২: ৰাজনৈতিক ভিত্তিপ্ৰতিষ্ঠাকাৰীসকল',
+  'unit-3-women-education-politics-literature': 'গোট ৩: নাৰী শিক্ষা, ৰাজনীতি আৰু সাহিত্য',
+};
+const ASSAMESE_HIERARCHY_LABELS = {
+  board: { degree: 'স্নাতক' },
+  class: {
+    '1st semester': 'প্ৰথম ষাণ্মাসিক',
+    '2nd semester': 'দ্বিতীয় ষাণ্মাসিক',
+    '3rd semester': 'তৃতীয় ষাণ্মাসিক',
+    '4th semester': 'চতুৰ্থ ষাণ্মাসিক',
+    '5th semester': 'পঞ্চম ষাণ্মাসিক',
+    '6th semester': 'ষষ্ঠ ষাণ্মাসিক',
+  },
+  stream: {
+    'b.a.': 'বি.এ.',
+    'b.sc': 'বি.এছ.চি.',
+    'b.sc.': 'বি.এছ.চি.',
+    'b.com': 'বি.কম.',
+    'b.com.': 'বি.কম.',
+  },
+};
+
+export function getSubjectCardName(sub = {}, isAs = false) {
+  if (!isAs) return sub.name || '';
+  return sub.name_as || (sub.slug === MAKERS_SUBJECT_SLUG ? MAKERS_ASSAMESE_TEXT.name : sub.name) || '';
+}
+
+export function getSubjectCardDescription(sub = {}, isAs = false) {
+  if (!isAs) return sub.description || '';
+  return sub.description_as || (sub.slug === MAKERS_SUBJECT_SLUG ? MAKERS_ASSAMESE_TEXT.description : sub.description) || '';
+}
+
+export function getSubjectCardHierarchyLabel(value = '', kind, isAs = false) {
+  if (!isAs || !value) return value;
+  const translations = ASSAMESE_HIERARCHY_LABELS[kind] || {};
+  return translations[value.trim().toLowerCase()] || value;
+}
+
+export function getSubjectCardChapterTitle(chapter = {}, isAs = false) {
+  if (!isAs) return chapter.title || '';
+  return chapter.title_as || ASSAMESE_UNIT_TITLES[chapter.slug] || chapter.title || '';
+}
+
 const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onToggleSave, onAskAI, index }) {
   const queryClient = useQueryClient();
   const { contentLang } = useContentLang();
   const isAs = contentLang === 'as';
-  const displayName = isAs && sub.name_as ? sub.name_as : sub.name;
-  const displayDescription = isAs && sub.description_as ? sub.description_as : sub.description;
+  const displayName = getSubjectCardName(sub, isAs);
+  const displayDescription = getSubjectCardDescription(sub, isAs);
+  const displayBoardName = getSubjectCardHierarchyLabel(sub.boardName, 'board', isAs);
+  const displayClassName = getSubjectCardHierarchyLabel(sub.className, 'class', isAs);
+  const displayStreamName = getSubjectCardHierarchyLabel(sub.streamName, 'stream', isAs);
   const thumbColors = useMemo(() => THUMB_GRADIENTS[sub.gradient] || THUMB_GRADIENTS.math, [sub.gradient]);
   const tags = useMemo(() => Array.isArray(sub.tags) ? sub.tags : [], [sub.tags]);
   const visibleTags = useMemo(() => tags.slice(0, 3), [tags]);
