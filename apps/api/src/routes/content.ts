@@ -1227,20 +1227,31 @@ contentRouter.get('/chapters/:chapterId/faq-jsonld', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  type QAItem = { question?: string; answer?: string };
+  type QAItem = { question?: string; answer?: string; solution?: string };
   const qaArr = safeParse<QAItem[]>(ch.qaEn) ?? [];
+  const entries = qaArr.flatMap((item) => {
+    const question = item.question?.trim() ?? '';
+    const answer = item.answer?.trim() || item.solution?.trim() || '';
+    return question.length > 5 && answer.length > 10
+      ? [{ question, answer }]
+      : [];
+  });
 
-  const faqJsonLd = qaArr.length > 0 ? {
+  const faqJsonLd = entries.length >= 2 ? {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: qaArr.slice(0, 20).map(q => ({
+    mainEntity: entries.slice(0, 20).map(q => ({
       '@type': 'Question',
-      name: q.question ?? '',
-      acceptedAnswer: { '@type': 'Answer', text: q.answer ?? '' },
+      name: q.question,
+      acceptedAnswer: { '@type': 'Answer', text: q.answer },
     })),
   } : null;
 
-  return c.json({ chapter_id: ch.id, faq_jsonld: faqJsonLd });
+  return c.json({
+    chapter_id: ch.id,
+    entries: entries.slice(0, 20),
+    faq_jsonld: faqJsonLd,
+  });
 });
 
 // ── GET /question-papers ───────────────────────────────────────────────────────

@@ -165,6 +165,14 @@ beforeAll(async () => {
         '[{"title":"Hidden only","slug":"hidden-only"}]'
       )
     `),
+    env.DB.prepare(`
+      INSERT INTO chapters (id, subject_id, title, slug, status, qa_en)
+      VALUES ('faq-complete', 'related-subject', 'FAQ fixture', 'faq-complete', 'published', ?)
+    `).bind(JSON.stringify([
+      { question: 'A complete question one?', answer: 'A reviewed answer with enough detail.' },
+      { question: 'A question with no answer?', answer: '' },
+      { question: 'A complete question two?', solution: 'A reviewed solution with enough detail.' },
+    ])),
   ]);
 });
 
@@ -177,6 +185,24 @@ async function get(pathname: string): Promise<Response> {
 }
 
 describe('Assamese public content metadata', () => {
+  it('exposes only complete Q&A pairs to FAQ metadata', async () => {
+    const response = await get('/api/v1/content/chapters/faq-complete/faq-jsonld');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      entries: [
+        { question: 'A complete question one?', answer: 'A reviewed answer with enough detail.' },
+        { question: 'A complete question two?', answer: 'A reviewed solution with enough detail.' },
+      ],
+      faq_jsonld: {
+        '@type': 'FAQPage',
+        mainEntity: [
+          { name: 'A complete question one?' },
+          { name: 'A complete question two?' },
+        ],
+      },
+    });
+  });
+
   it('prefers translated chapter metadata, slug, and topic titles', async () => {
     const response = await get('/api/v1/content/chapter-by-slug-as/ahsec/class-12/physics/gati');
     expect(response.status).toBe(200);

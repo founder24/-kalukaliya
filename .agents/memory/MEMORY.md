@@ -83,6 +83,7 @@
 - [Explicit curriculum scope](chat-curriculum-scope.md) — fail closed on explicit scope conflicts; map verified chat sources through the published hierarchy and retain provenance in history.
 - [Chat ad scope](chat-ad-scope.md) — hide ad placements on `/chat` only; keep them unchanged on every other page.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
+- [Complete Q&A indexing](rag-complete-qa.md) — only expose or index Q&A when the question has an approved answer or solution.
 - [Chat cancellation state](chat-cancellation-state.md) — use immediate stream abort plus bounded D1 tombstone polling, not per-token database reads.
 - [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
 - [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
