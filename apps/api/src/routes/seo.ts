@@ -7,6 +7,7 @@
 
 import { Hono } from 'hono';
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
+import { completeTopicPageLanguages } from '../services/topic-page';
 import type { Env } from '../types';
 
 export const seoRouter = new Hono<{ Bindings: Env }>();
@@ -24,6 +25,8 @@ type ContentUrl = {
   chapterSlug: string;
   notesEn: string | null;
   publishedTopics: string | null;
+  qaEn: string | null;
+  qaAs: string | null;
   updatedAt: number | null;
   createdAt: number | null;
 };
@@ -54,14 +57,17 @@ function topicEntries(rows: ContentUrl[]): string[] {
   for (const row of rows) {
     try {
       const topics = indexablePublishedTopics(JSON.parse(row.publishedTopics ?? '[]'));
+      const qaEn = JSON.parse(row.qaEn ?? '[]') as unknown[];
+      const qaAs = JSON.parse(row.qaAs ?? '[]') as unknown[];
       for (const topic of topics) {
         const slug = String(topic.topic_slug);
         const location = `${contentUrl(row)}/topic/${encodeURIComponent(slug)}`;
         const assameseOnly = topic.language === 'Assamese';
-        if (!assameseOnly && !entries.has(location)) {
+        const completeLanguages = completeTopicPageLanguages(topic, qaEn, qaAs);
+        if (!assameseOnly && completeLanguages.includes('en') && !entries.has(location)) {
           entries.set(location, urlEntry(location, date(row.updatedAt), '0.6'));
         }
-        if (assameseOnly || completeAssameseTopic(topic)) {
+        if ((assameseOnly || completeAssameseTopic(topic)) && completeLanguages.includes('as')) {
           const slugAs = String(topic.topic_slug_as ?? slug).trim();
           const localizedLocation = `${SITE_URL}/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}/topic/${encodeURIComponent(slugAs)}`;
           if (!entries.has(localizedLocation)) {
@@ -89,6 +95,7 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
   const subjectFilter = subjectSlug ? 'AND s.slug = ?' : '';
   const statement = c.env.DB.prepare(`
     SELECT c.title, c.slug AS chapter_slug, c.notes_en, c.published_topics,
+           c.qa_en, c.qa_as,
            c.updated_at, c.created_at, s.name AS subject_name, s.slug AS subject_slug,
            b.slug AS board_slug, cl.slug AS class_slug
     FROM chapters c
@@ -111,6 +118,8 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
     chapterSlug: String(row.chapter_slug ?? ''),
     notesEn: typeof row.notes_en === 'string' ? row.notes_en : null,
     publishedTopics: typeof row.published_topics === 'string' ? row.published_topics : null,
+    qaEn: typeof row.qa_en === 'string' ? row.qa_en : null,
+    qaAs: typeof row.qa_as === 'string' ? row.qa_as : null,
     updatedAt: typeof row.updated_at === 'number' ? row.updated_at : null,
     createdAt: typeof row.created_at === 'number' ? row.created_at : null,
   }));
