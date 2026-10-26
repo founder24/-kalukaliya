@@ -12,7 +12,16 @@ import type { Env } from '../types';
 export type RagScope = 'notes' | 'qa' | 'pyq';
 type SourceType = 'notes' | 'important_questions' | 'pyq';
 const sourceFor: Record<RagScope, SourceType> = { notes: 'notes', qa: 'important_questions', pyq: 'pyq' };
+const VECTORIZE_DELETE_BATCH_SIZE = 100;
 const now = () => Math.floor(Date.now() / 1000);
+
+export function batchVectorIds(ids: string[]): string[][] {
+  const batches: string[][] = [];
+  for (let offset = 0; offset < ids.length; offset += VECTORIZE_DELETE_BATCH_SIZE) {
+    batches.push(ids.slice(offset, offset + VECTORIZE_DELETE_BATCH_SIZE));
+  }
+  return batches;
+}
 
 function parse(value: string | null): Array<Record<string, string>> {
   try { return value ? JSON.parse(value) as Array<Record<string, string>> : []; } catch { return []; }
@@ -43,7 +52,7 @@ export async function purgeRagScope(env: Env, chapterId: string, scope: RagScope
   // Deterministic legacy IDs must be swept to prevent stale tails after older deployments.
   for (const medium of ['english', 'assamese']) for (let index = 0; index < 500; index++) ids.push(`${chapterId}_${medium}_${sourceType}_${index}`);
   const unique = [...new Set(ids)];
-  for (let offset = 0; offset < unique.length; offset += 1000) await env.VECTORIZE.deleteByIds(unique.slice(offset, offset + 1000));
+  for (const batch of batchVectorIds(unique)) await env.VECTORIZE.deleteByIds(batch);
   await db.delete(chunks).where(and(eq(chunks.chapterId, chapterId), eq(chunks.sourceType, sourceType)));
 }
 
