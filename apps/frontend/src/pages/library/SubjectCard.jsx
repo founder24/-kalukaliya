@@ -31,27 +31,44 @@ export function getSubjectLandingPath(sub = {}) {
 const MAKERS_SUBJECT_SLUG = 'makers-of-modern-assam-mdc-01013';
 const MAKERS_ASSAMESE_TEXT = {
   name: 'আধুনিক অসমৰ নিৰ্মাতা সকল',
-  description: 'গুৱাহাটী বিশ্ববিদ্যালয়ৰ FYUGP প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা-সাহিত্য, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা। ইংৰাজী আৰু অসমীয়াত অধ্যয়ন কৰক।',
+  description: 'গুৱাহাটী বিশ্ববিদ্যালয়ৰ প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা-সাহিত্য, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা। ইংৰাজী আৰু অসমীয়াত অধ্যয়ন কৰক।',
 };
 const ASSAMESE_UNIT_TITLES = {
   'unit-1-language-literature-culture': 'গোট ১: ভাষা, সাহিত্য আৰু সংস্কৃতি',
   'unit-2-political-foundations': 'গোট ২: ৰাজনৈতিক ভিত্তিপ্ৰতিষ্ঠাকাৰীসকল',
   'unit-3-women-education-politics-literature': 'গোট ৩: নাৰী শিক্ষা, ৰাজনীতি আৰু সাহিত্য',
 };
+const ASSAMESE_UNIT_TITLES_BY_ENGLISH_TITLE = {
+  'unit i language literature culture': ASSAMESE_UNIT_TITLES['unit-1-language-literature-culture'],
+  'unit ii framers of the political foundations': ASSAMESE_UNIT_TITLES['unit-2-political-foundations'],
+  'unit iii women s education politics and literature': ASSAMESE_UNIT_TITLES['unit-3-women-education-politics-literature'],
+  'unit 1 language literature culture': ASSAMESE_UNIT_TITLES['unit-1-language-literature-culture'],
+  'unit 2 framers of the political foundations': ASSAMESE_UNIT_TITLES['unit-2-political-foundations'],
+  'unit 3 women s education politics and literature': ASSAMESE_UNIT_TITLES['unit-3-women-education-politics-literature'],
+};
 const ASSAMESE_HIERARCHY_LABELS = {
   board: { degree: 'স্নাতক' },
   class: {
+    '1st': 'প্ৰথম ষাণ্মাসিক',
     '1st semester': 'প্ৰথম ষাণ্মাসিক',
+    '2nd': 'দ্বিতীয় ষাণ্মাসিক',
     '2nd semester': 'দ্বিতীয় ষাণ্মাসিক',
+    '3rd': 'তৃতীয় ষাণ্মাসিক',
     '3rd semester': 'তৃতীয় ষাণ্মাসিক',
+    '4th': 'চতুৰ্থ ষাণ্মাসিক',
     '4th semester': 'চতুৰ্থ ষাণ্মাসিক',
+    '5th': 'পঞ্চম ষাণ্মাসিক',
     '5th semester': 'পঞ্চম ষাণ্মাসিক',
+    '6th': 'ষষ্ঠ ষাণ্মাসিক',
     '6th semester': 'ষষ্ঠ ষাণ্মাসিক',
   },
   stream: {
+    ba: 'বি.এ.',
     'b.a.': 'বি.এ.',
+    bsc: 'বি.এছ.চি.',
     'b.sc': 'বি.এছ.চি.',
     'b.sc.': 'বি.এছ.চি.',
+    bcom: 'বি.কম.',
     'b.com': 'বি.কম.',
     'b.com.': 'বি.কম.',
   },
@@ -64,18 +81,29 @@ export function getSubjectCardName(sub = {}, isAs = false) {
 
 export function getSubjectCardDescription(sub = {}, isAs = false) {
   if (!isAs) return sub.description || '';
-  return sub.description_as || (sub.slug === MAKERS_SUBJECT_SLUG ? MAKERS_ASSAMESE_TEXT.description : sub.description) || '';
+  if (sub.slug === MAKERS_SUBJECT_SLUG) {
+    if (sub.description_as && !/\bFYUGP\b/i.test(sub.description_as)) return sub.description_as;
+    return MAKERS_ASSAMESE_TEXT.description;
+  }
+  return sub.description_as || sub.description || '';
 }
 
 export function getSubjectCardHierarchyLabel(value = '', kind, isAs = false) {
   if (!isAs || !value) return value;
   const translations = ASSAMESE_HIERARCHY_LABELS[kind] || {};
-  return translations[value.trim().toLowerCase()] || value;
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, ' ');
+  const withoutPeriods = normalized.replaceAll('.', '');
+  return translations[normalized] || translations[withoutPeriods] || value;
 }
 
 export function getSubjectCardChapterTitle(chapter = {}, isAs = false) {
   if (!isAs) return chapter.title || '';
-  return chapter.title_as || ASSAMESE_UNIT_TITLES[chapter.slug] || chapter.title || '';
+  const normalizedTitle = (chapter.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return chapter.title_as
+    || ASSAMESE_UNIT_TITLES[chapter.slug]
+    || ASSAMESE_UNIT_TITLES_BY_ENGLISH_TITLE[normalizedTitle]
+    || chapter.title
+    || '';
 }
 
 export function getSubjectCardPyqTitle(paper = {}, index = 0, isAs = false) {

@@ -40,7 +40,8 @@ describe('SubjectCard Assamese localization', () => {
 
   it('uses saved Assamese subject metadata or the course-specific fallback', () => {
     expect(getSubjectCardName(subject, true)).toBe('আধুনিক অসমৰ নিৰ্মাতা সকল');
-    expect(getSubjectCardDescription(subject, true)).toContain('গুৱাহাটী বিশ্ববিদ্যালয়ৰ');
+    expect(getSubjectCardDescription({ ...subject, description_as: 'FYUGP English text' }, true))
+      .toBe('গুৱাহাটী বিশ্ববিদ্যালয়ৰ প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা-সাহিত্য, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা। ইংৰাজী আৰু অসমীয়াত অধ্যয়ন কৰক।');
     expect(getSubjectCardName({ ...subject, name_as: 'D1 নাম' }, true)).toBe('D1 নাম');
     expect(getSubjectCardDescription({ ...subject, description_as: 'D1 বৰ্ণনা' }, true)).toBe('D1 বৰ্ণনা');
     expect(getSubjectCardName(subject, false)).toBe(subject.name);
@@ -49,11 +50,15 @@ describe('SubjectCard Assamese localization', () => {
   it('localizes the degree, semester, stream, and unit labels', () => {
     expect(getSubjectCardHierarchyLabel(subject.boardName, 'board', true)).toBe('স্নাতক');
     expect(getSubjectCardHierarchyLabel(subject.className, 'class', true)).toBe('প্ৰথম ষাণ্মাসিক');
+    expect(getSubjectCardHierarchyLabel('1st', 'class', true)).toBe('প্ৰথম ষাণ্মাসিক');
     expect(getSubjectCardHierarchyLabel(subject.streamName, 'stream', true)).toBe('বি.এ.');
     expect(getSubjectCardChapterTitle({
       title: 'Unit I: Language, Literature & Culture',
       slug: 'unit-1-language-literature-culture',
     }, true)).toBe('গোট ১: ভাষা, সাহিত্য আৰু সংস্কৃতি');
+    expect(getSubjectCardChapterTitle({
+      title: 'Unit II: Framers of the Political Foundations',
+    }, true)).toBe('গোট ২: ৰাজনৈতিক ভিত্তিপ্ৰতিষ্ঠাকাৰীসকল');
   });
 
   it('prefers stored Assamese unit titles and preserves English mode', () => {
