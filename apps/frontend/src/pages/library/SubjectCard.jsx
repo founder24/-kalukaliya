@@ -78,6 +78,13 @@ export function getSubjectCardChapterTitle(chapter = {}, isAs = false) {
   return chapter.title_as || ASSAMESE_UNIT_TITLES[chapter.slug] || chapter.title || '';
 }
 
+export function getSubjectCardPyqTitle(paper = {}, index = 0, isAs = false) {
+  if (!isAs) return paper.name || `Paper ${index + 1}`;
+  if (paper.name_as) return paper.name_as;
+  if (paper.year) return `বিগত বৰ্ষৰ প্ৰশ্নসমূহ — ${paper.year}`;
+  return 'প্ৰশ্নকাকত';
+}
+
 const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onToggleSave, onAskAI, index }) {
   const queryClient = useQueryClient();
   const { contentLang } = useContentLang();
@@ -108,14 +115,18 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     e.preventDefault();
     const parts = [displayName];
     if (displayDescription) parts.push(displayDescription);
-    const meta = [sub.board_name || sub.boardName, sub.class_name || sub.className, sub.stream_name || sub.streamName].filter(Boolean).join(' · ');
+    const meta = [
+      getSubjectCardHierarchyLabel(sub.board_name || sub.boardName, 'board', isAs),
+      getSubjectCardHierarchyLabel(sub.class_name || sub.className, 'class', isAs),
+      getSubjectCardHierarchyLabel(sub.stream_name || sub.streamName, 'stream', isAs),
+    ].filter(Boolean).join(' · ');
     if (meta) parts.push(meta);
     const chCount = chapters.length || sub.chapter_count || sub.chapterCount || 0;
-    if (chCount > 0) parts.push(`${chCount} chapters`);
-    if (sub.tags?.length) parts.push(`Topics: ${sub.tags.join(', ')}`);
-    parts.push('Study on Syrabit.ai');
+    if (chCount > 0) parts.push(isAs ? `${chCount}টা অধ্যায়` : `${chCount} chapters`);
+    if (sub.tags?.length) parts.push(`${isAs ? 'বিষয়সমূহ' : 'Topics'}: ${sub.tags.join(', ')}`);
+    parts.push(isAs ? 'Syrabit.ai-ত অধ্যয়ন কৰক' : 'Study on Syrabit.ai');
     share(displayName, subjectLandingPath, { text: parts.join('\n') });
-  }, [sub, chapters.length, subjectLandingPath, share, displayName, displayDescription]);
+  }, [sub, chapters.length, subjectLandingPath, share, displayName, displayDescription, isAs]);
 
   const handlePrefetch = useCallback(() => {
     if (sub.boardSlug && sub.classSlug && sub.slug) {
@@ -151,8 +162,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     // Subject-level PYQ papers — [{id, title, class_name, year, description, pages:[]}]
     const pyqGroups = (sub.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
-      title:       p.name || `Paper ${pi + 1}`,
-      class_name:  p.class_name || '',
+      title:       getSubjectCardPyqTitle(p, pi, isAs),
+      class_name:  getSubjectCardHierarchyLabel(p.class_name || '', 'class', isAs),
       year:        p.year || null,
       description: p.description || '',
       pages: (p.pages || []).map((pg, idx) => ({
@@ -164,7 +175,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     return [
       { key: 'notes',          label: isAs ? 'টোকা' : 'Notes',     chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
       { key: 'qa',             label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
-      { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs',   chapters: pyqChs,  pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
+      { key: 'question_paper', label: isAs ? 'বিগত বৰ্ষৰ প্ৰশ্ন' : 'PYQs',   chapters: pyqChs,  pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
     ];
   }, [chapters, sub.pyq_papers, isAs]);
 
@@ -217,14 +228,14 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
             <Layers size={10} className="text-white" />
           </div>
           <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: thumbColors[0] }}>
-            {sub.streamName || sub.boardName || 'Subject'}
+            {displayStreamName || displayBoardName || (isAs ? 'বিষয়' : 'Subject')}
           </span>
         </div>
         <div className="flex items-center gap-2">
           {hasDocument && (
             <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold"
               style={{ background: 'rgba(16,185,129,0.10)', color: '#059669', border: '1px solid rgba(16,185,129,0.20)' }}>
-              <Lock size={7} /> Doc
+              <Lock size={7} /> {isAs ? 'নথি' : 'Doc'}
             </span>
           )}
           {isSaved && (
@@ -235,7 +246,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
       {/* Subject info */}
       <div className="px-3 sm:px-4 pt-3 pb-2 relative z-[2]">
-        <Link to={subjectLandingPath} className="block group/title static" aria-label={`View ${displayName}`}>
+        <Link to={subjectLandingPath} className="block group/title static" aria-label={`${isAs ? 'বিষয়টো চাওক' : 'View'} ${displayName}`}>
           <span className="absolute inset-0 z-0" aria-hidden="true" />
           <div className="flex items-start gap-3 mb-2">
             <div
@@ -259,16 +270,16 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                   background: 'rgba(139,92,246,0.12)',
                   color: 'hsl(var(--primary))',
                 }}>
-                  {sub.boardName}
+                  {displayBoardName}
                 </span>
                 <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                  {sub.className}
+                  {displayClassName}
                 </span>
                 {sub.streamName && (
                   <>
                     <span className="text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>·</span>
                     <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                      {sub.streamName}
+                      {displayStreamName}
                     </span>
                   </>
                 )}
@@ -318,7 +329,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           className="flex items-center gap-1.5 px-2.5 py-1.5 overflow-x-auto scrollbar-none"
           style={{ borderBottom: '1px solid rgba(139,92,246,0.06)' }}
           role="group"
-          aria-label={`${sub.name} content sections`}
+          aria-label={`${displayName} ${isAs ? 'বিষয়বস্তুৰ শাখাসমূহ' : 'content sections'}`}
         >
           {SECTIONS.map(sec => (
             <button
@@ -386,7 +397,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setExpandedPyqId(isOpen ? null : grp.id); }}
                         aria-expanded={isOpen}
-                        aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${grp.title}`}
+                        aria-label={`${isOpen ? (isAs ? 'সামৰি থওক' : 'Collapse') : (isAs ? 'মেলক' : 'Expand')} ${grp.title}`}
                         className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-xs transition-all hover:bg-amber-50/60 active:bg-amber-100/60 text-left cursor-pointer"
                       >
                         <span
@@ -406,7 +417,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                           )}
                         </div>
                         <span className="text-[9px] shrink-0 mr-0.5 font-medium" style={{ color: `${section.accent}70` }}>
-                          {grp.pages.length}pg
+                          {isAs ? `${grp.pages.length} পৃষ্ঠা` : `${grp.pages.length}pg`}
                         </span>
                         <ChevronDown
                           size={11}
@@ -420,7 +431,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                         <div style={{ background: 'rgba(217,119,6,0.03)' }}>
                           {grp.pages.length === 0 ? (
                             <p className="text-center text-[10px] py-3 px-2" style={{ color: `${section.accent}60` }}>
-                              No pages uploaded yet.
+                              {isAs ? 'এতিয়ালৈ কোনো পৃষ্ঠা আপলোড কৰা হোৱা নাই।' : 'No pages uploaded yet.'}
                             </p>
                           ) : (
                             <div className="grid grid-cols-2 gap-1.5 px-2 pb-2">
@@ -435,7 +446,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                                 >
                                   <img
                                     src={page.url}
-                                    alt={`pg ${page.pageNum}`}
+                                    alt={`${isAs ? 'পৃষ্ঠা' : 'pg'} ${page.pageNum}`}
                                     className="w-full object-cover"
                                     style={{ height: 110 }}
                                     loading="lazy"
@@ -445,7 +456,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                                     className="absolute top-1 left-1 text-[9px] font-bold text-white px-1 py-0.5 rounded"
                                     style={{ background: 'rgba(0,0,0,0.45)' }}
                                   >
-                                    p{page.pageNum}
+                                    {isAs ? 'পৃষ্ঠা' : 'p'}{page.pageNum}
                                   </span>
                                 </a>
                               ))}
@@ -511,10 +522,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                     <Link
                       to={chPath}
                       className="truncate transition-colors flex-1 font-medium"
-                      title={`${ch.title} — ${sub.name}`}
+                      title={`${getSubjectCardChapterTitle(ch, isAs)} — ${displayName}`}
                       style={{ color: section.accent, opacity: (hasValidLink && hasContent) ? 1 : 0.5 }}
                     >
-                      {(isAs && ch.title_as) ? ch.title_as : ch.title}
+                      {getSubjectCardChapterTitle(ch, isAs)}
                     </Link>
                     <ExternalLink size={10} className="shrink-0" style={{ color: 'hsl(var(--muted-foreground) / 0.2)' }} />
                   </div>
@@ -544,7 +555,9 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         <button
           type="button"
           onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
-          aria-label={isSaved ? `Unsave ${sub.name}` : `Save ${sub.name}`}
+          aria-label={isSaved
+            ? (isAs ? `${displayName} সংৰক্ষণৰ পৰা আঁতৰাওক` : `Unsave ${displayName}`)
+            : (isAs ? `${displayName} সংৰক্ষণ কৰক` : `Save ${displayName}`)}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95"
           style={
             isSaved
@@ -584,9 +597,9 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           onClick={() => {
             const activeSec = SECTIONS.find(s => s.key === activeSection);
             const firstChapterId = activeSec?.chapters?.[0]?.id || null;
-            onAskAI(sub.id, hasDocument, sub.name, activeSection, firstChapterId);
+            onAskAI(sub.id, hasDocument, displayName, activeSection, firstChapterId);
           }}
-          aria-label={`Ask AI about ${sub.name}`}
+          aria-label={isAs ? `${displayName} বিষয়ে AI-ৰ পৰা সোধক` : `Ask AI about ${displayName}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold text-white transition-all duration-200 hover:opacity-90 active:scale-95"
           style={{
             background: hasDocument
@@ -604,7 +617,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           type="button"
           onClick={handleShare}
           disabled={sharing}
-          aria-label={`Share ${sub.name}`}
+          aria-label={isAs ? `${displayName} শ্বেয়াৰ কৰক` : `Share ${displayName}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95 disabled:opacity-50"
           style={{
             color: 'hsl(var(--muted-foreground))',
