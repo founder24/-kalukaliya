@@ -41,7 +41,7 @@ describe('SubjectCard Assamese localization', () => {
   it('uses saved Assamese subject metadata or the course-specific fallback', () => {
     expect(getSubjectCardName(subject, true)).toBe('আধুনিক অসমৰ নিৰ্মাতা সকল');
     expect(getSubjectCardDescription({ ...subject, description_as: 'FYUGP English text' }, true))
-      .toBe('গুৱাহাটী বিশ্ববিদ্যালয়ৰ প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা-সাহিত্য, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা। ইংৰাজী আৰু অসমীয়াত অধ্যয়ন কৰক।');
+      .toBe('গুৱাহাটী বিশ্ববিদ্যালয়ৰ NEP 2020-ৰ অধীনৰ চাৰি বছৰীয়া স্নাতক কাৰ্যসূচী (FYUGP), প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত-সংস্কৃতি, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।');
     expect(getSubjectCardName({ ...subject, name_as: 'D1 নাম' }, true)).toBe('D1 নাম');
     expect(getSubjectCardDescription({ ...subject, description_as: 'D1 বৰ্ণনা' }, true)).toBe('D1 বৰ্ণনা');
     expect(getSubjectCardName(subject, false)).toBe(subject.name);
@@ -71,6 +71,17 @@ describe('SubjectCard Assamese localization', () => {
       title: 'Unit II: Framers of the Political Foundations',
       slug: 'unit-2-political-foundations',
     }, false)).toBe('Unit II: Framers of the Political Foundations');
+  });
+
+  it('localizes the question-bank title when a stream copy has no saved Assamese title', () => {
+    expect(getSubjectCardChapterTitle({
+      title: 'Question Bank — Units I–III',
+      slug: 'question-bank-units-1-3',
+    }, true)).toBe('প্ৰশ্নসম্ভাৰ — গোট ১–৩');
+    expect(getSubjectCardChapterTitle({
+      title: 'Question Bank — Units I–III',
+      slug: 'question-bank-units-1-3',
+    }, false)).toBe('Question Bank — Units I–III');
   });
 
   it('localizes previous-year paper labels without changing English mode', () => {

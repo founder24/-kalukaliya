@@ -31,7 +31,7 @@ export function getSubjectLandingPath(sub = {}) {
 const MAKERS_SUBJECT_SLUG = 'makers-of-modern-assam-mdc-01013';
 const MAKERS_ASSAMESE_TEXT = {
   name: 'আধুনিক অসমৰ নিৰ্মাতা সকল',
-  description: 'গুৱাহাটী বিশ্ববিদ্যালয়ৰ প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা-সাহিত্য, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা। ইংৰাজী আৰু অসমীয়াত অধ্যয়ন কৰক।',
+  description: 'গুৱাহাটী বিশ্ববিদ্যালয়ৰ NEP 2020-ৰ অধীনৰ চাৰি বছৰীয়া স্নাতক কাৰ্যসূচী (FYUGP), প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত-সংস্কৃতি, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।',
 };
 const ASSAMESE_UNIT_TITLES = {
   'unit-1-language-literature-culture': 'গোট ১: ভাষা, সাহিত্য আৰু সংস্কৃতি',
@@ -45,6 +45,11 @@ const ASSAMESE_UNIT_TITLES_BY_ENGLISH_TITLE = {
   'unit 1 language literature culture': ASSAMESE_UNIT_TITLES['unit-1-language-literature-culture'],
   'unit 2 framers of the political foundations': ASSAMESE_UNIT_TITLES['unit-2-political-foundations'],
   'unit 3 women s education politics and literature': ASSAMESE_UNIT_TITLES['unit-3-women-education-politics-literature'],
+};
+const ASSAMESE_CONTENT_TITLES = {
+  'question-bank-units-1-3': 'প্ৰশ্নসম্ভাৰ — গোট ১–৩',
+  'question bank units i iii': 'প্ৰশ্নসম্ভাৰ — গোট ১–৩',
+  'question bank units 1 3': 'প্ৰশ্নসম্ভাৰ — গোট ১–৩',
 };
 const ASSAMESE_HIERARCHY_LABELS = {
   board: { degree: 'স্নাতক' },
@@ -102,6 +107,8 @@ export function getSubjectCardChapterTitle(chapter = {}, isAs = false) {
   return chapter.title_as
     || ASSAMESE_UNIT_TITLES[chapter.slug]
     || ASSAMESE_UNIT_TITLES_BY_ENGLISH_TITLE[normalizedTitle]
+    || ASSAMESE_CONTENT_TITLES[chapter.slug]
+    || ASSAMESE_CONTENT_TITLES[normalizedTitle]
     || chapter.title
     || '';
 }
