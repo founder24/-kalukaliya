@@ -71,3 +71,11 @@ rate of exactly `1`.
 
 **How to apply:** From `apps/api`, use
 `wrangler tail syrabit-api-prod --sampling-rate 0.99` for production monitoring.
+
+## GitHub Actions dispatch evidence
+
+A successful `workflow_dispatch` HTTP response does not prove that a release started. The run may remain pending with no jobs and no pending environment approvals, even when Actions is enabled and the workflow is active. Do not treat dispatch acceptance as deployment evidence or proceed with production indexing.
+
+**Why:** The connected GitHub workflow permission accepted dispatch requests, but two production release runs stayed pending without creating jobs; the active Worker remained unchanged.
+
+**How to apply:** After dispatch, inspect the run and job list, then verify the deployed Worker version. If a single retry also remains pending with no jobs, stop dispatching and investigate through GitHub’s run UI or repository administration. A raw token is not evidence that GitHub’s runner queue has advanced.
