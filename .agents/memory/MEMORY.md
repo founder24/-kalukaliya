@@ -1,6 +1,7 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter sections, degree course types stored as stream slugs, and bilingual content flow
 - [Bilingual subject card metadata](bilingual-subject-card-metadata.md) — Localize card summaries from each published syllabus page’s Assamese meta description
+- [Shared Makers course listing](makers-shared-course-catalog.md) — Keep stream-specific course records, but show the same MDC subject once per class with its available streams
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard

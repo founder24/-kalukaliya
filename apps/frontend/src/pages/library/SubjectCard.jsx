@@ -128,7 +128,11 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   const displayDescription = getSubjectCardDescription(sub, isAs);
   const displayBoardName = getSubjectCardHierarchyLabel(sub.boardName, 'board', isAs);
   const displayClassName = getSubjectCardHierarchyLabel(sub.className, 'class', isAs);
-  const displayStreamName = getSubjectCardHierarchyLabel(sub.streamName, 'stream', isAs);
+  const displayStreamNames = (Array.isArray(sub.available_stream_names) && sub.available_stream_names.length
+    ? sub.available_stream_names
+    : [sub.streamName])
+    .map((name) => getSubjectCardHierarchyLabel(name, 'stream', isAs));
+  const displayStreamName = displayStreamNames.join(' · ');
   const thumbColors = useMemo(() => THUMB_GRADIENTS[sub.gradient] || THUMB_GRADIENTS.math, [sub.gradient]);
   const tags = useMemo(() => Array.isArray(sub.tags) ? sub.tags : [], [sub.tags]);
   const visibleTags = useMemo(() => tags.slice(0, 3), [tags]);
@@ -313,7 +317,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
                   {displayClassName}
                 </span>
-                {sub.streamName && (
+        {displayStreamNames.length > 0 && (
                   <>
                     <span className="text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>·</span>
                     <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
@@ -593,7 +597,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
       >
         <button
           type="button"
-          onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
+          onClick={() => { onToggleSave(sub.id, sub.duplicate_subject_ids || []); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
           aria-label={isSaved
             ? (isAs ? `${displayName} সংৰক্ষণৰ পৰা আঁতৰাওক` : `Unsave ${displayName}`)
             : (isAs ? `${displayName} সংৰক্ষণ কৰক` : `Save ${displayName}`)}

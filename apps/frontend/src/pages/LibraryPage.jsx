@@ -12,7 +12,7 @@ import {
   LIBRARY_SEO_URL,
 } from '@/lib/librarySeo';
 import { Analytics } from '@/utils/analytics';
-import { groupLibrarySubjects } from '@/utils/librarySubjectGrouping';
+import { deduplicateMakersSubjects, groupLibrarySubjects } from '@/utils/librarySubjectGrouping';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
@@ -208,7 +208,14 @@ export default function LibraryPage() {
   );
   const { data: savedSubjects = [] } = useSavedSubjects(user);
   const toggleSaved = useToggleSavedSubject(user);
-  const handleToggleSave = useCallback((id) => toggleSaved.mutate(id), [toggleSaved]);
+  const handleToggleSave = useCallback(async (id, duplicateIds = []) => {
+    const savedCopies = [id, ...duplicateIds].filter((subjectId) => savedSubjects.includes(subjectId));
+    if (savedCopies.length) {
+      for (const subjectId of savedCopies) await toggleSaved.mutateAsync(subjectId);
+      return;
+    }
+    toggleSaved.mutate(id);
+  }, [toggleSaved, savedSubjects]);
 
   useEffect(() => {
     const handleContentUploaded = () => {
@@ -320,7 +327,7 @@ export default function LibraryPage() {
   const filteredSubjects = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
     const seen = new Set();
-    return enrichedSubjects.filter((sub) => {
+    const matchingSubjects = enrichedSubjects.filter((sub) => {
       if (seen.has(sub.id)) return false;
       seen.add(sub.id);
       if (sub.status && !['published', 'active'].includes(sub.status)) return false;
@@ -333,13 +340,15 @@ export default function LibraryPage() {
       }
       if (q && searchScore(sub, q) === 0) return false;
       return true;
-    });
+    }).map((sub) => ({ ...sub, is_saved: savedSubjectsSet.has(sub.id) }));
+    return deduplicateMakersSubjects(matchingSubjects, streamMap);
   }, [enrichedSubjects, activeFilter, deferredQuery, savedSubjectsSet,
       classMap, streamMap, searchScore]);
 
   const totalSeoTopics = useMemo(() => {
-    return enrichedSubjects.reduce((sum, s) => sum + (s.seo_stats?.topic_count || 0), 0);
-  }, [enrichedSubjects]);
+    const uniqueCatalogSubjects = deduplicateMakersSubjects(enrichedSubjects, streamMap);
+    return uniqueCatalogSubjects.reduce((sum, s) => sum + (s.seo_stats?.topic_count || 0), 0);
+  }, [enrichedSubjects, streamMap]);
 
   // JSON-LD now emitted via PageMeta (pageType="library"); see src/lib/jsonld.js
 
@@ -557,7 +566,10 @@ export default function LibraryPage() {
   );
 
   const seoTitle = LIBRARY_SEO_TITLE;
-  const seoDescription = getLibrarySeoDescription(subjects.length, totalSeoTopics);
+  const seoDescription = getLibrarySeoDescription(
+    deduplicateMakersSubjects(enrichedSubjects, streamMap).length,
+    totalSeoTopics,
+  );
   const seoKeywords = LIBRARY_SEO_KEYWORDS;
 
   if (bundleLoading) {
@@ -865,7 +877,7 @@ export default function LibraryPage() {
                       key={sub.id}
                       sub={sub}
                       chapters={chaptersBySubject.get(sub.id) || []}
-                      isSaved={savedSubjects.includes(sub.id)}
+                      isSaved={sub.is_saved ?? savedSubjects.includes(sub.id)}
                       onToggleSave={handleToggleSave}
                       onAskAI={handleAskAI}
                       index={index}

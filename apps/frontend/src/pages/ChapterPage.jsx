@@ -406,14 +406,23 @@ export default function ChapterPage() {
     let cancelled = false;
     if (!data?.chapter_id) return;
     if (
+      !topicSlugParam
+      &&
       initialChapterData?.topics_related
       && initialChapterData?.chapter_id === data.chapter_id
       && initialChapterData.topics_related.language === (isAssamesePath ? 'as' : 'en')
+      && (!Array.isArray(initialChapterData.topics_related.cross_chapter)
+        || initialChapterData.topics_related.cross_chapter.every(
+          (topic) => typeof topic.deep_link_path === 'string',
+        ))
     ) {
       return;
     }
+    const excludeTopicQuery = topicSlugParam
+      ? `&exclude_topic_id=${encodeURIComponent(topicSlugParam)}`
+      : '';
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/topics-related?limit=12&lang=${isAssamesePath ? 'as' : 'en'}`)
+      .get(`/content/chapters/${data.chapter_id}/topics-related?limit=12&lang=${isAssamesePath ? 'as' : 'en'}${excludeTopicQuery}`)
       .then((r) => {
         if (cancelled) return;
         const payload = r.data || {};
@@ -441,7 +450,7 @@ export default function ChapterPage() {
         if (!cancelled) setTopicGraph({ siblings: [], cross_chapter: [] });
       });
     return () => { cancelled = true; };
-  }, [data?.chapter_id, isAssamesePath, board, classSlug, subjectSlug]);
+  }, [data?.chapter_id, isAssamesePath, board, classSlug, subjectSlug, topicSlugParam]);
 
   // Task #914 Step 2 — gate the topic deep-link route on the
   // single-topic resolver. The resolver returns 404 for unknown,

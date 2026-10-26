@@ -548,14 +548,25 @@ async function fetchTopicPageContent(chapterId, topicSlug, language) {
 // chapter preload so SSR / curl-no-JS already ships the full
 // internal-linking graph on first byte. Mirrors the runtime
 // useEffect in ChapterPage; same null-on-failure semantics.
-async function fetchChapterTopicsRelated(chapterId, language = "en") {
+async function fetchChapterTopicsRelated(chapterId, language = "en", basePath = "") {
   if (!chapterId) return null;
   const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-related?limit=12&lang=${language}`;
   try {
     const payload = await fetchJson(url);
     if (!payload || typeof payload !== "object") return null;
     const siblings = Array.isArray(payload.siblings) ? payload.siblings : [];
-    const crossChapter = Array.isArray(payload.cross_chapter) ? payload.cross_chapter : [];
+    const crossChapter = Array.isArray(payload.cross_chapter)
+      ? payload.cross_chapter.map((topic) => {
+          const chapterSlug = language === "as"
+            ? (topic.chapter_slug_as || topic.chapter_slug)
+            : topic.chapter_slug;
+          if (!basePath || !chapterSlug || !topic.topic_slug) return null;
+          return {
+            ...topic,
+            deep_link_path: `${basePath}/${encodeURIComponent(chapterSlug)}/topic/${encodeURIComponent(topic.topic_slug)}`,
+          };
+        }).filter(Boolean)
+      : [];
     if (siblings.length === 0 && crossChapter.length === 0) return null;
     return { language: payload.language || language, siblings, cross_chapter: crossChapter };
   } catch {
@@ -1172,6 +1183,7 @@ async function main() {
         fetchChapterTopicsRelated(
           chapterData.chapter_id,
           chapterUrl.startsWith("/as/") ? "as" : "en",
+          chapterUrl.slice(0, chapterUrl.lastIndexOf("/")),
         ),
       ]);
       if (faqEntries) {
