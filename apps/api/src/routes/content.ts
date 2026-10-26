@@ -1098,40 +1098,87 @@ contentRouter.get('/chapters/:chapterId/topics/:topicSlug/page', async (c) => {
 contentRouter.get('/chapters/:chapterId/topics-related', async (c) => {
   const db = createDb(c.env.DB);
   const chapterId = c.req.param('chapterId') as string;
-  const limit = Math.min(50, parseInt(c.req.query('limit') ?? '12', 10));
+  const parsedLimit = Number.parseInt(c.req.query('limit') ?? '12', 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(50, parsedLimit)) : 12;
+  const language: TopicPageLanguage = c.req.query('lang') === 'as' ? 'as' : 'en';
   const excludeTopicId = c.req.query('exclude_topic_id') ?? '';
 
-  const ch = await db.select({ id: chapters.id, subjectId: chapters.subjectId, publishedTopics: chapters.publishedTopics })
+  const ch = await db.select({
+    id: chapters.id,
+    subjectId: chapters.subjectId,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  })
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  // Related = topics from sibling chapters in the same subject
-  const siblings = await db.select({ id: chapters.id, title: chapters.title, slug: chapters.slug, publishedTopics: chapters.publishedTopics })
+  const currentQuestions = safeParse<unknown[]>(
+    language === 'as' ? ch.qaAs : ch.qaEn,
+  ) ?? [];
+  const siblings = publishedChapterTopics(
+    safeParse<unknown[]>(ch.publishedTopics) ?? [],
+  ).flatMap((topic) => {
+    const page = resolveTopicPageContent(topic, currentQuestions, language);
+    if (!page || (excludeTopicId && [page.topic_id, page.topic_slug].includes(excludeTopicId))) return [];
+    return [{
+      topic_id: page.topic_id,
+      topic_slug: page.topic_slug,
+      title: page.title,
+      language,
+      page_available: true,
+    }];
+  }).slice(0, limit);
+
+  // Cross-chapter items are only emitted when the requested language has an
+  // approved notes + linked question/solution page. The frontend uses the
+  // returned chapter slug to build a canonical, language-correct topic URL.
+  const relatedChapters = await db.select({
+    id: chapters.id,
+    title: chapters.title,
+    titleAs: chapters.titleAs,
+    slug: chapters.slug,
+    slugAs: chapters.slugAs,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  })
     .from(chapters)
-    .where(and(eq(chapters.subjectId, ch.subjectId), eq(chapters.status, 'published')))
+    .where(and(eq(chapters.subjectId, ch.subjectId), eq(chapters.status, 'published'), ne(chapters.id, chapterId)))
     .limit(20);
 
-  type TopicEntry = {
-    title?: string;
-    slug?: string;
-    topic_slug?: string;
-    chapter_id?: string;
-    chapter_title?: string;
-  };
-  const relatedTopics: TopicEntry[] = [];
-  for (const sib of siblings) {
-    if (sib.id === chapterId) continue;
-    const tops = safeParse<TopicEntry[]>(sib.publishedTopics) ?? [];
-    for (const t of tops.slice(0, 3)) {
-      const topicId = String(t.slug ?? t.topic_slug ?? '');
-      if (excludeTopicId && topicId === excludeTopicId) continue;
-      relatedTopics.push({ ...t, chapter_id: sib.id, chapter_title: sib.title });
-      if (relatedTopics.length >= limit) break;
+  const crossChapter: Array<Record<string, unknown>> = [];
+  for (const sibling of relatedChapters) {
+    const questions = safeParse<unknown[]>(
+      language === 'as' ? sibling.qaAs : sibling.qaEn,
+    ) ?? [];
+    const topics = publishedChapterTopics(safeParse<unknown[]>(sibling.publishedTopics) ?? []);
+    for (const topic of topics) {
+      const page = resolveTopicPageContent(topic, questions, language);
+      if (!page || (excludeTopicId && [page.topic_id, page.topic_slug].includes(excludeTopicId))) continue;
+      crossChapter.push({
+        topic_id: page.topic_id,
+        topic_slug: page.topic_slug,
+        title: page.title,
+        chapter_id: sibling.id,
+        chapter_slug: sibling.slug,
+        chapter_slug_as: sibling.slugAs,
+        chapter_title: language === 'as' ? (sibling.titleAs || sibling.title) : sibling.title,
+        language,
+        page_available: true,
+      });
+      if (crossChapter.length >= limit) break;
     }
-    if (relatedTopics.length >= limit) break;
+    if (crossChapter.length >= limit) break;
   }
 
-  return c.json({ chapter_id: ch.id, related_topics: relatedTopics, total: relatedTopics.length });
+  return c.json({
+    chapter_id: ch.id,
+    language,
+    siblings,
+    cross_chapter: crossChapter,
+    total: siblings.length + crossChapter.length,
+  });
 });
 
 contentRouter.get('/chapters/:chapterId/topic-pyqs', async (c) => {

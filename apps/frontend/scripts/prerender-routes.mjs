@@ -548,16 +548,16 @@ async function fetchTopicPageContent(chapterId, topicSlug, language) {
 // chapter preload so SSR / curl-no-JS already ships the full
 // internal-linking graph on first byte. Mirrors the runtime
 // useEffect in ChapterPage; same null-on-failure semantics.
-async function fetchChapterTopicsRelated(chapterId) {
+async function fetchChapterTopicsRelated(chapterId, language = "en") {
   if (!chapterId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-related?limit=12`;
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-related?limit=12&lang=${language}`;
   try {
     const payload = await fetchJson(url);
     if (!payload || typeof payload !== "object") return null;
     const siblings = Array.isArray(payload.siblings) ? payload.siblings : [];
     const crossChapter = Array.isArray(payload.cross_chapter) ? payload.cross_chapter : [];
     if (siblings.length === 0 && crossChapter.length === 0) return null;
-    return { siblings, cross_chapter: crossChapter };
+    return { language: payload.language || language, siblings, cross_chapter: crossChapter };
   } catch {
     return null;
   }
@@ -1169,7 +1169,10 @@ async function main() {
       const [faqEntries, publishedTopics, topicsRelated] = await Promise.all([
         fetchChapterFaqEntries(chapterData.chapter_id),
         fetchChapterPublishedTopics(chapterData.chapter_id),
-        fetchChapterTopicsRelated(chapterData.chapter_id),
+        fetchChapterTopicsRelated(
+          chapterData.chapter_id,
+          chapterUrl.startsWith("/as/") ? "as" : "en",
+        ),
       ]);
       if (faqEntries) {
         chapterData.faq_entries = faqEntries;

@@ -38,6 +38,7 @@ beforeAll(async () => {
     env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('class', 'board', 'Class 12', 'class-12')`),
     env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('stream', 'class', 'Science', 'science')`),
     env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES ('subject', 'stream', 'Physics', 'physics', 1)`),
+    env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES ('related-subject', 'stream', 'Related Subject', 'related-subject', 1)`),
     env.DB.prepare(`UPDATE subjects SET pyq_papers = ? WHERE id = 'subject'`).bind(JSON.stringify([{
       id: 'paper-1',
       name: 'Physics Annual Final',
@@ -48,6 +49,62 @@ beforeAll(async () => {
       rag_text: 'Long question paper transcription that must not be duplicated in the slim catalog.',
       rag_text_as: 'দীঘল প্ৰশ্নকাকতৰ পাঠ',
     }])),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, title_as, slug, slug_as, status,
+        published_topics, qa_en, qa_as
+      ) VALUES (?, 'related-subject', ?, ?, ?, ?, 'published', ?, ?, ?)
+    `).bind(
+      'related-current',
+      'Current chapter',
+      'বৰ্তমান অধ্যায়',
+      'current-chapter',
+      'bartaman-adhyay',
+      JSON.stringify([{
+        topic_id: 'current-topic',
+        title: 'Current topic',
+        topic_slug: 'current-topic',
+        title_as: 'বৰ্তমান বিষয়',
+        topic_slug_as: 'bartaman-bishoy',
+        definition: 'A complete reviewed definition for the current topic.',
+        definition_as: 'বৰ্তমান বিষয়টোৰ সম্পূৰ্ণ পৰীক্ষিত সংজ্ঞা।',
+        notes_en: 'Approved English notes.',
+        notes_as: 'অনুমোদিত অসমীয়া টোকা।',
+        notes_status_en: 'approved',
+        notes_status_as: 'approved',
+        status: 'published',
+      }]),
+      JSON.stringify([{ question: 'English question?', answer: 'English answer.', topic_slugs: ['current-topic'] }]),
+      JSON.stringify([{ question: 'অসমীয়া প্ৰশ্ন?', answer: 'অসমীয়া উত্তৰ।', topic_slugs: ['bartaman-bishoy'] }]),
+    ),
+    env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, title_as, slug, slug_as, status,
+        published_topics, qa_en, qa_as
+      ) VALUES (?, 'related-subject', ?, ?, ?, ?, 'published', ?, ?, ?)
+    `).bind(
+      'related-sibling',
+      'Sibling chapter',
+      'সহোদৰ অধ্যায়',
+      'sibling-chapter',
+      'sohodor-adhyay',
+      JSON.stringify([{
+        topic_id: 'sibling-topic',
+        title: 'Sibling topic',
+        topic_slug: 'sibling-topic',
+        title_as: 'সহোদৰ বিষয়',
+        topic_slug_as: 'sohodor-bishoy',
+        definition: 'A complete reviewed definition for this sibling topic.',
+        definition_as: 'সহোদৰ বিষয়টোৰ সম্পূৰ্ণ পৰীক্ষিত সংজ্ঞা।',
+        notes_en: 'Approved sibling English notes.',
+        notes_as: 'Draft sibling Assamese notes.',
+        notes_status_en: 'approved',
+        notes_status_as: 'draft',
+        status: 'published',
+      }]),
+      JSON.stringify([{ question: 'Sibling question?', answer: 'Sibling answer.', topic_slugs: ['sibling-topic'] }]),
+      JSON.stringify([{ question: 'সহোদৰ প্ৰশ্ন?', answer: 'সহোদৰ উত্তৰ।', topic_slugs: ['sohodor-bishoy'] }]),
+    ),
     env.DB.prepare(`
       INSERT INTO chapters (
         id, subject_id, title, title_as, slug, slug_as,
@@ -364,5 +421,36 @@ describe('Assamese public content metadata', () => {
     expect(slimSubject?.pyq_papers[0]?.pages).toEqual([
       { id: 'page-1', url: '/papers/physics-2025/page-1' },
     ]);
+  });
+
+  it('returns only complete approved topic pages in the requested language', async () => {
+    const englishResponse = await get('/api/v1/content/chapters/related-current/topics-related?lang=en&limit=12');
+    const assameseResponse = await get('/api/v1/content/chapters/related-current/topics-related?lang=as&limit=12');
+    expect(englishResponse.status).toBe(200);
+    expect(assameseResponse.status).toBe(200);
+
+    const english = await englishResponse.json() as {
+      language: string;
+      siblings: Array<Record<string, unknown>>;
+      cross_chapter: Array<Record<string, unknown>>;
+    };
+    const assamese = await assameseResponse.json() as {
+      language: string;
+      siblings: Array<Record<string, unknown>>;
+      cross_chapter: Array<Record<string, unknown>>;
+    };
+
+    expect(english.language).toBe('en');
+    expect(english.siblings.map(topic => topic.topic_slug)).toEqual(['current-topic']);
+    expect(english.cross_chapter.map(topic => topic.topic_slug)).toEqual(['sibling-topic']);
+    expect(english.cross_chapter[0]).toMatchObject({
+      chapter_slug: 'sibling-chapter',
+      chapter_slug_as: 'sohodor-adhyay',
+      page_available: true,
+      language: 'en',
+    });
+    expect(assamese.language).toBe('as');
+    expect(assamese.siblings.map(topic => topic.topic_slug)).toEqual(['bartaman-bishoy']);
+    expect(assamese.cross_chapter).toEqual([]);
   });
 });

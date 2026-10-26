@@ -50,9 +50,14 @@ function GraphPill({ to, title, chapterTitle, isAnchor, subjectName }) {
   );
 }
 
-export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) {
-  const hasSiblings = Array.isArray(siblings) && siblings.length > 0;
-  const hasCross = Array.isArray(crossChapter) && crossChapter.length > 0;
+export default function ChapterTopicGraph({ siblings = [], crossChapter = [], language = 'en' }) {
+  const availableInLanguage = (topic) => topic?.page_available === true && topic.language === language;
+  const visibleSiblings = Array.isArray(siblings) ? siblings.filter(availableInLanguage) : [];
+  const visibleCrossChapter = Array.isArray(crossChapter)
+    ? crossChapter.filter((topic) => availableInLanguage(topic) && typeof topic.deep_link_path === 'string')
+    : [];
+  const hasSiblings = visibleSiblings.length > 0;
+  const hasCross = visibleCrossChapter.length > 0;
   if (!hasSiblings && !hasCross) return null;
 
   return (
@@ -67,7 +72,7 @@ export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) 
             More topics in this chapter
           </h2>
           <div className="flex flex-wrap gap-2">
-            {siblings.map((t) => (
+            {visibleSiblings.map((t) => (
               <GraphPill
                 key={`sib-${t.topic_id || t.topic_slug}`}
                 to={`#topic-${t.topic_slug}`}
@@ -86,7 +91,7 @@ export default function ChapterTopicGraph({ siblings = [], crossChapter = [] }) 
             <ArrowRight size={12} className="opacity-60" />
           </h2>
           <div className="flex flex-wrap gap-2">
-            {crossChapter.map((t) => (
+            {visibleCrossChapter.map((t) => (
               <GraphPill
                 key={`cross-${t.topic_id || t.topic_slug}`}
                 to={t.deep_link_path}

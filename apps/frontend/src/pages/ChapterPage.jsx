@@ -408,26 +408,40 @@ export default function ChapterPage() {
     if (
       initialChapterData?.topics_related
       && initialChapterData?.chapter_id === data.chapter_id
-      && (topicGraph.siblings.length > 0 || topicGraph.cross_chapter.length > 0)
+      && initialChapterData.topics_related.language === (isAssamesePath ? 'as' : 'en')
     ) {
       return;
     }
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/topics-related?limit=12`)
+      .get(`/content/chapters/${data.chapter_id}/topics-related?limit=12&lang=${isAssamesePath ? 'as' : 'en'}`)
       .then((r) => {
         if (cancelled) return;
         const payload = r.data || {};
+        const routeBasePath = `/${board}/${classSlug}/${subjectSlug}`;
+        const topicBasePath = isAssamesePath ? `/as${routeBasePath}` : routeBasePath;
+        const crossChapter = Array.isArray(payload.cross_chapter)
+          ? payload.cross_chapter.map((topic) => {
+              const chapterSlug = isAssamesePath
+                ? (topic.chapter_slug_as || topic.chapter_slug)
+                : topic.chapter_slug;
+              if (!chapterSlug || !topic.topic_slug) return null;
+              return {
+                ...topic,
+                deep_link_path: `${topicBasePath}/${encodeURIComponent(chapterSlug)}/topic/${encodeURIComponent(topic.topic_slug)}`,
+              };
+            }).filter(Boolean)
+          : [];
         setTopicGraph({
+          language: payload.language,
           siblings: Array.isArray(payload.siblings) ? payload.siblings : [],
-          cross_chapter: Array.isArray(payload.cross_chapter) ? payload.cross_chapter : [],
+          cross_chapter: crossChapter,
         });
       })
       .catch(() => {
         if (!cancelled) setTopicGraph({ siblings: [], cross_chapter: [] });
       });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.chapter_id]);
+  }, [data?.chapter_id, isAssamesePath, board, classSlug, subjectSlug]);
 
   // Task #914 Step 2 — gate the topic deep-link route on the
   // single-topic resolver. The resolver returns 404 for unknown,
@@ -1653,6 +1667,7 @@ export default function ChapterPage() {
             <ChapterTopicGraph
               siblings={topicGraph.siblings}
               crossChapter={topicGraph.cross_chapter}
+              language={isAssamesePath ? 'as' : 'en'}
             />
 
             {(() => {
