@@ -153,6 +153,14 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
           {sortedMarks.map(mark => {
             const questions = markWise[mark] || [];
             if (questions.length === 0) return null;
+            const questionsBySection = questions.reduce((groups, question) => {
+              const section = typeof question === 'object' && question?.section
+                ? question.section
+                : '';
+              if (!groups.has(section)) groups.set(section, []);
+              groups.get(section).push(question);
+              return groups;
+            }, new Map());
             const isOpen = expandedMark === mark;
             return (
               <div key={mark} className="border border-gray-200 rounded-xl overflow-hidden">
@@ -174,16 +182,25 @@ function ImportantQuestions({ chapterTitle, pyqData }) {
                 </button>
                 {isOpen && (
                   <div className="px-4 pb-4 pt-1">
-                    <ol className="space-y-2" style={{ color: '#333', listStyle: 'decimal', paddingLeft: '1.25rem' }}>
-                      {questions.map((q, i) => {
-                        const qText = typeof q === 'string' ? q : q.question || q.text || JSON.stringify(q);
-                        return (
-                          <li key={i} className="text-sm leading-relaxed text-gray-700 pl-1">
-                            {qText}
-                          </li>
-                        );
-                      })}
-                    </ol>
+                    {[...questionsBySection.entries()].map(([section, sectionQuestions]) => (
+                      <div key={section || 'general'} className="mt-3 first:mt-0">
+                        {section && <h3 className="text-xs font-bold uppercase tracking-wide text-violet-700 mb-2">{section}</h3>}
+                        <ol className="space-y-2" style={{ color: '#333', listStyle: 'decimal', paddingLeft: '1.25rem' }}>
+                          {sectionQuestions.map((q, i) => {
+                            const qText = typeof q === 'string' ? q : q.question || q.text || JSON.stringify(q);
+                            const provenance = typeof q === 'object'
+                              ? (q.source === 'Expected' ? 'Expected' : q.year ? `${q.year} PYQ` : '')
+                              : '';
+                            return (
+                              <li key={q.id || i} className="text-sm leading-relaxed text-gray-700 pl-1">
+                                {qText}
+                                {provenance && <span className="ml-2 text-[10px] font-medium text-gray-400">{provenance}</span>}
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

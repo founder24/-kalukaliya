@@ -38,9 +38,14 @@ export default function SubjectLandingPage() {
     // The chapter sequence is the syllabus structure, not a notes-availability
     // filter. Keep chapters visible while content is being generated so numbers
     // and names do not shift between visits.
-    const notesChs = chapters;
-    const qaChs = chapters.filter(ch => ch.has_qa);
-    // Subject-level PYQ papers — read from subject.pyq_papers (not chapters)
+    const pyqTypes = new Set(['question_paper', 'pyq']);
+    const notesChs = chapters.filter(ch => !pyqTypes.has(ch.content_type));
+    const qaChs = chapters.filter(ch => ch.has_qa && !pyqTypes.has(ch.content_type));
+    const pyqChs = chapters.filter(ch =>
+      pyqTypes.has(ch.content_type) && ch.notes_generated
+      && (!isAssamese || ch.has_assamese)
+    );
+    // Image-based subject-level papers remain supported alongside text transcripts.
     const pyqGroups = (subject?.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
       title:       p.name || `Paper ${pi + 1}`,
@@ -52,13 +57,13 @@ export default function SubjectLandingPage() {
         url:  pg.url,
         pageNum: idx + 1,
       })),
-    }));
+    })).filter((paper) => paper.pages.length > 0);
     return [
       { key: 'notes',          label: 'Chapters',  icon: BookOpen,   chapters: notesChs, pyqGroups: null,   accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.25)' },
       { key: 'qa',             label: 'Questions', icon: HelpCircle, chapters: qaChs,    pyqGroups: null,   accent: '#2563eb', bg: 'rgba(37,99,235,0.08)',  border: 'rgba(37,99,235,0.25)' },
-      { key: 'question_paper', label: 'PYQs',      icon: FileText,   chapters: [],       pyqGroups,         accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
+      { key: 'question_paper', label: 'PYQs',      icon: FileText,   chapters: pyqChs,    pyqGroups,         accent: '#d97706', bg: 'rgba(217,119,6,0.08)',  border: 'rgba(217,119,6,0.25)' },
     ];
-  }, [chapters, subject?.pyq_papers]);
+  }, [chapters, subject?.pyq_papers, isAssamese]);
 
   const activeSectionChapters = useMemo(() => {
     const sec = SECTIONS.find(s => s.key === activeSection);
@@ -164,7 +169,12 @@ export default function SubjectLandingPage() {
     return out.slice(0, 6);
   }, [seoRelated, chapters, seedChapterId, basePath]);
 
-  const subjectName = subject?.name || subjectSlug;
+  const subjectName = contentLang === 'as'
+    ? (subject?.name_as || subject?.name || subjectSlug)
+    : (subject?.name || subjectSlug);
+  const subjectDescription = contentLang === 'as'
+    ? (subject?.description_as || subject?.description)
+    : subject?.description;
   const boardName = subject?.board_name || board;
   const className = subject?.class_name || classSlug;
   const streamName = subject?.stream_name || '';
@@ -178,6 +188,30 @@ export default function SubjectLandingPage() {
   const faqJsonLd = useMemo(() => {
     if (!subjectName) return null;
     const qa = [];
+
+    if (contentLang === 'as') {
+      qa.push({
+        q: 'MDC-01013 — আধুনিক অসমৰ নিৰ্মাতা সকল পাঠ্যক্ৰমটো কি?',
+        a: 'ই গুৱাহাটী বিশ্ববিদ্যালয়ৰ FYUGP/NEP 2020 প্ৰথম ষাণ্মাসিকৰ বহুবিষয়ক পাঠ্যক্ৰম।',
+      });
+      qa.push({
+        q: 'আধুনিক অসমৰ নিৰ্মাতা সকল পাঠ্যক্ৰমত কি কি বিষয় আছে?',
+        a: 'আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত আৰু সংস্কৃতি; ৰাজনৈতিক সংগঠন আৰু নেতা; জনজাতীয় চেতনা আৰু অধিকাৰ; নাৰী শিক্ষা, কৰ্মী, সংস্কাৰ আৰু সাহিত্য।',
+      });
+      qa.push({
+        q: 'এই পাঠ্যক্ৰমত নাৰী আৰু জনজাতীয় সম্প্ৰদায়ৰ বিষয়ে কি আলোচনা কৰা হয়?',
+        a: 'পাঠ্যক্ৰমে নাৰী আৰু জনজাতীয় সম্প্ৰদায়ে মুক্তিমুখী আন্দোলনৰ পৰা কেনেদৰে উপকৃত হৈছিল সেয়া অন্বেষণ কৰে।',
+      });
+      return {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: qa.map(({ q, a }) => ({
+          '@type': 'Question',
+          name: q,
+          acceptedAnswer: { '@type': 'Answer', text: a },
+        })),
+      };
+    }
 
     qa.push({
       q: `What topics are covered in ${boardName} ${className} ${subjectName}?`,
@@ -220,7 +254,7 @@ export default function SubjectLandingPage() {
         acceptedAnswer: { '@type': 'Answer', text: a },
       })),
     };
-  }, [subjectName, boardName, className, chapterCount, contentTypes]);
+  }, [subjectName, boardName, className, chapterCount, contentTypes, contentLang]);
 
   if (loading) {
     return (
@@ -259,13 +293,14 @@ export default function SubjectLandingPage() {
     <div className="min-h-screen bg-background text-foreground">
       <PageMeta
         title={`${subjectName} — ${boardName} ${className} Notes & Study Material`}
-        description={subject.description || `Complete ${subjectName} study material for ${boardName} ${className} students. Notes, MCQs, important questions, and AI-powered tutoring.`}
+        description={subjectDescription || `Complete ${subjectName} study material for ${boardName} ${className} students. Notes, MCQs, important questions, and AI-powered tutoring.`}
         url={`https://syrabit.ai${basePath}`}
         pageType="subject"
         pageData={{
           subject: {
             ...subject,
             name: subjectName,
+            description: subjectDescription,
             slug: subjectSlug,
             board_slug: board,
             class_slug: classSlug,
@@ -303,9 +338,9 @@ export default function SubjectLandingPage() {
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight">
                 {subjectName}
               </h1>
-              {subject.description && (
+              {subjectDescription && (
                 <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed max-w-2xl line-clamp-2 sm:line-clamp-none">
-                  {subject.description}
+                  {subjectDescription}
                 </p>
               )}
               <div className="flex items-center gap-3 mt-2.5 text-xs sm:text-sm text-muted-foreground">
@@ -375,7 +410,7 @@ export default function SubjectLandingPage() {
                 >
                   <Icon size={14} />
                   <span>{sec.label}</span>
-                  {(() => { const n = sec.pyqGroups ? sec.pyqGroups.length : sec.chapters.length; return n > 0 ? (
+                  {(() => { const n = (sec.pyqGroups?.length || 0) + (sec.chapters?.length || 0); return n > 0 ? (
                     <span
                       className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
                       style={{
@@ -397,7 +432,8 @@ export default function SubjectLandingPage() {
           {activeSection === 'question_paper' ? (() => {
             const activeSec = SECTIONS.find(s => s.key === 'question_paper');
             const groups = activeSec?.pyqGroups || [];
-            if (groups.length === 0) return (
+            const paperChapters = activeSec?.chapters || [];
+            if (groups.length === 0 && paperChapters.length === 0) return (
               <div className="text-center py-12">
                 <FileText size={32} className="mx-auto mb-3 text-muted-foreground/40" />
                 <p className="text-muted-foreground text-sm">PYQs will be added here once available</p>
@@ -405,6 +441,34 @@ export default function SubjectLandingPage() {
             );
             return (
               <div className="space-y-3">
+                {paperChapters.map((ch, i) => {
+                  const slug = ch.slug || '';
+                  const targetSlug = isAssamese ? (ch.slug_as || slug) : slug;
+                  const path = targetSlug
+                    ? `${isAssamese ? '/as' : ''}/${board}/${classSlug}/${subjectSlug}/${targetSlug}`
+                    : `${isAssamese ? '/as' : ''}/${board}/${classSlug}/${subjectSlug}`;
+                  const title = isAssamese && ch.title_as ? ch.title_as : ch.title;
+                  return (
+                    <Link
+                      key={ch.id || `pyq-chapter-${i}`}
+                      to={path}
+                      className="flex items-center gap-3 px-5 py-4 group/pyq rounded-2xl transition-colors hover:bg-amber-50/60"
+                      style={{ border: '1px solid rgba(217,119,6,0.20)', background: 'rgba(217,119,6,0.02)' }}
+                    >
+                      <span className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+                        style={{ background: 'rgba(217,119,6,0.10)', color: '#d97706' }}>
+                        {ch.title?.match(/\b20\d{2}\b/)?.[0] || i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <h2 className="text-sm font-semibold truncate" style={{ color: '#92400e' }}>{title}</h2>
+                        <p className="text-[10px] text-amber-700/60 mt-0.5">
+                          {isAssamese ? 'অসমীয়া আৰু ইংৰাজী প্ৰশ্ন' : 'Previous-year questions · English & Assamese'}
+                        </p>
+                      </div>
+                      <ChevronRight size={16} className="shrink-0" style={{ color: '#d97706' }} />
+                    </Link>
+                  );
+                })}
                 {groups.map((grp, i) => {
                   const isOpen = expandedPyqId === grp.id;
                   return (

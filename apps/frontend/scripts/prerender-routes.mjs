@@ -55,6 +55,10 @@ import {
   enumerateSitemapSubjectRoutes,
   selectChapterCandidates,
 } from "./_prerender-chapter-policy.mjs";
+import {
+  includeChapterParentSubjectPaths,
+  readSubjectSitemapPaths,
+} from "./_prerender-output-coverage.mjs";
 import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
 import { injectJsonLdIntoHead, topicPageSchema } from "../src/lib/jsonld.js";
 import { assertGovernmentSpendingMultiplierDefinition } from "./_government-spending-multiplier.mjs";
@@ -65,6 +69,7 @@ const distSsrDir = path.resolve(__dirname, "..", "dist-ssr");
 const srcHtml = path.join(distDir, "index.html");
 const ssrEntry = path.join(distSsrDir, "entry-server.js");
 const chapterSitemap = path.join(distDir, "sitemap-chapters.xml");
+const subjectSitemap = path.join(distDir, "sitemap-subjects.xml");
 const STRICT_CURRICULUM_BUILD =
   process.env.CLOUDFLARE_RELEASE_BUILD === "true" ||
   (process.env.NODE_ENV === "production" &&
@@ -623,6 +628,22 @@ function readPublishedChapterPaths() {
   return paths;
 }
 
+function readPublishedSubjectPaths() {
+  if (!fs.existsSync(subjectSitemap)) {
+    if (STRICT_CURRICULUM_BUILD) {
+      throw new Error(
+        `[prerender-routes] required subject sitemap missing at ${subjectSitemap}`,
+      );
+    }
+    return null;
+  }
+  const paths = readSubjectSitemapPaths(fs.readFileSync(subjectSitemap, "utf-8"));
+  if (STRICT_CURRICULUM_BUILD && paths.size === 0) {
+    throw new Error("[prerender-routes] subject sitemap contains zero subject URLs");
+  }
+  return paths;
+}
+
 function readPublishedTopicPaths() {
   const sitemap = path.join(distDir, "sitemap-topics.xml");
   if (!fs.existsSync(sitemap)) return new Set();
@@ -752,6 +773,10 @@ async function main() {
   // is useful for recovering failed detail requests, but it can be incomplete
   // or use different subject IDs and must not prune listed routes.
   const publishedChapterPaths = new Set(readPublishedChapterPaths());
+  const publishedSubjectPaths = readPublishedSubjectPaths();
+  const requiredSubjectPaths = publishedSubjectPaths
+    ? includeChapterParentSubjectPaths(publishedSubjectPaths, publishedChapterPaths)
+    : null;
   const publishedTopicPaths = readPublishedTopicPaths();
   const sitemapSubjectRoutes = enumerateSitemapSubjectRoutes(
     publishedChapterPaths,
@@ -815,10 +840,17 @@ async function main() {
   // used for chapter lookup match the published URL even if hierarchy data
   // still has an obsolete stream record for that subject.
   const routesByPath = new Map(
-    allSubjectRoutes.map((route) => [subjectPath(route), route]),
+    allSubjectRoutes
+      .filter((route) =>
+        !requiredSubjectPaths || requiredSubjectPaths.has(subjectPath(route)),
+      )
+      .map((route) => [subjectPath(route), route]),
   );
   for (const route of sitemapSubjectRoutes) {
-    routesByPath.set(subjectPath(route), route);
+    const routePath = subjectPath(route);
+    if (!requiredSubjectPaths || requiredSubjectPaths.has(routePath)) {
+      routesByPath.set(routePath, route);
+    }
   }
   const allPublishedSubjectRoutes = [...routesByPath.values()];
   const rankedSubjectRoutes = haveTraffic

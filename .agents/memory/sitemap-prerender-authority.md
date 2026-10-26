@@ -26,3 +26,9 @@ Assamese topic sitemap entries require a translated title, a dedicated translate
 **Why:** A partial translation can otherwise look like a published localized page while reusing English route identity or exposing thin content.
 
 **How to apply:** Enforce the same completeness check in every sitemap producer and show editors the exact encoded `/as/` route before they publish the translation.
+
+For subject snapshots, use the published subject sitemap plus parent paths required by published chapter URLs; do not prerender every subject in the broader library bundle. When duplicate stream records share one streamless canonical URL, choose the lexically first stream only if all tied records have the exact same published chapter-slug set and every sitemap slug matches. Otherwise fail rather than guess.
+
+**Why:** The library bundle includes subjects that are not published/indexable, while chapter parents can still be required even if a subject sitemap omits them. Duplicate stream copies also need the same deterministic winner in the public resolver and prerenderer.
+
+**How to apply:** Derive the release subject route set from both sitemap contracts, keep unpublished bundle-only records out of static output, and test both safe duplicate resolution and genuine ambiguous collisions.

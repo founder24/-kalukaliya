@@ -1255,6 +1255,7 @@ async function prewarmSubject(env: Env, subjectId: string): Promise<void> {
     slugAs: chapters.slugAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
+    contentType: chapters.contentType,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,

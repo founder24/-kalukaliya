@@ -21,6 +21,7 @@ import {
 } from "../../scripts/_prerender-chapter-policy.mjs";
 import {
   collectPrerenderOutputPaths,
+  includeChapterParentSubjectPaths,
   readChapterSitemapPaths,
   readSubjectSitemapPaths,
   readTopicSitemapPaths,
@@ -80,8 +81,8 @@ describe("sitemap subject route resolution", () => {
     ]);
   });
 
-  it("fails rather than guessing when duplicate stream subjects match the sitemap equally", () => {
-    const routes = ["arts", "commerce"].map((streamSlug) => ({
+  it("selects the canonical lexical stream when duplicate records have identical published chapters", () => {
+    const routes = ["bsc", "ba", "bcom"].map((streamSlug) => ({
       board: "ahsec",
       classSlug: "hs-2nd-year",
       streamSlug,
@@ -95,6 +96,28 @@ describe("sitemap subject route resolution", () => {
       subject_id: route.subject.id,
       slug: "government-budget-and-the-economy",
     }));
+
+    expect(enumerateSitemapSubjectRoutes(chapterPaths, routes, chapters)[0].streamSlug)
+      .toBe("ba");
+  });
+
+  it("fails rather than guessing when tied stream records have different chapter sets", () => {
+    const routes = ["arts", "commerce"].map((streamSlug) => ({
+      board: "ahsec",
+      classSlug: "hs-2nd-year",
+      streamSlug,
+      subjectSlug: "economics",
+      subject: { id: `${streamSlug}-economics` },
+    }));
+    const chapterPaths = new Set([
+      "/ahsec/hs-2nd-year/economics/government-budget-and-the-economy",
+    ]);
+    const chapters = [
+      { subject_id: "arts-economics", slug: "government-budget-and-the-economy" },
+      { subject_id: "arts-economics", slug: "arts-only-chapter" },
+      { subject_id: "commerce-economics", slug: "government-budget-and-the-economy" },
+      { subject_id: "commerce-economics", slug: "commerce-only-chapter" },
+    ];
 
     expect(() => enumerateSitemapSubjectRoutes(chapterPaths, routes, chapters))
       .toThrow(/ambiguous stream for published subject/);
@@ -530,6 +553,27 @@ describe("subject output coverage", () => {
     expect(
       validateSubjectOutputCoverage({ pages, expectedPaths, strict: true }),
     ).toEqual({ subjectsOnDisk: 1, failures: [] });
+  });
+
+  it("allows a subject parent required by a published chapter URL", () => {
+    const chapter = `${stale}/published-chapter`;
+    const expectedPaths = includeChapterParentSubjectPaths(
+      new Set([subject]),
+      new Set([chapter]),
+    );
+    const pagesWithParent = [
+      ...pages,
+      { rel: `${stale.slice(1)}/index.html`, body: '<div data-hydrate="subject">' },
+    ];
+
+    expect(expectedPaths).toEqual(new Set([subject, stale]));
+    expect(
+      validateSubjectOutputCoverage({
+        pages: pagesWithParent,
+        expectedPaths,
+        strict: true,
+      }),
+    ).toEqual({ subjectsOnDisk: 2, failures: [] });
   });
 
   it("rejects subject routes missing from the sitemap or output", () => {

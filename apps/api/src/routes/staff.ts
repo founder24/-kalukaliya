@@ -475,7 +475,7 @@ async function kvPrewarm(env: Env, subjectId: string): Promise<void> {
     const db = createDb(env.DB);
     const chaps = await db.select({
       id: chapters.id, title: chapters.title, titleAs: chapters.titleAs, slug: chapters.slug, slugAs: chapters.slugAs,
-      chapterNumber: chapters.chapterNumber, status: chapters.status,
+      chapterNumber: chapters.chapterNumber, status: chapters.status, contentType: chapters.contentType,
       notesEn: chapters.notesEn, notesAs: chapters.notesAs, qaEn: chapters.qaEn,
       publishedTopics: chapters.publishedTopics, pyqPdfUrl: chapters.pyqPdfUrl, pyqPapers: chapters.pyqPapers,
     }).from(chapters).where(publicChapterListWhere(subjectId)).orderBy(chapters.chapterNumber);

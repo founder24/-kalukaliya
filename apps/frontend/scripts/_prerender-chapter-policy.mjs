@@ -28,20 +28,39 @@ export function enumerateSitemapSubjectRoutes(chapterPaths, bundleRoutes, bundle
       return { route, matches, subjectId };
     }).sort((a, b) => b.matches - a.matches);
 
-    if (
-      ranked.length > 1 &&
-      ranked[0].matches > 0 &&
-      ranked[0].matches === ranked[1].matches &&
-      ranked[0].subjectId !== ranked[1].subjectId
-    ) {
-      throw new Error(
-        `[prerender-routes] ambiguous stream for published subject ${subjectUrl}: ` +
-        `${ranked.filter((candidate) => candidate.matches === ranked[0].matches)
-          .map((candidate) => candidate.route.streamSlug || "(no stream)").join(", ")}`,
+    let selectedCandidate = ranked[0];
+    const tied = ranked.filter((candidate) =>
+      candidate.matches > 0 && candidate.matches === ranked[0]?.matches,
+    );
+    if (tied.length > 1 && new Set(tied.map((candidate) => candidate.subjectId)).size > 1) {
+      const slugSets = tied.map(({ subjectId }) =>
+        [...(chaptersBySubject.get(subjectId) || [])].sort(),
       );
+      const identicalPublishedSets = slugSets.every((slugs) =>
+        slugs.length === slugSets[0].length &&
+        slugs.every((slug, index) => slug === slugSets[0][index]),
+      );
+      const allSitemapSlugsMatch = ranked[0].matches === publishedSlugs.size;
+
+      // A streamless canonical URL may represent the same published course in
+      // multiple program streams. If every tied record has the exact same
+      // chapter slug set, choose the first stream deterministically; the
+      // public subject resolver uses the same lexical stream ordering.
+      if (identicalPublishedSets && allSitemapSlugsMatch) {
+        selectedCandidate = [...tied].sort((a, b) => {
+          const aStream = a.route.streamSlug || "";
+          const bStream = b.route.streamSlug || "";
+          return aStream < bStream ? -1 : aStream > bStream ? 1 : 0;
+        })[0];
+      } else {
+        throw new Error(
+          `[prerender-routes] ambiguous stream for published subject ${subjectUrl}: ` +
+          `${tied.map((candidate) => candidate.route.streamSlug || "(no stream)").join(", ")}`,
+        );
+      }
     }
 
-    const selected = ranked[0]?.route;
+    const selected = selectedCandidate?.route;
     routes.push({
       ...(selected || {}),
       board,

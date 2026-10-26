@@ -66,4 +66,14 @@ describe('serializePublicChapterList', () => {
     expect(placeholder).toMatchObject({ notes_generated: false, has_assamese: false });
     expect(content).toMatchObject({ notes_generated: true, has_assamese: true });
   });
+
+  it('preserves text question-paper types for the subject PYQ section', () => {
+    const [paper, pyq] = serializePublicChapterList([
+      { ...row, id: 'paper', contentType: 'question_paper' },
+      { ...row, id: 'pyq', contentType: 'pyq' },
+    ]);
+
+    expect(paper?.content_type).toBe('question_paper');
+    expect(pyq?.content_type).toBe('pyq');
+  });
 });

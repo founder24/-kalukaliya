@@ -460,6 +460,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     slugAs: chapters.slugAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
+    contentType: chapters.contentType,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,
@@ -562,6 +563,7 @@ async function resolveChapterBySlug(
     keywordsAs: chapters.keywordsAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
+    contentType: chapters.contentType,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     publishedTopics: chapters.publishedTopics,
@@ -658,7 +660,9 @@ async function resolveChapterBySlug(
     stream_slug:    owningStream?.slug ?? '',
     content:        contentEn,
     content_as:     contentAs,
-    content_type:   'chapter',
+    content_type:   ['question_paper', 'pyq'].includes(chapterRow.contentType ?? '')
+      ? chapterRow.contentType
+      : 'chapter',
     has_assamese:   hasAssamese,
     pyq_pdf_url:    chapterRow.pyqPdfUrl ?? null,
     pyq_papers:     safeParse(chapterRow.pyqPapers) ?? [],
@@ -731,16 +735,25 @@ contentRouter.get('/library-bundle', async (c) => {
   const boot = c.req.query('boot') ?? null; // board DB id for boot mode
 
   // Load base hierarchy data in parallel
-  const [allBoards, allClasses, allStreams, allSubjects] = await Promise.all([
+  const [allBoards, allClasses, allStreams, allSubjects, allSyllabusDescriptions] = await Promise.all([
     db.select({ id: boards.id, name: boards.name, slug: boards.slug }).from(boards),
     db.select({ id: classes.id, boardId: classes.boardId, name: classes.name, slug: classes.slug, level: classes.level }).from(classes),
     db.select({ id: streams.id, classId: streams.classId, name: streams.name, slug: streams.slug }).from(streams),
     db.select({
-      id: subjects.id, streamId: subjects.streamId, name: subjects.name, slug: subjects.slug,
+      id: subjects.id, streamId: subjects.streamId, name: subjects.name, nameAs: subjects.nameAs, slug: subjects.slug,
       description: subjects.description, imageUrl: subjects.imageUrl,
       pyqPapers: subjects.pyqPapers, isPublished: subjects.isPublished,
     }).from(subjects).where(eq(subjects.isPublished, 1)),
+    c.env.DB.prepare(
+      `SELECT subject_id, meta_description_as FROM chapters
+       WHERE status IN ('published', 'active')
+         AND slug LIKE 'course-syllabus-%'
+         AND meta_description_as IS NOT NULL AND meta_description_as != ''`,
+    ).all<{ subject_id: string; meta_description_as: string }>(),
   ]);
+  const syllabusDescriptionAsBySubject = new Map(
+    (allSyllabusDescriptions.results ?? []).map(row => [row.subject_id, row.meta_description_as]),
+  );
 
   // Determine which subjects belong to the boot board (if boot mode)
   let bootSubjectIds: Set<string> | null = null;
@@ -819,10 +832,12 @@ contentRouter.get('/library-bundle', async (c) => {
     return {
       id: sub.id,
       name: sub.name,
+      name_as: sub.nameAs ?? null,
       slug: sub.slug,
       stream_id: sub.streamId ?? null,
       status: sub.isPublished ? 'published' : 'draft',
       description: sub.description ?? null,
+      description_as: syllabusDescriptionAsBySubject.get(sub.id) ?? null,
       icon: null,
       gradient: null,
       thumbnail_url: sub.imageUrl ?? null,
@@ -923,7 +938,7 @@ contentRouter.get('/resolve-subject/:board/:classSlug/:subjectSlug', async (c) =
 
   // Streams within class
   const allStreams = await db.select({ id: streams.id, name: streams.name, slug: streams.slug })
-    .from(streams).where(eq(streams.classId, classRow.id));
+    .from(streams).where(eq(streams.classId, classRow.id)).orderBy(asc(streams.slug));
 
   // Find subject across all streams in this class
   let subjectRow: (typeof subjects.$inferSelect) | undefined;
@@ -942,12 +957,21 @@ contentRouter.get('/resolve-subject/:board/:classSlug/:subjectSlug', async (c) =
   const chapterCountResult = await c.env.DB.prepare(
     `SELECT COUNT(*) as cnt FROM chapters WHERE subject_id = ? AND status = 'published'`
   ).bind(subjectRow.id).first<{ cnt: number }>();
+  const syllabusMetadata = await c.env.DB.prepare(
+    `SELECT meta_description_as FROM chapters
+     WHERE subject_id = ? AND status IN ('published', 'active')
+       AND slug LIKE 'course-syllabus-%'
+       AND meta_description_as IS NOT NULL AND meta_description_as != ''
+     LIMIT 1`
+  ).bind(subjectRow.id).first<{ meta_description_as: string }>();
 
   return c.json({
     id: subjectRow.id,
     name: subjectRow.name,
+    name_as: subjectRow.nameAs ?? null,
     slug: subjectRow.slug,
     description: subjectRow.description ?? null,
+    description_as: syllabusMetadata?.meta_description_as ?? null,
     tags: [],
     icon: null,
     gradient: null,
@@ -1043,7 +1067,7 @@ contentRouter.get('/chapters/:chapterId/topic-pyqs', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  type QAItem = { id?: string; question?: string; answer?: string; marks?: number; year?: number; source?: string };
+  type QAItem = { id?: string; section?: string; question?: string; answer?: string; marks?: number; year?: number; source?: string };
   const rawQA = lang === 'as'
     ? (safeParse<QAItem[]>(ch.qaAs) ?? safeParse<QAItem[]>(ch.qaEn) ?? [])
     : (safeParse<QAItem[]>(ch.qaEn) ?? []);

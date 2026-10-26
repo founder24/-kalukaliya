@@ -60,6 +60,17 @@ export function readSubjectSitemapPaths(xml) {
   );
 }
 
+export function includeChapterParentSubjectPaths(subjectPaths, chapterPaths) {
+  const paths = new Set(subjectPaths || []);
+  for (const chapterPath of chapterPaths || []) {
+    const segments = chapterPath.split("/").filter(Boolean);
+    if (segments.length === 4) {
+      paths.add(`/${segments.slice(0, 3).join("/")}`);
+    }
+  }
+  return paths;
+}
+
 export function readTopicSitemapPaths(xml) {
   return readSitemapPaths(xml, (route) => route.split("/").includes("topic"));
 }

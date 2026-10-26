@@ -9,6 +9,7 @@ export type PublicChapterListRow = {
   slugAs: string | null;
   chapterNumber: number | null;
   status: string | null;
+  contentType?: string | null;
   notesEn: string | null;
   notesAs: string | null;
   qaEn: string | null;
@@ -33,7 +34,7 @@ export type PublicChapterListItem = {
   syllabus_topics: string[];
   syllabus_topics_as: string[];
   topic_count: number;
-  content_type: 'chapter';
+  content_type: 'chapter' | 'question_paper' | 'pyq';
 };
 
 /** Shared row-membership rule for every public chapter-list read and prewarm. */
@@ -83,7 +84,9 @@ export function serializePublicChapterList(
       syllabus_topics: syllabusTopics,
       syllabus_topics_as: syllabusTopicsAs,
       topic_count: syllabusTopics.length,
-      content_type: 'chapter',
+      content_type: chapter.contentType === 'question_paper' || chapter.contentType === 'pyq'
+        ? chapter.contentType
+        : 'chapter',
     };
   });
 }

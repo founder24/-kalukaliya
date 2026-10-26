@@ -32,6 +32,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   const queryClient = useQueryClient();
   const { contentLang } = useContentLang();
   const isAs = contentLang === 'as';
+  const displayName = isAs && sub.name_as ? sub.name_as : sub.name;
+  const displayDescription = isAs && sub.description_as ? sub.description_as : sub.description;
   const thumbColors = useMemo(() => THUMB_GRADIENTS[sub.gradient] || THUMB_GRADIENTS.math, [sub.gradient]);
   const tags = useMemo(() => Array.isArray(sub.tags) ? sub.tags : [], [sub.tags]);
   const visibleTags = useMemo(() => tags.slice(0, 3), [tags]);
@@ -51,16 +53,16 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
   const handleShare = useCallback((e) => {
     e.preventDefault();
-    const parts = [sub.name];
-    if (sub.description) parts.push(sub.description);
+    const parts = [displayName];
+    if (displayDescription) parts.push(displayDescription);
     const meta = [sub.board_name || sub.boardName, sub.class_name || sub.className, sub.stream_name || sub.streamName].filter(Boolean).join(' · ');
     if (meta) parts.push(meta);
     const chCount = chapters.length || sub.chapter_count || sub.chapterCount || 0;
     if (chCount > 0) parts.push(`${chCount} chapters`);
     if (sub.tags?.length) parts.push(`Topics: ${sub.tags.join(', ')}`);
     parts.push('Study on Syrabit.ai');
-    share(sub.name, subjectLandingPath, { text: parts.join('\n') });
-  }, [sub, chapters.length, subjectLandingPath, share]);
+    share(displayName, subjectLandingPath, { text: parts.join('\n') });
+  }, [sub, chapters.length, subjectLandingPath, share, displayName, displayDescription]);
 
   const handlePrefetch = useCallback(() => {
     if (sub.boardSlug && sub.classSlug && sub.slug) {
@@ -70,11 +72,12 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
   const SECTIONS = useMemo(() => {
     const QA_TYPES = new Set(['qa', 'important_questions', 'chapter_question', 'mcqs']);
+    const PYQ_TYPES = new Set(['question_paper', 'pyq']);
     // Notes section: chapters that aren't dedicated Q&A-only chapters AND have actual content.
     // notes_generated=false means the ingestion pipeline hasn't produced notes yet — hide those
     // stubs so students never land on a blank page. They auto-appear once ingestion runs.
     const notesChs = chapters.filter(ch =>
-      (!ch.content_type || !QA_TYPES.has(ch.content_type)) && ch.notes_generated
+      (!ch.content_type || (!QA_TYPES.has(ch.content_type) && !PYQ_TYPES.has(ch.content_type))) && ch.notes_generated
       && (isAs ? ch.has_assamese : true)
     );
     // Questions section: dedicated Q&A chapters (content_type) OR notes chapters that
@@ -88,6 +91,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     const qaChs = _hasNamedQa
       ? _allQaChs.filter(ch => !_GENERIC_TITLE.test((ch.title || '').trim()))
       : _allQaChs;
+    const pyqChs = chapters.filter(ch =>
+      PYQ_TYPES.has(ch.content_type) && ch.notes_generated
+      && (isAs ? ch.has_assamese : true)
+    );
     // Subject-level PYQ papers — [{id, title, class_name, year, description, pages:[]}]
     const pyqGroups = (sub.pyq_papers || []).map((p, pi) => ({
       id:          p.id || `pyq-${pi}`,
@@ -100,11 +107,11 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         url:     pg.url,
         pageNum: idx + 1,
       })),
-    }));
+    })).filter((paper) => paper.pages.length > 0);
     return [
       { key: 'notes',          label: isAs ? 'টোকা' : 'Notes',     chapters: notesChs, pyqGroups: null,  accent: '#7c3aed', bg: 'rgba(139,92,246,0.08)' },
       { key: 'qa',             label: isAs ? 'প্ৰশ্ন' : 'Questions', chapters: qaChs,    pyqGroups: null,  accent: '#2563eb', bg: 'rgba(37,99,235,0.08)' },
-      { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs',   chapters: [],       pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
+      { key: 'question_paper', label: isAs ? 'পিৱাইকিউ' : 'PYQs',   chapters: pyqChs,  pyqGroups,        accent: '#d97706', bg: 'rgba(217,119,6,0.08)' },
     ];
   }, [chapters, sub.pyq_papers, isAs]);
 
@@ -175,7 +182,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
       {/* Subject info */}
       <div className="px-3 sm:px-4 pt-3 pb-2 relative z-[2]">
-        <Link to={subjectLandingPath} className="block group/title static" aria-label={`View ${sub.name}`}>
+        <Link to={subjectLandingPath} className="block group/title static" aria-label={`View ${displayName}`}>
           <span className="absolute inset-0 z-0" aria-hidden="true" />
           <div className="flex items-start gap-3 mb-2">
             <div
@@ -192,7 +199,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 className="font-bold group-hover/title:text-purple-300 transition-colors leading-tight"
                 style={{ fontSize: '0.95rem', color: 'hsl(var(--foreground))' }}
               >
-                {sub.name}
+                {displayName}
               </h3>
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5">
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded" style={{
@@ -217,10 +224,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           </div>
         </Link>
 
-        {sub.description && (
+        {displayDescription && (
           <p className="text-xs leading-relaxed mb-1.5 sm:mb-2 line-clamp-1 sm:line-clamp-2 font-medium"
             style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {sub.description}
+            {displayDescription}
           </p>
         )}
 
@@ -273,7 +280,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
               }
             >
               {sec.label}
-              {(() => { const n = sec.pyqGroups ? sec.pyqGroups.length : sec.chapters.length; return n > 0 ? <span className="ml-0.5 font-semibold" style={{ opacity: 0.7 }}>{n}</span> : null; })()}
+              {(() => { const n = (sec.pyqGroups?.length || 0) + (sec.chapters?.length || 0); return n > 0 ? <span className="ml-0.5 font-semibold" style={{ opacity: 0.7 }}>{n}</span> : null; })()}
             </button>
           ))}
         </div>
@@ -283,7 +290,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
           // ── PYQ section — chapter cards each holding page images ─────
           if (section.key === 'question_paper') {
             const groups = section.pyqGroups || [];
-            if (groups.length === 0) {
+            const paperChapters = section.chapters || [];
+            if (groups.length === 0 && paperChapters.length === 0) {
               return (
                 <div key="question_paper" className="px-3 py-4 text-center text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
                   {isAs ? 'পিৱাইকিউ সোনকালে আহিব' : 'PYQs coming soon'}
@@ -292,8 +300,30 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
             }
             const visGroups = showAllInSection ? groups : groups.slice(0, 3);
             const moreCount = showAllInSection ? 0 : groups.length - 3;
+            const visPaperChapters = showAllInSection ? paperChapters : paperChapters.slice(0, 3);
+            const moreChapterCount = showAllInSection ? 0 : paperChapters.length - 3;
             return (
               <div key="question_paper">
+                {visPaperChapters.map((ch, i) => {
+                  const slug = ch.slug || '';
+                  const targetSlug = isAs ? (ch.slug_as || slug) : slug;
+                  const path = sub.boardSlug && sub.classSlug && sub.slug && targetSlug
+                    ? `${isAs ? '/as' : ''}/${sub.boardSlug}/${sub.classSlug}/${sub.slug}/${targetSlug}`
+                    : subjectLandingPath;
+                  const title = isAs && ch.title_as ? ch.title_as : ch.title;
+                  return (
+                    <Link
+                      key={ch.id || `pyq-chapter-${i}`}
+                      to={path}
+                      className="flex items-center gap-2 px-3 py-2.5 text-xs transition-colors hover:bg-amber-50/60"
+                      style={{ borderBottom: '1px solid rgba(217,119,6,0.07)', color: section.accent }}
+                    >
+                      <BookOpen size={13} className="shrink-0" />
+                      <span className="font-semibold flex-1 min-w-0 truncate">{title}</span>
+                      <ExternalLink size={11} className="shrink-0 opacity-60" />
+                    </Link>
+                  );
+                })}
                 {visGroups.map((grp, i) => {
                   const isOpen = expandedPyqId === grp.id;
                   return (
@@ -373,14 +403,14 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                     </div>
                   );
                 })}
-                {moreCount > 0 && (
+                {moreCount + moreChapterCount > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowAllInSection(true)}
                     className="flex items-center justify-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors w-full"
                     style={{ borderTop: '1px solid rgba(217,119,6,0.07)', color: section.accent }}
                   >
-                    +{moreCount} {isAs ? 'আৰু' : 'more'}
+                    +{moreCount + moreChapterCount} {isAs ? 'আৰু' : 'more'}
                     <ChevronDown size={11} />
                   </button>
                 )}

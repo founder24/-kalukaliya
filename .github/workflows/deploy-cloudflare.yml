@@ -455,6 +455,11 @@ jobs:
       - name: Deploy API Worker
         run: pnpm --filter syrabit-api exec wrangler deploy --env production
 
+      - name: Refresh and verify production library-bundle cache
+        env:
+          PUBLIC_LIBRARY_BUNDLE_URL: https://syrabit.ai
+        run: node apps/edge/scripts/invalidate-library-bundle-kv.mjs
+
       - name: Record successful D1-claims deployment
         env:
           RELEASE_VERSION: ${{ github.sha }}
