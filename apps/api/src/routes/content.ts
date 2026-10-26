@@ -1042,7 +1042,14 @@ contentRouter.get('/chapters/:chapterId/topics/:topicSlug/page', async (c) => {
     publishedTopics: chapters.publishedTopics,
     qaEn: chapters.qaEn,
     qaAs: chapters.qaAs,
-  }).from(chapters).where(eq(chapters.id, chapterId)).get();
+  }).from(chapters)
+    .innerJoin(subjects, eq(chapters.subjectId, subjects.id))
+    .where(and(
+      eq(chapters.id, chapterId),
+      eq(chapters.status, 'published'),
+      eq(subjects.isPublished, 1),
+    ))
+    .get();
   if (!chapter) return c.json({ detail: 'Chapter not found' }, 404);
 
   const topics = publishedChapterTopics(safeParse<unknown[]>(chapter.publishedTopics) ?? []);

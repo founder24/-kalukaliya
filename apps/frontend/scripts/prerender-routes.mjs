@@ -1262,7 +1262,7 @@ async function main() {
               const topicLanguage = localized.path.startsWith("/as/") ? "as" : "en";
               const pagePayload = await fetchTopicPageContent(
                 chapterData.chapter_id,
-                topic.topic_slug,
+                topicLanguage === "as" ? topic.topic_slug_as : topic.topic_slug,
                 topicLanguage,
               );
               if (!pagePayload?.topic?.notes || !Array.isArray(pagePayload.topic.questions) || pagePayload.topic.questions.length === 0) {

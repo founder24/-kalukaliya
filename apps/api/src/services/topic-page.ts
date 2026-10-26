@@ -47,7 +47,7 @@ export function resolveTopicPageContent(
   language: TopicPageLanguage,
 ) {
   const identity = topicIdentity(topic, language);
-  if (!identity.id || !identity.slug || !identity.title || !identity.notes) return null;
+  if (!identity.slug || !identity.title || !identity.notes) return null;
 
   const linkedQuestions = questions
     .filter((value): value is JsonRecord => Boolean(value && typeof value === 'object' && !Array.isArray(value)))
@@ -56,7 +56,7 @@ export function resolveTopicPageContent(
 
   if (linkedQuestions.length === 0) return null;
   return {
-    topic_id: identity.id,
+    topic_id: identity.id || identity.slug,
     topic_slug: identity.slug,
     title: identity.title,
     notes: identity.notes,

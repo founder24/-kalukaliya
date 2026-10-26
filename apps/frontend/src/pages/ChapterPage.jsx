@@ -997,9 +997,6 @@ export default function ChapterPage() {
       ? (t.topic_slug_as === topicSlugParam || (t.language === 'Assamese' && t.topic_slug === topicSlugParam))
       : (t.language !== 'Assamese' && (t.topic_slug || t.slug) === topicSlugParam)) || null)
     : null;
-  const activeTopicDefinitionAs = typeof activeDeepLinkTopic?.definition_as === 'string'
-    ? activeDeepLinkTopic.definition_as
-    : typeof activeDeepLinkTopic?.content_as === 'string' ? activeDeepLinkTopic.content_as : '';
   const topicAlternateUrl = topicPageData?.alternate_slug
     ? `https://syrabit.ai${isAssamesePath
       ? routerLocation.pathname.replace(/^\/as\//, '/').replace(/\/topic\/[^/]+$/, `/topic/${topicPageData.alternate_slug}`)
@@ -1097,9 +1094,9 @@ export default function ChapterPage() {
           <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-5">
             <BookOpen size={28} className="text-muted-foreground" />
           </div>
-          <h1 className="text-2xl font-bold mb-3" data-testid="topic-not-found">Topic not found</h1>
+          <h1 className="text-2xl font-bold mb-3" data-testid="topic-not-found">{isAssamesePath ? 'বিষয়ৰ পৃষ্ঠা উপলব্ধ নহয়' : 'Topic page not available'}</h1>
           <p className="text-muted-foreground mb-6">
-            This topic page is not complete in this language yet.
+            {isAssamesePath ? 'এই ভাষাত বিষয়টোৰ টোকা আৰু সম্পৰ্কিত প্ৰশ্ন সম্পূৰ্ণকৈ প্ৰকাশ হোৱা নাই।' : 'Approved notes and explicitly linked questions are not complete in this language yet.'}
           </p>
           {/* Stream-aware link target — `basePath` intentionally
               omits streamSlug for breadcrumbs, so re-insert it here
@@ -1121,7 +1118,7 @@ export default function ChapterPage() {
     );
   }
 
-  if (topicSlugParam && topicPageLoading) {
+  if (topicSlugParam && (topicPageLoading || topicPageData?.topic?.topic_slug !== topicSlugParam)) {
     return <div className="mx-auto max-w-3xl px-4 py-12" aria-busy="true"><Skeleton className="h-10 w-3/4 mb-6" /><Skeleton className="h-5 w-full mb-3" /><Skeleton className="h-5 w-5/6 mb-3" /></div>;
   }
 
