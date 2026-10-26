@@ -41,7 +41,7 @@ describe('SubjectCard Assamese localization', () => {
   it('uses saved Assamese subject metadata or the course-specific fallback', () => {
     expect(getSubjectCardName(subject, true)).toBe('আধুনিক অসমৰ নিৰ্মাতা সকল');
     expect(getSubjectCardDescription({ ...subject, description_as: 'FYUGP English text' }, true))
-      .toBe('গুৱাহাটী বিশ্ববিদ্যালয়ৰ NEP 2020-ৰ অধীনৰ চাৰি বছৰীয়া স্নাতক কাৰ্যসূচী (FYUGP), প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত-সংস্কৃতি, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।');
+      .toBe('গুৱাহাটী বিশ্ববিদ্যালয় · NEP 2020-ৰ চাৰি বছৰীয়া FYUGP · প্ৰথম ষাণ্মাসিক · MDC-01013। কি পঢ়িব? আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।');
     expect(getSubjectCardName({ ...subject, name_as: 'D1 নাম' }, true)).toBe('D1 নাম');
     expect(getSubjectCardDescription({ ...subject, description_as: 'D1 বৰ্ণনা' }, true)).toBe('D1 বৰ্ণনা');
     expect(getSubjectCardName(subject, false)).toBe(subject.name);

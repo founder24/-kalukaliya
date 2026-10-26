@@ -31,7 +31,7 @@ export function getSubjectLandingPath(sub = {}) {
 const MAKERS_SUBJECT_SLUG = 'makers-of-modern-assam-mdc-01013';
 const MAKERS_ASSAMESE_TEXT = {
   name: 'আধুনিক অসমৰ নিৰ্মাতা সকল',
-  description: 'গুৱাহাটী বিশ্ববিদ্যালয়ৰ NEP 2020-ৰ অধীনৰ চাৰি বছৰীয়া স্নাতক কাৰ্যসূচী (FYUGP), প্ৰথম ষাণ্মাসিকৰ MDC-01013 পাঠ্যক্ৰম: আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত-সংস্কৃতি, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।',
+  description: 'গুৱাহাটী বিশ্ববিদ্যালয় · NEP 2020-ৰ চাৰি বছৰীয়া FYUGP · প্ৰথম ষাণ্মাসিক · MDC-01013। কি পঢ়িব? আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।',
 };
 const ASSAMESE_UNIT_TITLES = {
   'unit-1-language-literature-culture': 'গোট ১: ভাষা, সাহিত্য আৰু সংস্কৃতি',
@@ -233,10 +233,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     <div
       className="w-full rounded-2xl overflow-hidden transition-all duration-300 group/card hover:-translate-y-0.5 relative cursor-pointer"
       style={{
-        background: 'var(--card)',
+        background: 'hsl(var(--card))',
         border: isSaved
           ? '1px solid rgba(139,92,246,0.40)'
-          : '1px solid rgba(139,92,246,0.10)',
+          : '1px solid rgba(124,58,237,0.20)',
         boxShadow: isSaved
           ? '0 0 32px rgba(139,92,246,0.15), 0 8px 32px rgba(0,0,0,0.08)'
           : '0 2px 12px rgba(0,0,0,0.06)',
@@ -324,7 +324,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
         </Link>
 
         {displayDescription && (
-          <p className="text-xs leading-relaxed mb-1.5 sm:mb-2 line-clamp-1 sm:line-clamp-2 font-medium"
+          <p className="text-[12px] sm:text-[13px] leading-snug mb-2 line-clamp-3 font-medium"
             style={{ color: 'hsl(var(--muted-foreground))' }}>
             {displayDescription}
           </p>
