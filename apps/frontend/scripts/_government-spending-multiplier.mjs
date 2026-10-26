@@ -18,10 +18,11 @@ export function assertGovernmentSpendingMultiplierDefinition(definition) {
     .replace(/×/g, "*")
     .replace(/\s+/g, " ");
   const requiredPatterns = [
+    /Y\*\s*=\s*\(\s*1\s*\/\s*\(\s*1\s*-\s*c\s*\)\s*\)\s*\*\s*\(C̄\s*-\s*cT\s*\+\s*cTR̄\s*\+\s*I\s*\+\s*G\)/,
+    /\(Y\*\s*\+\s*ΔY\)\s*=\s*\(\s*1\s*\/\s*\(\s*1\s*-\s*c\s*\)\s*\)\s*\*\s*\(C̄\s*-\s*cT\s*\+\s*cTR̄\s*\+\s*I\s*\+\s*G\s*\+\s*ΔG\)/,
     /ΔY\s*=\s*\(1\s*\/\s*\(1\s*-\s*c\)\)\s*\*\s*ΔG/,
     /ΔY\s*\/\s*ΔG\s*=\s*1\s*\/\s*\(1\s*-\s*c\)/,
-    /For c\s*=\s*0\.8[^.]*\b5\b[^.]*\b500\b/i,
-    /Source:\s*NCERT.*Introductory Macroeconomics.*Chapter 5.*equations 5\.4-5\.6, page 73/i,
+    /Source:\s*NCERT.*Introductory Macroeconomics.*Class XII.*Chapter 5.*Government Budget and the Economy.*Changes in Government Expenditure.*equations \(5\.4\), \(5\.4a\), \(5\.5\), and \(5\.6\), p\. 73.*Reprint 2026-27.*https:\/\/ncert\.nic\.in\/textbook\/pdf\/leec105\.pdf/i,
   ];
   if (!requiredPatterns.every((pattern) => pattern.test(normalized))) {
     throw new Error("Government-spending multiplier topic is missing the NCERT-grounded derivation or source.");
