@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { completeTopicPageLanguages, resolveTopicPageContent } from './topic-page';
+import { completeTopicPageLanguages, replaceTopicQuestionLinks, resolveTopicPageContent, stableQuestionId } from './topic-page';
 
 const topic = {
   id: 'topic-modern-assam-1',
   title: 'Modern Assamese literature',
   topic_slug: 'modern-assamese-literature',
   notes_en: 'Approved notes about the topic.',
+  notes_status_en: 'approved',
   title_as: 'আধুনিক অসমীয়া সাহিত্য',
   topic_slug_as: 'adhunik-asamiya-sahitya',
   notes_as: 'বিষয়টোৰ অনুমোদিত টোকা।',
+  notes_status_as: 'approved',
 };
 
 describe('topic page source matching', () => {
@@ -38,5 +40,22 @@ describe('topic page source matching', () => {
 
     expect(completeTopicPageLanguages(topic, englishOnly, [])).toEqual(['en']);
     expect(completeTopicPageLanguages(topic, englishOnly, withAssamese)).toEqual(['en', 'as']);
+  });
+
+  it('requires language-specific approval before making a page available', () => {
+    expect(resolveTopicPageContent({ ...topic, notes_status_as: 'draft' }, [
+      { topic_id: topic.id, question: 'প্ৰশ্ন', answer: 'উত্তৰ' },
+    ], 'as')).toBeNull();
+  });
+
+  it('assigns deterministic IDs to legacy questions and only changes explicit link metadata', () => {
+    const original = { question: 'Question text', answer: 'Existing answer', topic_ids: ['other-topic'] };
+    const id = stableQuestionId(original);
+    expect(stableQuestionId({ question: 'Question text', answer: 'different answer' })).toBe(id);
+    const linked = replaceTopicQuestionLinks([original], topic, [id], 'en')[0] as Record<string, unknown>;
+    expect(linked.answer).toBe('Existing answer');
+    expect(linked.question_id).toBe(id);
+    expect(linked.topic_ids).toEqual(['other-topic', topic.id]);
+    expect(linked.topic_slugs).toEqual([topic.topic_slug]);
   });
 });

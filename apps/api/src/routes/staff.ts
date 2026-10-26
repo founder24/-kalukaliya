@@ -33,6 +33,7 @@ import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog, 
 import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { purgeChapterRag, purgeRagScope, reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
+import { replaceTopicQuestionLinks, resolveTopicPageContent, stableQuestionId } from '../services/topic-page';
 import type { Env, JwtPayload } from '../types';
 import type { JWTPayload } from 'jose';
 
@@ -1623,6 +1624,10 @@ type Topic = {
   definition_as?: string;
   content?: string;
   content_as?: string;
+  notes_en?: string;
+  notes_as?: string;
+  notes_status_en?: 'draft' | 'approved';
+  notes_status_as?: 'draft' | 'approved';
   status?: 'draft' | 'published';
   [key: string]: unknown;
 };
@@ -1755,7 +1760,17 @@ async function topicChapter(env: Env, chapterId: string) {
 }
 staffRouter.get('/content/chapter/:chapterId/topics', async c => {
   const auth = await guard(c); if (!auth) return c.res;
-  const row = await topicChapter(c.env, c.req.param('chapterId')); return row ? c.json({ topics: chapterTopics(row) }) : c.json({ detail: 'Chapter not found' }, 404);
+  const row = await createDb(c.env.DB).select({
+    id: chapters.id, subjectId: chapters.subjectId, publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn, qaAs: chapters.qaAs,
+  }).from(chapters).where(eq(chapters.id, c.req.param('chapterId'))).get();
+  if (!row) return c.json({ detail: 'Chapter not found' }, 404);
+  const editorQuestions = (raw: string | null) => (safeParse<unknown[]>(raw) ?? []).map(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+    const question = entry as Record<string, unknown>;
+    return { ...question, editor_question_id: stableQuestionId(question) };
+  });
+  return c.json({ topics: chapterTopics(row), questions: { en: editorQuestions(row.qaEn), as: editorQuestions(row.qaAs) } });
 });
 staffRouter.post('/content/chapter/:chapterId/topics', async c => {
   const auth = await guard(c); if (!auth) return c.res; const denied = await capabilityDenied(c, auth, 'content:edit'); if (denied) return denied;
@@ -1771,6 +1786,10 @@ staffRouter.post('/content/chapter/:chapterId/topics', async c => {
     definition_as: typeof body.definition_as === 'string' ? body.definition_as : '',
     content: typeof body.content === 'string' ? body.content : '',
     content_as: typeof body.content_as === 'string' ? body.content_as : '',
+    notes_en: '',
+    notes_as: '',
+    notes_status_en: 'draft',
+    notes_status_as: 'draft',
     status: 'draft',
   };
   const topics = [...chapterTopics(row), topic];
@@ -1781,20 +1800,71 @@ staffRouter.patch('/content/chapter/:chapterId/topics/:topicId', async c => {
   const auth = await guard(c); if (!auth) return c.res; const denied = await capabilityDenied(c, auth, 'content:edit'); if (denied) return denied;
   const row = await topicChapter(c.env, c.req.param('chapterId')); if (!row) return c.json({ detail: 'Chapter not found' }, 404);
   const body = await safeBody(c); const topics = chapterTopics(row); const topic = topics.find(item => item.id === c.req.param('topicId')); if (!topic) return c.json({ detail: 'Topic not found' }, 404);
-  for (const key of ['title', 'title_as', 'topic_slug', 'topic_slug_as', 'definition', 'definition_as', 'content', 'content_as'] as const) {
+  for (const key of ['title', 'title_as', 'topic_slug', 'topic_slug_as', 'definition', 'definition_as', 'content', 'content_as', 'notes_en', 'notes_as'] as const) {
     if (typeof body[key] === 'string') topic[key] = body[key] as string;
   }
   await createDb(c.env.DB).update(chapters).set({ publishedTopics: JSON.stringify(topics), updatedAt: nowTs(), ragUpdatedAt: nowTs() }).where(eq(chapters.id, row.id));
   await auditLog(c.env, auth.sub ?? '', 'update_topic', 'topic', topic.id, { chapter_id: row.id });
   return c.json({ topic });
 });
+staffRouter.patch('/content/chapter/:chapterId/topics/:topicId/question-links/:language', async c => {
+  const auth = await guard(c); if (!auth) return c.res;
+  const denied = await capabilityDenied(c, auth, 'content:edit'); if (denied) return denied;
+  const language = c.req.param('language');
+  if (language !== 'en' && language !== 'as') return c.json({ detail: 'language must be en or as' }, 422);
+  const chapterId = c.req.param('chapterId');
+  const row = await createDb(c.env.DB).select({
+    id: chapters.id, publishedTopics: chapters.publishedTopics, qaEn: chapters.qaEn, qaAs: chapters.qaAs,
+  }).from(chapters).where(eq(chapters.id, chapterId)).get();
+  if (!row) return c.json({ detail: 'Chapter not found' }, 404);
+  const topic = chapterTopics(row).find(item => item.id === c.req.param('topicId'));
+  if (!topic) return c.json({ detail: 'Topic not found' }, 404);
+  const body = await safeBody(c);
+  const ids = Array.isArray(body.question_ids)
+    ? [...new Set(body.question_ids.filter((id): id is string => typeof id === 'string' && id.length <= 200))]
+    : null;
+  if (!ids) return c.json({ detail: 'question_ids must be an array of stable question IDs' }, 422);
+  const current = safeParse<unknown[]>(language === 'en' ? row.qaEn : row.qaAs) ?? [];
+  const stableIds = current.flatMap(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
+    ? [stableQuestionId(entry as Record<string, unknown>)] : []);
+  if (new Set(stableIds.filter(Boolean)).size !== stableIds.filter(Boolean).length) {
+    return c.json({ detail: 'Duplicate question text needs an explicit question_id before it can be linked' }, 409);
+  }
+  if (ids.some(id => !stableIds.includes(id))) return c.json({ detail: 'A selected question changed; reload and try again' }, 409);
+  const next = replaceTopicQuestionLinks(current, topic, ids, language);
+  const db = createDb(c.env.DB);
+  const updatedAt = nowTs();
+  if (language === 'en') await db.update(chapters).set({ qaEn: JSON.stringify(next), updatedAt }).where(eq(chapters.id, chapterId));
+  else await db.update(chapters).set({ qaAs: JSON.stringify(next), updatedAt }).where(eq(chapters.id, chapterId));
+  await auditLog(c.env, auth.sub ?? '', 'update_topic_question_links', 'topic', topic.id, { chapter_id: chapterId, language, question_count: ids.length });
+  return c.json({ ok: true, language, question_ids: ids });
+});
 staffRouter.post('/content/chapter/:chapterId/topics/:topicId/:action', async c => {
   const auth = await guard(c); if (!auth) return c.res;
   const action = c.req.param('action');
-  const needed: StaffCapability = action === 'publish' || action === 'unpublish' ? 'content:publish' : action === 'reindex' ? 'rag:reindex' : 'content:edit';
+  const needed: StaffCapability = action === 'publish' || action === 'unpublish' || action.startsWith('approve-') || action.startsWith('unapprove-')
+    ? 'content:publish' : action === 'reindex' ? 'rag:reindex' : 'content:edit';
   const denied = await capabilityDenied(c, auth, needed); if (denied) return denied;
   const row = await topicChapter(c.env, c.req.param('chapterId')); if (!row) return c.json({ detail: 'Chapter not found' }, 404);
   const topics = chapterTopics(row); const topic = topics.find(item => item.id === c.req.param('topicId')); if (!topic) return c.json({ detail: 'Topic not found' }, 404);
+  if (action === 'approve-en' || action === 'approve-as' || action === 'unapprove-en' || action === 'unapprove-as') {
+    const language = action.endsWith('-as') ? 'as' : 'en';
+    const qaRow = await createDb(c.env.DB).select({ qaEn: chapters.qaEn, qaAs: chapters.qaAs }).from(chapters).where(eq(chapters.id, row.id)).get();
+    const questionSource = safeParse<unknown[]>(language === 'en' ? qaRow?.qaEn : qaRow?.qaAs) ?? [];
+    const key = `notes_status_${language}` as const;
+    if (action.startsWith('approve')) {
+      if (!resolveTopicPageContent({ ...topic, [key]: 'approved' }, questionSource, language)) {
+        return c.json({ detail: `Add this language's title, slug, notes, and an explicitly linked question with an answer/solution before approval.` }, 422);
+      }
+      topic[key] = 'approved';
+    } else topic[key] = 'draft';
+    const timestamp = nowTs();
+    await createDb(c.env.DB).update(chapters).set({
+      publishedTopics: JSON.stringify(topics), updatedAt: timestamp, ragUpdatedAt: timestamp,
+    }).where(eq(chapters.id, row.id));
+    await auditLog(c.env, auth.sub ?? '', action.replace('-', '_'), 'topic', topic.id, { chapter_id: row.id, language });
+    return c.json({ ok: true, topic });
+  }
   if (action === 'publish') {
     if (!topic.title.trim() || !(topic.content ?? '').trim()) {
       return c.json({ detail: 'Question and answer are required before publishing' }, 422);
