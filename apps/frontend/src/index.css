@@ -684,27 +684,27 @@
     background: #ffffff;
     color: #1a1a1a;
     font-family: Georgia, 'Times New Roman', 'Noto Serif', serif;
-    font-size: 12px;
+    font-size: 1rem;
     line-height: 1.75;
-    letter-spacing: 0.01em;
+    letter-spacing: 0;
     box-shadow: 0 1px 6px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04);
   }
-  .chapter-textbook h1 { font-size: 1.2rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #111; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.3rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  .chapter-textbook h2 { font-size: 1rem; font-weight: 700; margin: 1.1rem 0 0.4rem; color: #1a1a1a; border-bottom: 1px solid #f0f0f0; padding-bottom: 0.2rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  .chapter-textbook h3 { font-size: 0.9rem; font-weight: 600; margin: 0.9rem 0 0.3rem; color: #222; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  .chapter-textbook h4, .chapter-textbook h5, .chapter-textbook h6 { font-size: var(--reading-base); font-weight: 600; margin: 0.6rem 0 0.25rem; color: #333; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  .chapter-textbook p { margin: 0.4rem 0 1rem; color: #222; }
-  .chapter-textbook strong { font-weight: 700; color: #111; }
-  .chapter-textbook em { font-style: italic; color: #444; }
-  .chapter-textbook ul { list-style: disc; padding-left: 1.5rem; margin: 0.5rem 0 1rem; color: #222; }
-  .chapter-textbook ol { list-style: decimal; padding-left: 1.5rem; margin: 0.5rem 0 1rem; color: #222; }
-  .chapter-textbook li { margin: 0.3rem 0; }
-  .chapter-textbook li > ul, .chapter-textbook li > ol { margin: 0.2rem 0; }
-  .chapter-textbook blockquote { border-left: 3px solid #d1d5db; padding: 0.5rem 0 0.5rem 1rem; margin: 1rem 0; color: #555; font-style: italic; background: #f9fafb; border-radius: 0 6px 6px 0; }
+  .chapter-textbook h1 { font-size: 1.45rem; line-height: 1.3; font-weight: 700; margin: 1.6rem 0 0.75rem; color: #171717; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.45rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .chapter-textbook h2 { font-size: 1.22rem; line-height: 1.4; font-weight: 650; margin: 1.5rem 0 0.55rem; color: #222; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .chapter-textbook h3 { font-size: 1.08rem; line-height: 1.45; font-weight: 600; margin: 1.15rem 0 0.4rem; color: #292929; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .chapter-textbook h4, .chapter-textbook h5, .chapter-textbook h6 { font-size: 1rem; font-weight: 600; margin: 0.9rem 0 0.35rem; color: #333; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  .chapter-textbook p { margin: 0.55rem 0 0.9rem; color: #292929; }
+  .chapter-textbook strong { font-weight: 600; color: inherit; }
+  .chapter-textbook em { font-style: italic; color: inherit; }
+  .chapter-textbook ul { list-style: disc; padding-left: 1.35rem; margin: 0.45rem 0 1rem; color: #292929; }
+  .chapter-textbook ol { list-style: decimal; padding-left: 1.35rem; margin: 0.45rem 0 1rem; color: #292929; }
+  .chapter-textbook li { margin: 0.4rem 0; padding-left: 0.1rem; }
+  .chapter-textbook li > ul, .chapter-textbook li > ol { margin: 0.3rem 0 0.45rem; }
+  .chapter-textbook blockquote { border-left: 2px solid #c4b5fd; padding: 0.35rem 0 0.35rem 0.9rem; margin: 1rem 0; color: #444; font-style: italic; background: transparent; }
   .chapter-textbook code { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.83em; background: #f3f4f6; padding: 0.1em 0.4em; border-radius: 4px; color: #7c3aed; }
   .chapter-textbook pre { background: #1e1e2e; color: #cdd6f4; border-radius: 10px; padding: 1rem 1.2rem; margin: 0.8rem 0; overflow-x: auto; }
   .chapter-textbook pre code { background: none; padding: 0; color: inherit; font-size: 0.85em; }
-  .chapter-textbook table { width: 100%; border-collapse: collapse; margin: 0.6rem 0; font-size: 0.8rem; }
+  .chapter-textbook table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 0.95em; }
   .chapter-textbook th { background: #f3f4f6; color: #111; font-weight: 600; padding: 0.5rem 0.75rem; text-align: left; border: 1px solid #e5e7eb; }
   .chapter-textbook td { padding: 0.45rem 0.75rem; border: 1px solid #e5e7eb; color: #333; }
   .chapter-textbook tr:nth-child(even) td { background: #fafafa; }
@@ -1667,6 +1667,10 @@
   0% { background-color: rgba(74, 222, 128, 0.22) !important; box-shadow: inset 4px 0 0 0 #22c55e, 0 0 12px rgba(74, 222, 128, 0.12) !important; }
   100% { background-color: rgba(74, 222, 128, 0.10) !important; box-shadow: inset 3px 0 0 0 #22c55e !important; }
 }
+@keyframes chapterHighlightFadeIn {
+  0% { background-color: rgba(124, 58, 237, 0.10); box-shadow: inset 2px 0 0 0 rgba(124, 58, 237, 0.4); }
+  100% { background-color: rgba(124, 58, 237, 0.06); box-shadow: inset 2px 0 0 0 rgba(124, 58, 237, 0.55); }
+}
 .chapter-textbook .highlight-active,
 .highlight-active {
   background-color: rgba(74, 222, 128, 0.10) !important;
@@ -1676,6 +1680,11 @@
   animation: highlightFadeIn 1s ease-out;
   transition: background-color 0.6s ease, box-shadow 0.6s ease, color 0.6s ease;
   scroll-margin-top: 80px;
+}
+.chapter-textbook .highlight-active {
+  background-color: rgba(124, 58, 237, 0.06) !important;
+  box-shadow: inset 2px 0 0 0 rgba(124, 58, 237, 0.55) !important;
+  animation: chapterHighlightFadeIn 0.6s ease-out;
 }
 .highlight-active.highlight-section-start {
   border-radius: 8px 8px 0 0;
@@ -1691,7 +1700,9 @@
 }
 .chapter-textbook h2.highlight-active,
 .chapter-textbook h3.highlight-active,
-.chapter-textbook h4.highlight-active,
+.chapter-textbook h4.highlight-active {
+  color: inherit !important;
+}
 h2.highlight-active,
 h3.highlight-active,
 h4.highlight-active {

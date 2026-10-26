@@ -62,6 +62,7 @@
 - [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.
 - [Prerender canonical counts](prerender-canonical-counts.md) — Release manifests must count unique canonical output paths, not duplicate source records.
 - [Sitemap prerender authority](sitemap-prerender-authority.md) — Published chapter sitemap paths remain expected even when a static bundle cannot map their subject IDs.
+- [Strict prerender release evidence](strict-prerender-release-evidence.md) — Verify the live D1 payload and deployed checker; a successful conditional migration may change zero rows.
 - [Prerender backend signals](prerender-backend-signals.md) — Coalesce concurrent schema probes, but never TTL-cache completed signals across cache reads.
 - [Prerender request concurrency](prerender-request-concurrency.md) — enforce one process-wide backend request pool; nested route loops otherwise multiply fan-out.
 - [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains, Access writes, and Logpush need current API contracts; location hints do not guarantee residency.

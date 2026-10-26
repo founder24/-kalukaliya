@@ -28,6 +28,7 @@ import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
+import { resolveTopicPageContent, type TopicPageLanguage } from '../services/topic-page';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
@@ -998,12 +999,19 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
   const db = createDb(c.env.DB);
   const chapterId = c.req.param('chapterId') as string;
 
-  const ch = await db.select({ id: chapters.id, publishedTopics: chapters.publishedTopics })
+  const ch = await db.select({
+    id: chapters.id,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  })
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
   const rawTopics = safeParse<unknown[]>(ch.publishedTopics) ?? [];
   const lang = c.req.query('lang');
+  const qaEn = safeParse<unknown[]>(ch.qaEn) ?? [];
+  const qaAs = safeParse<unknown[]>(ch.qaAs) ?? [];
   const topics = publishedChapterTopics(rawTopics).map(topic => {
       if (lang !== 'as') return topic;
       const definitionAs = typeof topic.definition_as === 'string'
@@ -1016,7 +1024,49 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
         ...(definitionAs.trim() ? { definition: definitionAs } : {}),
       };
     });
-  return c.json({ chapter_id: ch.id, topics, total: topics.length });
+  const withAvailability = topics.map(topic => ({
+    ...topic,
+    topic_page_available_en: Boolean(resolveTopicPageContent(topic, qaEn, 'en')),
+    topic_page_available_as: Boolean(resolveTopicPageContent(topic, qaAs, 'as')),
+  }));
+  return c.json({ chapter_id: ch.id, topics: withAvailability, total: withAvailability.length });
+});
+
+contentRouter.get('/chapters/:chapterId/topics/:topicSlug/page', async (c) => {
+  const db = createDb(c.env.DB);
+  const chapterId = c.req.param('chapterId');
+  const topicSlug = c.req.param('topicSlug');
+  const language = c.req.query('lang') === 'as' ? 'as' : 'en';
+  const chapter = await db.select({
+    id: chapters.id,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  }).from(chapters).where(eq(chapters.id, chapterId)).get();
+  if (!chapter) return c.json({ detail: 'Chapter not found' }, 404);
+
+  const topics = publishedChapterTopics(safeParse<unknown[]>(chapter.publishedTopics) ?? []);
+  const topic = topics.find((candidate) => language === 'as'
+    ? candidate.topic_slug_as === topicSlug
+    : (candidate.topic_slug ?? candidate.slug) === topicSlug);
+  if (!topic) return c.json({ detail: 'Topic page not found' }, 404);
+
+  const questionSource = safeParse<unknown[]>(
+    language === 'as' ? chapter.qaAs : chapter.qaEn,
+  ) ?? [];
+  const page = resolveTopicPageContent(topic, questionSource, language as TopicPageLanguage);
+  if (!page) return c.json({ detail: 'Topic page is not complete in this language' }, 404);
+  const alternateLanguage = language === 'as' ? 'en' : 'as';
+  const alternateQuestions = safeParse<unknown[]>(
+    alternateLanguage === 'as' ? chapter.qaAs : chapter.qaEn,
+  ) ?? [];
+  const alternate = resolveTopicPageContent(topic, alternateQuestions, alternateLanguage);
+
+  return c.json({
+    chapter_id: chapter.id,
+    topic: page,
+    alternate_slug: alternate?.topic_slug ?? null,
+  });
 });
 
 contentRouter.get('/chapters/:chapterId/topics-related', async (c) => {

@@ -158,7 +158,9 @@ export const chapters = sqliteTable('chapters', {
   ragSectionsEn: text('rag_sections_en').default('[]'),               // JSON RagSection[]
   ragSectionsAs: text('rag_sections_as').default('[]'),
 
-  // Published topics (public curriculum structure)
+  // Published topics (public curriculum structure). Indexable topic pages
+  // carry notes_en/notes_as; chapter QA records link explicitly using
+  // topic_id/topic_slug (or their linked_* equivalents).
   publishedTopics: text('published_topics').default('[]'),            // JSON Topic[]
 
   // Q&A

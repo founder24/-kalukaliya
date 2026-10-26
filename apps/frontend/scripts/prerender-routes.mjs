@@ -537,6 +537,12 @@ async function fetchChapterPublishedTopics(chapterId) {
   }
 }
 
+async function fetchTopicPageContent(chapterId, topicSlug, language) {
+  if (!chapterId || !topicSlug) return null;
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics/${encodeURIComponent(topicSlug)}/page?lang=${language}`;
+  return fetchJson(url);
+}
+
 // Topical-mapping (Task: topical mapping + topical authority) —
 // bake the related-topic graph (siblings + cross-chapter) into the
 // chapter preload so SSR / curl-no-JS already ships the full
@@ -1253,13 +1259,22 @@ async function main() {
               )
             ) continue;
             try {
-              const topicTitle = localized.title || topic.title;
-              if (topic.topic_slug === "government-spending-multiplier") {
-                assertGovernmentSpendingMultiplierDefinition(localized.definition);
-              }
               const topicLanguage = localized.path.startsWith("/as/") ? "as" : "en";
+              const pagePayload = await fetchTopicPageContent(
+                chapterData.chapter_id,
+                topic.topic_slug,
+                topicLanguage,
+              );
+              if (!pagePayload?.topic?.notes || !Array.isArray(pagePayload.topic.questions) || pagePayload.topic.questions.length === 0) {
+                throw new Error("topic page endpoint returned incomplete notes or question sources");
+              }
+              const topicTitle = pagePayload.topic.title || localized.title || topic.title;
+              const topicNotes = pagePayload.topic.notes;
+              if (topic.topic_slug === "government-spending-multiplier") {
+                assertGovernmentSpendingMultiplierDefinition(topic.definition);
+              }
               const topicSchema = topicPageSchema({
-                topic: { title: topicTitle, description: localized.definition },
+                topic: { title: topicTitle, description: topicNotes },
                 chapter: {
                   subject_name: subjName,
                   board_name: bName,
@@ -1270,14 +1285,18 @@ async function main() {
                 url: `https://syrabit.ai${localized.path}`,
                 parentUrl: `https://syrabit.ai${localized.path.replace(/\/topic\/[^/]+$/, "")}`,
               });
+              const topicPreload = {
+                ...preload,
+                data: { ...preload.data, topic_page_content: pagePayload },
+              };
               const topicHtml = await renderOne(renderRoute, htmlTemplate, {
                 url: localized.path,
-                seed: { chapterPreload: preload },
+                seed: { chapterPreload: topicPreload },
                 hydrateKind: "chapter",
                 inlineScripts: inlineChapterScripts,
                 head: {
                   title: `${topicTitle} — ${chapterTitle}`,
-                  description: (localized.definition || topicTitle).slice(0, 280),
+                  description: (topicNotes || topicTitle).slice(0, 280),
                   canonical: `https://syrabit.ai${localized.path}`,
                   ogImageAlt: `${topicTitle} — ${chapterTitle} | Syrabit.ai`,
                   language: topicLanguage,

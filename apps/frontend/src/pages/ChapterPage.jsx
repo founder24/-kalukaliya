@@ -364,6 +364,8 @@ export default function ChapterPage() {
   // `null` = not yet checked (or not on the deep-link route),
   // `true` = resolver returned 404, `false` = topic resolved.
   const [topicNotFound, setTopicNotFound] = useState(false);
+  const [topicPageData, setTopicPageData] = useState(initialChapterData?.topic_page_content || null);
+  const [topicPageLoading, setTopicPageLoading] = useState(Boolean(topicSlugParam && !initialChapterData?.topic_page_content));
 
   // Fetch related topics across the chapter for in-content internal links.
   useEffect(() => {
@@ -456,20 +458,33 @@ export default function ChapterPage() {
     let cancelled = false;
     if (!topicSlugParam || !data?.chapter_id) {
       setTopicNotFound(false);
+      setTopicPageData(null);
+      setTopicPageLoading(false);
       return;
     }
+    if (initialChapterData?.topic_page_content?.topic?.topic_slug === topicSlugParam) {
+      setTopicPageData(initialChapterData.topic_page_content);
+      setTopicNotFound(false);
+      setTopicPageLoading(false);
+      return;
+    }
+    setTopicPageLoading(true);
+    setTopicNotFound(false);
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/topics/${encodeURIComponent(topicSlugParam)}`)
-      .then(() => { if (!cancelled) setTopicNotFound(false); })
+      .get(`/content/chapters/${data.chapter_id}/topics/${encodeURIComponent(topicSlugParam)}/page?lang=${isAssamesePath ? 'as' : 'en'}`)
+      .then((r) => {
+        if (cancelled) return;
+        setTopicPageData(r.data);
+        setTopicNotFound(false);
+        setTopicPageLoading(false);
+      })
       .catch((e) => {
         if (cancelled) return;
-        // Only flip to "not found" on a real 404. Network blips fall
-        // through silently — the answer card list will still render
-        // from the topics-published fetch, and the user can retry.
+        setTopicPageLoading(false);
         if (e?.response?.status === 404) setTopicNotFound(true);
       });
     return () => { cancelled = true; };
-  }, [topicSlugParam, data?.chapter_id]);
+  }, [topicSlugParam, data?.chapter_id, isAssamesePath, initialChapterData]);
 
   // Task #914 Step 2 — explicit scroll for path-segment deep-links.
   // Once the answer cards are in the DOM, scroll the matching card
@@ -985,17 +1000,10 @@ export default function ChapterPage() {
   const activeTopicDefinitionAs = typeof activeDeepLinkTopic?.definition_as === 'string'
     ? activeDeepLinkTopic.definition_as
     : typeof activeDeepLinkTopic?.content_as === 'string' ? activeDeepLinkTopic.content_as : '';
-  const hasCompleteTopicAs = Boolean(
-    typeof activeDeepLinkTopic?.title_as === 'string' && activeDeepLinkTopic.title_as.trim() &&
-    typeof activeDeepLinkTopic?.topic_slug_as === 'string' && activeDeepLinkTopic.topic_slug_as.trim() &&
-    activeTopicDefinitionAs.trim().split(/\s+/).filter(Boolean).length >= 40
-  );
-  const topicAlternateUrl = hasCompleteTopicAs
+  const topicAlternateUrl = topicPageData?.alternate_slug
     ? `https://syrabit.ai${isAssamesePath
-      ? routerLocation.pathname
-          .replace(/^\/as\//, "/")
-          .replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug}`)
-      : `/as${routerLocation.pathname.replace(/\/topic\/[^/]+$/, `/topic/${activeDeepLinkTopic.topic_slug_as}`)}`
+      ? routerLocation.pathname.replace(/^\/as\//, '/').replace(/\/topic\/[^/]+$/, `/topic/${topicPageData.alternate_slug}`)
+      : `/as${routerLocation.pathname.replace(/\/topic\/[^/]+$/, `/topic/${topicPageData.alternate_slug}`)}`
     }`
     : undefined;
   const readMins = data?.word_count ? Math.max(1, Math.ceil(data.word_count / 200)) : null;
@@ -1091,7 +1099,7 @@ export default function ChapterPage() {
           </div>
           <h1 className="text-2xl font-bold mb-3" data-testid="topic-not-found">Topic not found</h1>
           <p className="text-muted-foreground mb-6">
-            This topic isn't published yet. You can still read the full chapter below.
+            This topic page is not complete in this language yet.
           </p>
           {/* Stream-aware link target — `basePath` intentionally
               omits streamSlug for breadcrumbs, so re-insert it here
@@ -1111,6 +1119,10 @@ export default function ChapterPage() {
         </div>
       </div>
     );
+  }
+
+  if (topicSlugParam && topicPageLoading) {
+    return <div className="mx-auto max-w-3xl px-4 py-12" aria-busy="true"><Skeleton className="h-10 w-3/4 mb-6" /><Skeleton className="h-5 w-full mb-3" /><Skeleton className="h-5 w-5/6 mb-3" /></div>;
   }
 
   if (error || !data) {
@@ -1191,24 +1203,21 @@ export default function ChapterPage() {
     ? `${_baseDesc} Covers ${_bingDescTerms.join(', ')}.`.slice(0, 300)
     : _baseDesc;
 
-  if (topicSlugParam && activeDeepLinkTopic) {
-    const topicTitle = isAssamesePath
-      ? (activeDeepLinkTopic.title_as || activeDeepLinkTopic.title)
-      : activeDeepLinkTopic.title;
-    const topicDefinition = isAssamesePath
-      ? (activeDeepLinkTopic.definition_as || activeDeepLinkTopic.definition)
-      : activeDeepLinkTopic.definition;
+  if (topicSlugParam && topicPageData?.topic) {
+    const topicTitle = topicPageData.topic.title;
+    const topicNotes = topicPageData.topic.notes;
+    const questions = topicPageData.topic.questions || [];
     return (
       <main className="min-h-screen bg-background text-foreground px-4 py-8">
         <PageMeta
           title={`${topicTitle} — ${chapterTitle}`}
-          description={(topicDefinition || seoDesc).slice(0, 280)}
+          description={topicNotes.slice(0, 280)}
           url={canonical}
           type="article"
           section={subjectName}
           pageType="topic"
           pageData={{
-            topic: { title: topicTitle, description: topicDefinition },
+            topic: { title: topicTitle, description: topicNotes },
             chapter: {
               subject_name: subjectName,
               board_name: boardName,
@@ -1218,7 +1227,7 @@ export default function ChapterPage() {
             parentUrl: `https://syrabit.ai${_topicParentPath}`,
             language: isAssamesePath ? "as" : "en",
           }}
-          hasAssamese={Boolean(activeDeepLinkTopic.definition_as)}
+          hasAssamese={Boolean(topicAlternateUrl)}
           language={isAssamesePath ? "as" : "en"}
           alternateUrl={topicAlternateUrl}
         />
@@ -1229,12 +1238,25 @@ export default function ChapterPage() {
             <Link to={_topicParentPath}>{chapterTitle}</Link>
           </nav>
           <h1 className="mb-5 text-3xl font-bold">{topicTitle}</h1>
-          <section className="prose dark:prose-invert max-w-none" aria-label={topicTitle}>
-            <p>{topicDefinition}</p>
+          <section className="prose dark:prose-invert max-w-none" aria-label={isAssamesePath ? 'বিষয়ভিত্তিক টোকা' : 'Topic notes'}>
+            <MarkdownRenderer>{topicNotes}</MarkdownRenderer>
+          </section>
+          <section className="mt-10 border-t border-border/50 pt-6" aria-labelledby="topic-questions-heading">
+            <h2 id="topic-questions-heading" className="mb-5 text-2xl font-bold">{isAssamesePath ? 'সম্পৰ্কিত প্ৰশ্ন আৰু সমাধান' : 'Related questions and solutions'}</h2>
+            {questions.map((question, index) => (
+              <article key={question.id || `${topicPageData.topic.topic_id}-${index}`} className="mb-6 rounded-xl border border-border/50 p-5">
+                <h3 className="font-semibold">{question.question}</h3>
+                {(question.solution || question.answer) && <div className="prose dark:prose-invert mt-3 max-w-none"><MarkdownRenderer>{question.solution || question.answer}</MarkdownRenderer></div>}
+              </article>
+            ))}
           </section>
           <p className="mt-8">
-            <Link className="text-primary underline" to={_topicParentPath}>
+            <Link className="text-primary underline" to={`${_topicParentPath}?tab=notes`}>
               {isAssamesePath ? 'অধ্যায়ৰ সম্পূৰ্ণ টোকা পঢ়ক' : `Read the complete ${chapterTitle} chapter notes`}
+            </Link>
+            {' · '}
+            <Link className="text-primary underline" to={`${_topicParentPath}?tab=qa`}>
+              {isAssamesePath ? 'অধ্যায়ৰ প্ৰশ্নোত্তৰ চাওক' : 'View these in chapter Questions'}
             </Link>
           </p>
         </article>
@@ -1461,7 +1483,7 @@ export default function ChapterPage() {
             )}
             <div
               id="chapter-content-top"
-              className="chapter-textbook rounded-2xl p-3 sm:p-4 scroll-mt-20 max-w-[720px] mx-auto text-[12px] leading-relaxed"
+              className="chapter-textbook rounded-2xl p-4 sm:p-6 scroll-mt-20 max-w-[720px] mx-auto text-[15px] sm:text-base leading-relaxed"
             >
               {/* Notes mode — main markdown content */}
               {(isQuestionPaper || contentMode === 'notes') && (
@@ -1523,10 +1545,10 @@ export default function ChapterPage() {
                             topic={t}
                             chapterUrl={chapterUrl}
                             topicUrl={isAssamesePath
-                              ? (typeof t.topic_slug_as === 'string' && typeof t.title_as === 'string' && typeof t.definition_as === 'string' && t.definition_as.trim().split(/\s+/).filter(Boolean).length >= 40
+                              ? (t.topic_page_available_as && typeof t.topic_slug_as === 'string' && typeof t.title_as === 'string' && typeof t.definition_as === 'string' && t.definition_as.trim().split(/\s+/).filter(Boolean).length >= 40
                                 ? `${_chapterPath}/topic/${encodeURIComponent(t.topic_slug_as)}`
                                 : undefined)
-                              : (t.topic_slug || t.slug
+                              : (t.topic_page_available_en && (t.topic_slug || t.slug)
                                 ? `${_chapterPath}/topic/${encodeURIComponent(t.topic_slug || t.slug)}`
                                 : undefined)}
                             fromChat={!!(fromChatTopicSlug && fromChatTopicSlug === tSlug)}

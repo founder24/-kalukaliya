@@ -16,6 +16,10 @@ import { useContentLang } from '@/context/LanguageContext';
 import { seoRelatedByChapter } from '@/utils/api';
 import { siblingsAsRelated } from '@/utils/siblingChapter';
 
+const MAKERS_SUBJECT_SLUG = 'makers-of-modern-assam-mdc-01013';
+const MAKERS_ASSAMESE_NAME = 'আধুনিক অসমৰ নিৰ্মাতা সকল';
+const MAKERS_ASSAMESE_DESCRIPTION = 'গুৱাহাটী বিশ্ববিদ্যালয় · NEP 2020-ৰ চাৰি বছৰীয়া FYUGP · প্ৰথম ষাণ্মাসিক · MDC-01013। কি পঢ়িব? আধুনিক অসমীয়া ভাষা, সাহিত্য, সংগীত, ৰাজনৈতিক ভিত্তি, জনজাতীয় অধিকাৰ আৰু নাৰী শিক্ষা।';
+
 export default function SubjectLandingPage() {
   const { board, classSlug, subjectSlug } = useParams();
   const location = useLocation();
@@ -169,11 +173,12 @@ export default function SubjectLandingPage() {
     return out.slice(0, 6);
   }, [seoRelated, chapters, seedChapterId, basePath]);
 
+  const isMakersSubject = subjectSlug === MAKERS_SUBJECT_SLUG;
   const subjectName = contentLang === 'as'
-    ? (subject?.name_as || subject?.name || subjectSlug)
+    ? (subject?.name_as || (isMakersSubject ? MAKERS_ASSAMESE_NAME : subject?.name) || subjectSlug)
     : (subject?.name || subjectSlug);
   const subjectDescription = contentLang === 'as'
-    ? (subject?.description_as || subject?.description)
+    ? (subject?.description_as || (isMakersSubject ? MAKERS_ASSAMESE_DESCRIPTION : subject?.description))
     : subject?.description;
   const boardName = subject?.board_name || board;
   const className = subject?.class_name || classSlug;

@@ -246,6 +246,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
       }}
       data-testid="library-subject-card"
       data-subject-id={sub.id}
+      itemScope={sub.slug === MAKERS_SUBJECT_SLUG || undefined}
+      itemType={sub.slug === MAKERS_SUBJECT_SLUG ? 'https://schema.org/Course' : undefined}
     >
       {/* Header bar — same gradient style as Degree cards */}
       <div
@@ -297,6 +299,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
               <h3
                 className="font-bold group-hover/title:text-purple-300 transition-colors leading-tight"
                 style={{ fontSize: '0.95rem', color: 'hsl(var(--foreground))' }}
+                itemProp={sub.slug === MAKERS_SUBJECT_SLUG ? 'name' : undefined}
               >
                 {displayName}
               </h3>
@@ -325,7 +328,8 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
 
         {displayDescription && (
           <p className="text-[12px] sm:text-[13px] leading-snug mb-2 line-clamp-3 font-medium"
-            style={{ color: 'hsl(var(--muted-foreground))' }}>
+            style={{ color: 'hsl(var(--muted-foreground))' }}
+            itemProp={sub.slug === MAKERS_SUBJECT_SLUG ? 'description' : undefined}>
             {displayDescription}
           </p>
         )}

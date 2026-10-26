@@ -14,11 +14,15 @@ const chapterRows = [{
   chapter_slug: 'newtons-laws',
   notes_en: 'A complete explanation of Newton’s laws of motion for students.',
   published_topics: JSON.stringify([{
+    id: 'topic-first-law',
     topic_slug: 'first-law',
     title: 'Newton’s first law',
+    notes_en: Array.from({ length: 40 }, (_, i) => `note${i}`).join(' '),
     definition_status: 'ok',
     definition: Array.from({ length: 40 }, (_, i) => `principle${i}`).join(' '),
   }]),
+  qa_en: JSON.stringify([{ topic_slug: 'first-law', question: 'What is the first law?', answer: 'An object remains at rest or in uniform motion.' }]),
+  qa_as: '[]',
   updated_at: 1_735_689_600,
   created_at: 1_735_603_200,
   subject_name: 'Physics',
@@ -407,17 +411,19 @@ describe('Worker-native site-operation routes', () => {
     expect(await emptyTopicIndex.text()).not.toContain('sitemap-topics.xml');
   });
 
-  it('sitemaps only reviewed, substantial, explicitly slugged, unique English topics', async () => {
+  it('sitemaps only complete reviewed topic pages with explicit question links', async () => {
     const substantial = Array.from({ length: 40 }, (_, i) => `concept${i}`).join(' ');
     const row = {
       ...chapterRows[0]!,
       published_topics: JSON.stringify([
-        { topic_slug: 'valid-topic', title: 'Valid topic', definition_status: 'ok', definition: substantial },
+        { id: 'topic-valid', topic_slug: 'valid-topic', title: 'Valid topic', notes_en: substantial, definition_status: 'ok', definition: substantial },
         { topic_slug: 'duplicate-topic', title: 'Duplicate topic', definition_status: 'ok', definition: substantial },
         { topic_slug: 'short-topic', title: 'Short topic', definition_status: 'ok', definition: 'Only a few words.' },
         { topic_slug: 'pending-topic', title: 'Pending topic', definition_status: 'pending', definition: substantial },
         { title: 'Slug missing', definition_status: 'ok', definition: substantial },
       ]),
+      qa_en: JSON.stringify([{ topic_id: 'topic-valid', question: 'Question?', answer: 'Answer.' }]),
+      qa_as: '[]',
     };
     const env = {
       ...testEnv(),
@@ -439,6 +445,7 @@ describe('Worker-native site-operation routes', () => {
     const row = {
       ...chapterRows[0]!,
       published_topics: JSON.stringify([{
+        id: 'topic-assamese',
         language: 'Assamese',
         topic_slug: 'অসমীয়া-বিষয়',
         title: 'অসমীয়া বিষয়',
@@ -446,8 +453,11 @@ describe('Worker-native site-operation routes', () => {
         title_as: 'অসমীয়া বিষয়',
         topic_slug_as: 'অসমীয়া-বিষয়',
         definition_as: definition,
+        notes_as: definition,
         definition_status: 'ok',
       }]),
+      qa_en: '[]',
+      qa_as: JSON.stringify([{ topic_id: 'topic-assamese', question: 'প্ৰশ্ন?', answer: 'উত্তৰ।' }]),
     };
     const env = { ...testEnv(), DB: { prepare: () => ({ all: async () => ({ results: [row] }) }) } } as unknown as Env;
     const response = await api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env);
@@ -465,6 +475,7 @@ describe('Worker-native site-operation routes', () => {
       ...chapterRows[0]!,
       published_topics: JSON.stringify([
         {
+          id: 'topic-first-law',
           topic_slug: 'first-law',
           title: 'First law',
           definition_status: 'ok',
@@ -472,6 +483,8 @@ describe('Worker-native site-operation routes', () => {
           title_as: 'প্ৰথম নিয়ম',
           topic_slug_as: 'প্ৰথম-নিয়ম',
           definition_as: longDefinition,
+          notes_en: longDefinition,
+          notes_as: longDefinition,
         },
         {
           topic_slug: 'short-topic',
@@ -493,6 +506,8 @@ describe('Worker-native site-operation routes', () => {
           definition_as: longDefinition,
         },
       ]),
+      qa_en: JSON.stringify([{ topic_id: 'topic-first-law', question: 'Question?', answer: 'Answer.' }]),
+      qa_as: JSON.stringify([{ topic_id: 'topic-first-law', question: 'প্ৰশ্ন?', answer: 'উত্তৰ।' }]),
     };
     const env = {
       ...testEnv(),
@@ -504,6 +519,6 @@ describe('Worker-native site-operation routes', () => {
     expect(xml).toContain(`/as/ahsec/class-12/physics/newtons-laws/topic/${encodeURIComponent('প্ৰথম-নিয়ম')}`);
     expect(xml).not.toContain('/as/ahsec/class-12/physics/newtons-laws/topic/short-assamese');
     expect(xml).not.toContain('/as/ahsec/class-12/physics/newtons-laws/topic/missing-slug');
-    expect((xml.match(/<loc>/g) ?? []).length).toBe(4);
+    expect((xml.match(/<loc>/g) ?? []).length).toBe(2);
   });
 });
