@@ -37,9 +37,39 @@ function notes(value: string | null, sections: string | null): string | null {
   const parsed = parse(sections);
   return parsed.length ? parsed.map(s => [s.title ? `## ${s.title}` : '', s.content ?? ''].filter(Boolean).join('\n')).join('\n\n') : value;
 }
-function qa(value: string | null): string | null {
+export function qaTextFromApprovedPairs(value: string | null, pyqOnly = false): string | null {
   const parsed = parse(value);
-  return parsed.length ? parsed.map(s => [s.section && `Section: ${s.section}`, s.question && `Q: ${s.question}`, s.answer && `A: ${s.answer}`, s.solution && `Solution: ${s.solution}`, s.content].filter(Boolean).join('\n')).filter(Boolean).join('\n\n') || null : null;
+  const complete = parsed.flatMap((item) => {
+    const question = typeof item.question === 'string' ? item.question.trim() : '';
+    const answer = typeof item.answer === 'string' ? item.answer.trim() : '';
+    const solution = typeof item.solution === 'string' ? item.solution.trim() : '';
+    const content = typeof item.content === 'string' ? item.content.trim() : '';
+    const source = typeof item.source === 'string' ? item.source.trim() : '';
+    const hasPyqSource = /pyq|previous\s+year/i.test(source) || Boolean(item.year);
+
+    if (pyqOnly && !hasPyqSource) return [];
+    if (question && (answer || solution)) {
+      return [[
+        item.id && `Question ID: ${item.id}`,
+        item.section && `Section: ${item.section}`,
+        `Q: ${question}`,
+        answer && `A: ${answer}`,
+        solution && `Solution: ${solution}`,
+        source && `Source: ${source}`,
+        item.year && `Year: ${item.year}`,
+        item.marks && `Marks: ${item.marks}`,
+      ].filter(Boolean).join('\n')];
+    }
+
+    // Legacy freeform Q&A is accepted only when both sides are explicitly
+    // present; bare question lists must not become answer-bearing RAG chunks.
+    if (!question && content && /(?:^|\n)\s*(?:q|question)\s*:/i.test(content)
+      && /(?:^|\n)\s*(?:a|answer|solution)\s*:/i.test(content)) {
+      return [content];
+    }
+    return [];
+  });
+  return complete.join('\n\n') || null;
 }
 
 /** Delete mappings only after Vectorize deletion succeeds, including legacy IDs. */
@@ -120,10 +150,10 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
   const append = (base: string | null, topics: string) => [base, topics].filter(Boolean).join('\n\n') || null;
   const text: Record<RagScope, [string | null, string | null]> = {
     notes: [append(notes(chapter.ragText ?? chapter.notesEn, chapter.ragSectionsEn), topicText), append(notes(chapter.ragTextAs ?? chapter.notesAs, chapter.ragSectionsAs), topicTextAs)],
-    qa: [qa(chapter.qaEn), qa(chapter.qaAs)],
+    qa: [qaTextFromApprovedPairs(chapter.qaEn), qaTextFromApprovedPairs(chapter.qaAs)],
     // Chapter rag_text belongs to notes, never PYQ. File-only PYQs have no
     // extractable text and are deliberately not embedded until OCR text exists.
-    pyq: [null, null],
+    pyq: [qaTextFromApprovedPairs(chapter.qaEn, true), qaTextFromApprovedPairs(chapter.qaAs, true)],
   };
   const result = {} as Record<RagScope, { chunks: number; error?: string; skipped?: string }>;
   for (const scope of requested) {

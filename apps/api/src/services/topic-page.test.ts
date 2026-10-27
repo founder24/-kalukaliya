@@ -6,9 +6,11 @@ const topic = {
   title: 'Modern Assamese literature',
   topic_slug: 'modern-assamese-literature',
   notes_en: 'Approved notes about the topic.',
+  notes_status_en: 'approved',
   title_as: 'আধুনিক অসমীয়া সাহিত্য',
   topic_slug_as: 'adhunik-asamiya-sahitya',
   notes_as: 'বিষয়টোৰ অনুমোদিত টোকা।',
+  notes_status_as: 'approved',
 };
 
 describe('topic page source matching', () => {

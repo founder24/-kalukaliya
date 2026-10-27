@@ -18,6 +18,7 @@ const chapterRows = [{
     topic_slug: 'first-law',
     title: 'Newton’s first law',
     notes_en: Array.from({ length: 40 }, (_, i) => `note${i}`).join(' '),
+    notes_status_en: 'approved',
     definition_status: 'ok',
     definition: Array.from({ length: 40 }, (_, i) => `principle${i}`).join(' '),
   }]),
@@ -416,7 +417,7 @@ describe('Worker-native site-operation routes', () => {
     const row = {
       ...chapterRows[0]!,
       published_topics: JSON.stringify([
-        { id: 'topic-valid', topic_slug: 'valid-topic', title: 'Valid topic', notes_en: substantial, definition_status: 'ok', definition: substantial },
+        { id: 'topic-valid', topic_slug: 'valid-topic', title: 'Valid topic', notes_en: substantial, notes_status_en: 'approved', definition_status: 'ok', definition: substantial },
         { topic_slug: 'duplicate-topic', title: 'Duplicate topic', definition_status: 'ok', definition: substantial },
         { topic_slug: 'short-topic', title: 'Short topic', definition_status: 'ok', definition: 'Only a few words.' },
         { topic_slug: 'pending-topic', title: 'Pending topic', definition_status: 'pending', definition: substantial },
@@ -454,6 +455,7 @@ describe('Worker-native site-operation routes', () => {
         topic_slug_as: 'অসমীয়া-বিষয়',
         definition_as: definition,
         notes_as: definition,
+        notes_status_as: 'approved',
         definition_status: 'ok',
       }]),
       qa_en: '[]',
@@ -485,6 +487,8 @@ describe('Worker-native site-operation routes', () => {
           definition_as: longDefinition,
           notes_en: longDefinition,
           notes_as: longDefinition,
+          notes_status_en: 'approved',
+          notes_status_as: 'approved',
         },
         {
           topic_slug: 'short-topic',
