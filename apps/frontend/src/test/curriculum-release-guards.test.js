@@ -21,6 +21,7 @@ import {
 } from "../../scripts/_prerender-chapter-policy.mjs";
 import {
   collectPrerenderOutputPaths,
+  includeChapterParentSubjectPaths,
   readChapterSitemapPaths,
   readSubjectSitemapPaths,
   readTopicSitemapPaths,
@@ -551,6 +552,14 @@ describe("subject output coverage", () => {
     expect(
       validateSubjectOutputCoverage({ pages, expectedPaths, strict: true }),
     ).toEqual({ subjectsOnDisk: 1, failures: [] });
+  });
+
+  it("includes parent subjects required by published chapter routes", () => {
+    const chapterPaths = readChapterSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${stale}/published-chapter</loc></url></urlset>`,
+    );
+    expect(includeChapterParentSubjectPaths(new Set([subject]), chapterPaths))
+      .toEqual(new Set([subject, stale]));
   });
 
   it("rejects subject routes missing from the sitemap or output", () => {
