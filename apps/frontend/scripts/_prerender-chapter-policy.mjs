@@ -1,3 +1,61 @@
+export function enumerateSitemapSubjectRoutes(chapterPaths, bundleRoutes, bundleChapters = []) {
+  const pathsBySubjectRoute = new Map();
+  for (const chapterPath of chapterPaths) {
+    const segments = chapterPath.split("/").filter(Boolean);
+    if (segments.length !== 4) continue;
+    const subjectUrl = `/${segments.slice(0, 3).join("/")}`;
+    if (!pathsBySubjectRoute.has(subjectUrl)) pathsBySubjectRoute.set(subjectUrl, new Set());
+    pathsBySubjectRoute.get(subjectUrl).add(segments[3]);
+  }
+
+  const chaptersBySubject = new Map();
+  for (const chapter of bundleChapters) {
+    if (!chapter?.subject_id || !chapter?.slug) continue;
+    if (!chaptersBySubject.has(chapter.subject_id)) chaptersBySubject.set(chapter.subject_id, new Set());
+    chaptersBySubject.get(chapter.subject_id).add(chapter.slug);
+  }
+
+  const routes = [];
+  for (const [subjectUrl, publishedSlugs] of pathsBySubjectRoute) {
+    const [board, classSlug, subjectSlug] = subjectUrl.split("/").filter(Boolean);
+    const candidates = bundleRoutes.filter((route) =>
+      `/${route.board}/${route.classSlug}/${route.subjectSlug}` === subjectUrl,
+    );
+    const ranked = candidates.map((route) => {
+      const subjectId = route.subject?.id || route.subject?._id;
+      const availableSlugs = chaptersBySubject.get(subjectId) || new Set();
+      const matches = [...publishedSlugs].filter((slug) => availableSlugs.has(slug)).length;
+      return { route, matches, subjectId };
+    }).sort((a, b) => b.matches - a.matches);
+
+    if (
+      ranked.length > 1 &&
+      ranked[0].matches > 0 &&
+      ranked[0].matches === ranked[1].matches &&
+      ranked[0].subjectId !== ranked[1].subjectId
+    ) {
+      throw new Error(
+        `[prerender-routes] ambiguous stream for published subject ${subjectUrl}: ` +
+        `${ranked.filter((candidate) => candidate.matches === ranked[0].matches)
+          .map((candidate) => candidate.route.streamSlug || "(no stream)").join(", ")}`,
+      );
+    }
+
+    const selected = ranked[0]?.route;
+    routes.push({
+      ...(selected || {}),
+      board,
+      classSlug,
+      subjectSlug,
+      // Preserve the bundle's stream-specific subject record when the
+      // public URL omits its stream segment. This resolves duplicate
+      // slugs from the published chapter inventory, not record order.
+      subject: selected?.subject || {},
+    });
+  }
+  return routes;
+}
+
 export function selectChapterCandidates({
   subjectUrl,
   rankedChapters,
