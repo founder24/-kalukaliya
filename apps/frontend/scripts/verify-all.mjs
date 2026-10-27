@@ -23,6 +23,7 @@ import {
 } from "./release-guards.mjs";
 import { AI_PLUGIN_METADATA } from "./cloudflare-production-contract.mjs";
 import {
+  includeChapterParentSubjectPaths,
   readChapterSitemapPaths,
   readSubjectSitemapPaths,
   readTopicSitemapPaths,
@@ -489,12 +490,6 @@ if (fs.existsSync(subjectSitemapPath)) {
     fs.readFileSync(subjectSitemapPath, "utf-8"),
   );
 }
-const subjectCoverage = validateSubjectOutputCoverage({
-  pages,
-  expectedPaths: expectedSubjectPaths,
-  strict: strictReleaseBuild,
-});
-failures.push(...subjectCoverage.failures);
 let expectedChapterPaths = null;
 const chapterSitemapPath = path.join(distDir, "sitemap-chapters.xml");
 if (fs.existsSync(chapterSitemapPath)) {
@@ -502,6 +497,18 @@ if (fs.existsSync(chapterSitemapPath)) {
     fs.readFileSync(chapterSitemapPath, "utf-8"),
   );
 }
+if (expectedSubjectPaths && expectedChapterPaths) {
+  expectedSubjectPaths = includeChapterParentSubjectPaths(
+    expectedSubjectPaths,
+    expectedChapterPaths,
+  );
+}
+const subjectCoverage = validateSubjectOutputCoverage({
+  pages,
+  expectedPaths: expectedSubjectPaths,
+  strict: strictReleaseBuild,
+});
+failures.push(...subjectCoverage.failures);
 const chapterCoverage = validateChapterOutputCoverage({
   pages,
   expectedPaths: expectedChapterPaths,
