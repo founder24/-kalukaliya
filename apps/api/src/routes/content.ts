@@ -28,6 +28,7 @@ import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
+import { resolveTopicPageContent, type TopicPageLanguage } from '../services/topic-page';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
@@ -460,6 +461,7 @@ contentRouter.get('/chapters/:subjectId', async (c) => {
     slugAs: chapters.slugAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
+    contentType: chapters.contentType,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     qaEn: chapters.qaEn,
@@ -537,10 +539,10 @@ async function resolveChapterBySlug(
   const streamIds = targetStreams.map(s => s.id);
   const placeholders = streamIds.map(() => '?').join(',');
   const subjectRows = await c.env.DB
-    .prepare(`SELECT id, name, slug, stream_id FROM subjects
+    .prepare(`SELECT id, name, name_as, slug, stream_id FROM subjects
               WHERE is_published=1 AND stream_id IN (${placeholders})`)
     .bind(...streamIds)
-    .all<{ id: string; name: string; slug: string; stream_id: string | null }>();
+    .all<{ id: string; name: string; name_as: string | null; slug: string; stream_id: string | null }>();
 
   const subjectRow = (subjectRows.results ?? []).find(
     s => s.slug === subjectSlug,
@@ -562,6 +564,7 @@ async function resolveChapterBySlug(
     keywordsAs: chapters.keywordsAs,
     chapterNumber: chapters.chapterNumber,
     status: chapters.status,
+    contentType: chapters.contentType,
     notesEn: chapters.notesEn,
     notesAs: chapters.notesAs,
     publishedTopics: chapters.publishedTopics,
@@ -649,6 +652,7 @@ async function resolveChapterBySlug(
     // Dedicated topic deep links resolve their own heading on the client.
     topic_title:    displayTitle,
     subject_name:   subjectRow.name,
+    subject_name_as: subjectRow.name_as ?? null,
     subject_slug:   subjectRow.slug,
     board_name:     boardRow.name,
     board_slug:     boardRow.slug,
@@ -658,7 +662,9 @@ async function resolveChapterBySlug(
     stream_slug:    owningStream?.slug ?? '',
     content:        contentEn,
     content_as:     contentAs,
-    content_type:   'chapter',
+    content_type:   ['question_paper', 'pyq'].includes(chapterRow.contentType ?? '')
+      ? chapterRow.contentType
+      : 'chapter',
     has_assamese:   hasAssamese,
     pyq_pdf_url:    chapterRow.pyqPdfUrl ?? null,
     pyq_papers:     safeParse(chapterRow.pyqPapers) ?? [],
@@ -731,16 +737,25 @@ contentRouter.get('/library-bundle', async (c) => {
   const boot = c.req.query('boot') ?? null; // board DB id for boot mode
 
   // Load base hierarchy data in parallel
-  const [allBoards, allClasses, allStreams, allSubjects] = await Promise.all([
+  const [allBoards, allClasses, allStreams, allSubjects, allSyllabusDescriptions] = await Promise.all([
     db.select({ id: boards.id, name: boards.name, slug: boards.slug }).from(boards),
     db.select({ id: classes.id, boardId: classes.boardId, name: classes.name, slug: classes.slug, level: classes.level }).from(classes),
     db.select({ id: streams.id, classId: streams.classId, name: streams.name, slug: streams.slug }).from(streams),
     db.select({
-      id: subjects.id, streamId: subjects.streamId, name: subjects.name, slug: subjects.slug,
+      id: subjects.id, streamId: subjects.streamId, name: subjects.name, nameAs: subjects.nameAs, slug: subjects.slug,
       description: subjects.description, imageUrl: subjects.imageUrl,
       pyqPapers: subjects.pyqPapers, isPublished: subjects.isPublished,
     }).from(subjects).where(eq(subjects.isPublished, 1)),
+    c.env.DB.prepare(
+      `SELECT subject_id, meta_description_as FROM chapters
+       WHERE status IN ('published', 'active')
+         AND slug LIKE 'course-syllabus-%'
+         AND meta_description_as IS NOT NULL AND meta_description_as != ''`,
+    ).all<{ subject_id: string; meta_description_as: string }>(),
   ]);
+  const syllabusDescriptionAsBySubject = new Map(
+    (allSyllabusDescriptions.results ?? []).map(row => [row.subject_id, row.meta_description_as]),
+  );
 
   // Determine which subjects belong to the boot board (if boot mode)
   let bootSubjectIds: Set<string> | null = null;
@@ -816,19 +831,40 @@ contentRouter.get('/library-bundle', async (c) => {
   // Build subject list (flat + with chapter_count)
   const buildSubject = (sub: typeof allSubjects[0], includeChapters: boolean) => {
     const chaps = chaptersBySubject.get(sub.id) ?? [];
+    const storedPyqPapers = safeParse<Array<Record<string, unknown>>>(sub.pyqPapers) ?? [];
+    // The library catalog only needs paper metadata to render subject-card
+    // labels and page links. Full transcriptions are served by dedicated
+    // content routes, not duplicated in nested and flat catalog hierarchies.
+    const pyqPapers = storedPyqPapers.map((paper) => ({
+      id: paper.id ?? null,
+      name: paper.name ?? null,
+      name_as: paper.name_as ?? null,
+      class_name: paper.class_name ?? null,
+      year: paper.year ?? null,
+      description: paper.description ?? null,
+      pages: Array.isArray(paper.pages)
+        ? paper.pages.flatMap((page) => {
+            if (!page || typeof page !== 'object') return [];
+            const pageRecord = page as Record<string, unknown>;
+            return [{ id: pageRecord.id ?? null, url: pageRecord.url ?? null }];
+          })
+        : [],
+    }));
     return {
       id: sub.id,
       name: sub.name,
+      name_as: sub.nameAs ?? null,
       slug: sub.slug,
       stream_id: sub.streamId ?? null,
       status: sub.isPublished ? 'published' : 'draft',
       description: sub.description ?? null,
+      description_as: syllabusDescriptionAsBySubject.get(sub.id) ?? null,
       icon: null,
       gradient: null,
       thumbnail_url: sub.imageUrl ?? null,
       tags: [],
       chapter_count: slim ? (chapterCountBySubject.get(sub.id) ?? 0) : chaps.length,
-      pyq_papers: safeParse(sub.pyqPapers) ?? [],
+      pyq_papers: pyqPapers,
       ...(includeChapters ? { chapters: chaps } : {}),
     };
   };
@@ -923,7 +959,7 @@ contentRouter.get('/resolve-subject/:board/:classSlug/:subjectSlug', async (c) =
 
   // Streams within class
   const allStreams = await db.select({ id: streams.id, name: streams.name, slug: streams.slug })
-    .from(streams).where(eq(streams.classId, classRow.id));
+    .from(streams).where(eq(streams.classId, classRow.id)).orderBy(asc(streams.slug));
 
   // Find subject across all streams in this class
   let subjectRow: (typeof subjects.$inferSelect) | undefined;
@@ -942,12 +978,21 @@ contentRouter.get('/resolve-subject/:board/:classSlug/:subjectSlug', async (c) =
   const chapterCountResult = await c.env.DB.prepare(
     `SELECT COUNT(*) as cnt FROM chapters WHERE subject_id = ? AND status = 'published'`
   ).bind(subjectRow.id).first<{ cnt: number }>();
+  const syllabusMetadata = await c.env.DB.prepare(
+    `SELECT meta_description_as FROM chapters
+     WHERE subject_id = ? AND status IN ('published', 'active')
+       AND slug LIKE 'course-syllabus-%'
+       AND meta_description_as IS NOT NULL AND meta_description_as != ''
+     LIMIT 1`
+  ).bind(subjectRow.id).first<{ meta_description_as: string }>();
 
   return c.json({
     id: subjectRow.id,
     name: subjectRow.name,
+    name_as: subjectRow.nameAs ?? null,
     slug: subjectRow.slug,
     description: subjectRow.description ?? null,
+    description_as: syllabusMetadata?.meta_description_as ?? null,
     tags: [],
     icon: null,
     gradient: null,
@@ -974,12 +1019,19 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
   const db = createDb(c.env.DB);
   const chapterId = c.req.param('chapterId') as string;
 
-  const ch = await db.select({ id: chapters.id, publishedTopics: chapters.publishedTopics })
+  const ch = await db.select({
+    id: chapters.id,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  })
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
   const rawTopics = safeParse<unknown[]>(ch.publishedTopics) ?? [];
   const lang = c.req.query('lang');
+  const qaEn = safeParse<unknown[]>(ch.qaEn) ?? [];
+  const qaAs = safeParse<unknown[]>(ch.qaAs) ?? [];
   const topics = publishedChapterTopics(rawTopics).map(topic => {
       if (lang !== 'as') return topic;
       const definitionAs = typeof topic.definition_as === 'string'
@@ -992,46 +1044,142 @@ contentRouter.get('/chapters/:chapterId/topics-published', async (c) => {
         ...(definitionAs.trim() ? { definition: definitionAs } : {}),
       };
     });
-  return c.json({ chapter_id: ch.id, topics, total: topics.length });
+  const withAvailability = topics.map(topic => ({
+    ...topic,
+    topic_page_available_en: Boolean(resolveTopicPageContent(topic, qaEn, 'en')),
+    topic_page_available_as: Boolean(resolveTopicPageContent(topic, qaAs, 'as')),
+  }));
+  return c.json({ chapter_id: ch.id, topics: withAvailability, total: withAvailability.length });
+});
+
+contentRouter.get('/chapters/:chapterId/topics/:topicSlug/page', async (c) => {
+  const db = createDb(c.env.DB);
+  const chapterId = c.req.param('chapterId');
+  const topicSlug = c.req.param('topicSlug');
+  const language = c.req.query('lang') === 'as' ? 'as' : 'en';
+  const chapter = await db.select({
+    id: chapters.id,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  }).from(chapters)
+    .innerJoin(subjects, eq(chapters.subjectId, subjects.id))
+    .where(and(
+      eq(chapters.id, chapterId),
+      eq(chapters.status, 'published'),
+      eq(subjects.isPublished, 1),
+    ))
+    .get();
+  if (!chapter) return c.json({ detail: 'Chapter not found' }, 404);
+
+  const topics = publishedChapterTopics(safeParse<unknown[]>(chapter.publishedTopics) ?? []);
+  const topic = topics.find((candidate) => language === 'as'
+    ? candidate.topic_slug_as === topicSlug
+    : (candidate.topic_slug ?? candidate.slug) === topicSlug);
+  if (!topic) return c.json({ detail: 'Topic page not found' }, 404);
+
+  const questionSource = safeParse<unknown[]>(
+    language === 'as' ? chapter.qaAs : chapter.qaEn,
+  ) ?? [];
+  const page = resolveTopicPageContent(topic, questionSource, language as TopicPageLanguage);
+  if (!page) return c.json({ detail: 'Topic page is not complete in this language' }, 404);
+  const alternateLanguage = language === 'as' ? 'en' : 'as';
+  const alternateQuestions = safeParse<unknown[]>(
+    alternateLanguage === 'as' ? chapter.qaAs : chapter.qaEn,
+  ) ?? [];
+  const alternate = resolveTopicPageContent(topic, alternateQuestions, alternateLanguage);
+
+  return c.json({
+    chapter_id: chapter.id,
+    topic: page,
+    alternate_slug: alternate?.topic_slug ?? null,
+  });
 });
 
 contentRouter.get('/chapters/:chapterId/topics-related', async (c) => {
   const db = createDb(c.env.DB);
   const chapterId = c.req.param('chapterId') as string;
-  const limit = Math.min(50, parseInt(c.req.query('limit') ?? '12', 10));
+  const parsedLimit = Number.parseInt(c.req.query('limit') ?? '12', 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(50, parsedLimit)) : 12;
+  const language: TopicPageLanguage = c.req.query('lang') === 'as' ? 'as' : 'en';
   const excludeTopicId = c.req.query('exclude_topic_id') ?? '';
 
-  const ch = await db.select({ id: chapters.id, subjectId: chapters.subjectId, publishedTopics: chapters.publishedTopics })
+  const ch = await db.select({
+    id: chapters.id,
+    subjectId: chapters.subjectId,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  })
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  // Related = topics from sibling chapters in the same subject
-  const siblings = await db.select({ id: chapters.id, title: chapters.title, slug: chapters.slug, publishedTopics: chapters.publishedTopics })
+  const currentQuestions = safeParse<unknown[]>(
+    language === 'as' ? ch.qaAs : ch.qaEn,
+  ) ?? [];
+  const siblings = publishedChapterTopics(
+    safeParse<unknown[]>(ch.publishedTopics) ?? [],
+  ).flatMap((topic) => {
+    const page = resolveTopicPageContent(topic, currentQuestions, language);
+    if (!page || (excludeTopicId && [page.topic_id, page.topic_slug].includes(excludeTopicId))) return [];
+    return [{
+      topic_id: page.topic_id,
+      topic_slug: page.topic_slug,
+      title: page.title,
+      language,
+      page_available: true,
+    }];
+  }).slice(0, limit);
+
+  // Cross-chapter items are only emitted when the requested language has an
+  // approved notes + linked question/solution page. The frontend uses the
+  // returned chapter slug to build a canonical, language-correct topic URL.
+  const relatedChapters = await db.select({
+    id: chapters.id,
+    title: chapters.title,
+    titleAs: chapters.titleAs,
+    slug: chapters.slug,
+    slugAs: chapters.slugAs,
+    publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  })
     .from(chapters)
-    .where(and(eq(chapters.subjectId, ch.subjectId), eq(chapters.status, 'published')))
+    .where(and(eq(chapters.subjectId, ch.subjectId), eq(chapters.status, 'published'), ne(chapters.id, chapterId)))
     .limit(20);
 
-  type TopicEntry = {
-    title?: string;
-    slug?: string;
-    topic_slug?: string;
-    chapter_id?: string;
-    chapter_title?: string;
-  };
-  const relatedTopics: TopicEntry[] = [];
-  for (const sib of siblings) {
-    if (sib.id === chapterId) continue;
-    const tops = safeParse<TopicEntry[]>(sib.publishedTopics) ?? [];
-    for (const t of tops.slice(0, 3)) {
-      const topicId = String(t.slug ?? t.topic_slug ?? '');
-      if (excludeTopicId && topicId === excludeTopicId) continue;
-      relatedTopics.push({ ...t, chapter_id: sib.id, chapter_title: sib.title });
-      if (relatedTopics.length >= limit) break;
+  const crossChapter: Array<Record<string, unknown>> = [];
+  for (const sibling of relatedChapters) {
+    const questions = safeParse<unknown[]>(
+      language === 'as' ? sibling.qaAs : sibling.qaEn,
+    ) ?? [];
+    const topics = publishedChapterTopics(safeParse<unknown[]>(sibling.publishedTopics) ?? []);
+    for (const topic of topics) {
+      const page = resolveTopicPageContent(topic, questions, language);
+      if (!page || (excludeTopicId && [page.topic_id, page.topic_slug].includes(excludeTopicId))) continue;
+      crossChapter.push({
+        topic_id: page.topic_id,
+        topic_slug: page.topic_slug,
+        title: page.title,
+        chapter_id: sibling.id,
+        chapter_slug: sibling.slug,
+        chapter_slug_as: sibling.slugAs,
+        chapter_title: language === 'as' ? (sibling.titleAs || sibling.title) : sibling.title,
+        language,
+        page_available: true,
+      });
+      if (crossChapter.length >= limit) break;
     }
-    if (relatedTopics.length >= limit) break;
+    if (crossChapter.length >= limit) break;
   }
 
-  return c.json({ chapter_id: ch.id, related_topics: relatedTopics, total: relatedTopics.length });
+  return c.json({
+    chapter_id: ch.id,
+    language,
+    siblings,
+    cross_chapter: crossChapter,
+    total: siblings.length + crossChapter.length,
+  });
 });
 
 contentRouter.get('/chapters/:chapterId/topic-pyqs', async (c) => {
@@ -1043,7 +1191,7 @@ contentRouter.get('/chapters/:chapterId/topic-pyqs', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  type QAItem = { id?: string; question?: string; answer?: string; marks?: number; year?: number; source?: string };
+  type QAItem = { id?: string; section?: string; question?: string; answer?: string; marks?: number; year?: number; source?: string };
   const rawQA = lang === 'as'
     ? (safeParse<QAItem[]>(ch.qaAs) ?? safeParse<QAItem[]>(ch.qaEn) ?? [])
     : (safeParse<QAItem[]>(ch.qaEn) ?? []);
@@ -1079,20 +1227,31 @@ contentRouter.get('/chapters/:chapterId/faq-jsonld', async (c) => {
     .from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
 
-  type QAItem = { question?: string; answer?: string };
+  type QAItem = { question?: string; answer?: string; solution?: string };
   const qaArr = safeParse<QAItem[]>(ch.qaEn) ?? [];
+  const entries = qaArr.flatMap((item) => {
+    const question = item.question?.trim() ?? '';
+    const answer = item.answer?.trim() || item.solution?.trim() || '';
+    return question.length > 5 && answer.length > 10
+      ? [{ question, answer }]
+      : [];
+  });
 
-  const faqJsonLd = qaArr.length > 0 ? {
+  const faqJsonLd = entries.length >= 2 ? {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: qaArr.slice(0, 20).map(q => ({
+    mainEntity: entries.slice(0, 20).map(q => ({
       '@type': 'Question',
-      name: q.question ?? '',
-      acceptedAnswer: { '@type': 'Answer', text: q.answer ?? '' },
+      name: q.question,
+      acceptedAnswer: { '@type': 'Answer', text: q.answer },
     })),
   } : null;
 
-  return c.json({ chapter_id: ch.id, faq_jsonld: faqJsonLd });
+  return c.json({
+    chapter_id: ch.id,
+    entries: entries.slice(0, 20),
+    faq_jsonld: faqJsonLd,
+  });
 });
 
 // ── GET /question-papers ───────────────────────────────────────────────────────

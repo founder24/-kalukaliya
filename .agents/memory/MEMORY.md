@@ -1,5 +1,7 @@
 - [Syrabit dev setup](syrabit-dev-setup.md) — Replit dev environment setup details for this monorepo
 - [Syrabit content architecture](syrabit-content-arch.md) — Chapter sections, degree course types stored as stream slugs, and bilingual content flow
+- [Bilingual subject card metadata](bilingual-subject-card-metadata.md) — Localize card summaries from each published syllabus page’s Assamese meta description
+- [Shared Makers course listing](makers-shared-course-catalog.md) — Keep stream-specific course records, but show the same MDC subject once per class with its available streams
 - [Syrabit chat+auth pipeline bugs](syrabit-pipeline-bugs.md) — Fixed bugs: analytics 404s, conversation_id/session_id mismatch, logout null-token crash
 - [CF↔GCP audit](cf-gcp-audit.md) — Token perms, duplicate SM secrets, BACKEND_URL binding conflict, CF KV cache fix, bot rendering fix
 - [Syrabit chat latency fix](syrabit-chat-latency.md) — gemini-2.5-flash thinking phase (7-8s TTFB) fixed; model switch + thinkingBudget guard
@@ -61,9 +63,10 @@
 - [Frontend undefined identifiers](frontend-undefined-identifiers.md) — Vite builds do not catch unbound JSX names; extracted admin tabs need render coverage or static checks.
 - [Prerender canonical counts](prerender-canonical-counts.md) — Release manifests must count unique canonical output paths, not duplicate source records.
 - [Sitemap prerender authority](sitemap-prerender-authority.md) — Published chapter sitemap paths remain expected even when a static bundle cannot map their subject IDs.
+- [Strict prerender release evidence](strict-prerender-release-evidence.md) — Verify the live D1 payload and deployed checker; a successful conditional migration may change zero rows.
 - [Prerender backend signals](prerender-backend-signals.md) — Coalesce concurrent schema probes, but never TTL-cache completed signals across cache reads.
 - [Prerender request concurrency](prerender-request-concurrency.md) — enforce one process-wide backend request pool; nested route loops otherwise multiply fan-out.
-- [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains and Access writes require current, resource-specific API fields and permissions.
+- [Cloudflare account API contracts](cloudflare-account-api-contracts.md) — R2 custom domains, Access writes, and Logpush need current API contracts; location hints do not guarantee residency.
 - [Chat transport retry identity](chat-transport-retry-identity.md) — Keep one stable logical request key across bounded transport retries so quota is reserved only once.
 - [Worker chat web egress and latency](worker-chat-web-egress-latency.md) — Wikimedia is blocked from Workers; Crossref works, and the fast Llama model meets the first-token target.
 - [Worker chat student memory](worker-chat-student-memory.md) — authenticated chat reads and refreshes bounded D1 memory; anonymous chat never writes long-term memory.
@@ -80,6 +83,7 @@
 - [Explicit curriculum scope](chat-curriculum-scope.md) — fail closed on explicit scope conflicts; map verified chat sources through the published hierarchy and retain provenance in history.
 - [Chat ad scope](chat-ad-scope.md) — hide ad placements on `/chat` only; keep them unchanged on every other page.
 - [Exact vector grounding](rag-exact-vector-grounding.md) — preserve matched passage order; never replace semantic matches with chapter openings.
+- [Complete Q&A indexing](rag-complete-qa.md) — only expose or index Q&A when the question has an approved answer or solution.
 - [Chat cancellation state](chat-cancellation-state.md) — use immediate stream abort plus bounded D1 tombstone polling, not per-token database reads.
 - [Chat performance gate](chat-performance-gate.md) — freshness probes need explicit curriculum binding and must not require removed raw web-source URLs.
 - [Workers rate-limit test clocks](workers-rate-limit-test-clocks.md) — isolate DO names per invocation and keep alarm reset windows ahead of the runtime clock.
@@ -99,6 +103,7 @@
 - [Cloudflare release provenance](cloudflare-release-provenance.md) — release builds must keep generated curriculum, review cache, and browser output out of tracked source
 - [Cloudflare Agent Readiness policy](cloudflare-agent-readiness-policy.md) — advertise only working services; leave unsupported agent protocols unscored rather than fabricate discovery metadata
 - [Production AdSense verification](production-ads-verification.md) — a live Google loader is not enough; verify compiled slot IDs, DOM metadata, fills, and stale hashed assets separately
+- [AdSense finalization boundary](adsense-finalization-boundary.md) — Google performance reports are estimates; do not treat monthly finalized totals as weekly referral revenue without an approved allocation policy
 - [AHSEC index concurrency](ahsec-index-concurrency.md) — lock the full chapter write/index sequence and refresh repair notes after lock acquisition
 - [CF token self-edit limitation](cf-token-self-edit-limitation.md) — a token can never grant itself new scopes (9109 Unauthorized); scope-gap fixes need a manual dashboard edit by the account owner
 - [GitHub Actions runner context in job env](github-actions-runner-context-job-env.md) — job-level env can't use `runner` context; causes whole workflow to fail to start (0 jobs), not just a lint warning
@@ -115,3 +120,4 @@
 - [Tollbit crawler integration](tollbit-crawler-integration.md) — Use verified Tollbit-supported ingestion/configuration, not a raw User-Agent proxy; validate the supplied bot list before use.
 - [AI readiness review evidence](ai-readiness-evidence.md) — Separate page-internal claim support from official curriculum verification; keep composite scores N/A when required evidence is missing.
 - [SSR route heading audits](ssr-route-heading-audits.md) — Shared shell H1 may precede route H1; score page content against the route-specific heading.
+- [Topic traffic measurement](topic-traffic-measurement.md) — distinguish consented discovery proxies from authoritative verified crawler fetches; missing coverage stays N/A.
