@@ -161,3 +161,17 @@ mtime_ms = 1792775958900
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/bd886233-4641-437d-ac79-afadc3f513b4/8499afab-93e2-4784-a34b-be4b806d8d8f"
 storage_version_token = "1792776261979925"
 content_type = "text/csv"
+
+[[outputs]]
+id = "pBzbpA2A1VReMG-7s2uvx"
+uri = "file://generated-artifacts/Makers_Modern_Assam_Topic_AEO_Drafts.md"
+type = "text"
+title = "Makers of Modern Assam — AEO drafts"
+description = "Bilingual review drafts for 17 individual topics, with source gaps and unresolved D1 topic IDs clearly flagged. Nothing has been published or indexed."
+logical_id = "ad37d4b5-4bdf-4e09-bfa0-9141967e95a7"
+content_hash = "sha256:d1681a4e58e7e0d75d1702700245a2e3707230549bafa1c023dd64baa1e18360"
+size = 25772
+mtime_ms = 1793076521754
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:3bc3ffb7-ccda-4887-b58b-a6209cd74cc3/ad37d4b5-4bdf-4e09-bfa0-9141967e95a7/3bb56523-b7cb-484a-8293-696df94e2dcd"
+storage_version_token = "1793076544493070"
+content_type = "text/markdown"
