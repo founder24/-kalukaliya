@@ -1,9 +1,16 @@
 const CLASS_GROUPS = [
   ['hs 1st year', 'class 11'],
   ['hs 2nd year', 'class 12'],
+  ['class 9'],
+  ['class 10'],
   ['1st semester'],
+  ['2nd semester'],
   ['3rd semester'],
+  ['4th semester'],
   ['5th semester'],
+  ['6th semester'],
+  ['7th semester'],
+  ['8th semester'],
 ];
 
 export function groupLibrarySubjects(subjectsToGroup, streamMap, classMap) {

@@ -279,13 +279,20 @@ export default function LibraryPage() {
     const wanted = [
       { names: ['hs 1st year', 'class 11'], label: 'Class 11' },
       { names: ['hs 2nd year', 'class 12'], label: 'Class 12' },
+      { names: ['class 9'], label: 'Class 9' },
+      { names: ['class 10'], label: 'Class 10' },
       { names: ['1st semester'], label: '1st Semester' },
+      { names: ['2nd semester'], label: '2nd Semester' },
       { names: ['3rd semester'], label: '3rd Semester' },
+      { names: ['4th semester'], label: '4th Semester' },
       { names: ['5th semester'], label: '5th Semester' },
+      { names: ['6th semester'], label: '6th Semester' },
+      { names: ['7th semester'], label: '7th Semester' },
+      { names: ['8th semester'], label: '8th Semester' },
     ];
-    return wanted.map((item) => {
+    return wanted.flatMap((item) => {
       const cls = classes.find((candidate) => item.names.includes(String(candidate.name || '').trim().toLowerCase()));
-      return { id: `class:${cls?.id || item.label.toLowerCase().replaceAll(' ', '-')}`, label: item.label };
+      return cls ? [{ id: `class:${cls.id}`, label: item.label }] : [];
     });
   }, [classes]);
   const allStreamChips = useMemo(
