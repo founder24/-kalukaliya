@@ -26,4 +26,17 @@ describe('library subject grouping', () => {
       expect(grouped.at(-1).name).toBe('Business Studies');
     },
   );
+
+  it('keeps second-semester courses in the library card list', () => {
+    const classMap = new Map([['semester-2', { name: '2nd Semester' }]]);
+    const streamMap = new Map([['ba-stream', { class_id: 'semester-2', name: 'B.A.', slug: 'ba' }]]);
+    const course = {
+      id: 'mdc-02013',
+      name: 'Essence of Democracy and Indian Constitution (MDC-02013)',
+      slug: 'essence-of-democracy-and-indian-constitution',
+      stream_id: 'ba-stream',
+    };
+
+    expect(groupLibrarySubjects([course], streamMap, classMap)).toContainEqual(course);
+  });
 });
