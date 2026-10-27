@@ -1152,7 +1152,27 @@ export function topicPageSchema({ topic, chapter, url, parentUrl, language } = {
       ...(chapterTitle ? { name: chapterTitle } : {}),
     };
   }
-  return { '@context': 'https://schema.org', '@graph': [resource] };
+  const graph = [resource];
+  const faqEntries = (Array.isArray(topic?.questions) ? topic.questions : [])
+    .map((entry) => ({
+      question: typeof entry?.question === 'string' ? entry.question.trim() : '',
+      answer: typeof entry?.solution === 'string' && entry.solution.trim()
+        ? entry.solution.trim()
+        : typeof entry?.answer === 'string' ? entry.answer.trim() : '',
+    }))
+    .filter((entry) => entry.question.length > 5 && entry.answer.length > 10)
+    .slice(0, 10);
+  if (faqEntries.length > 0) {
+    graph.push({
+      '@type': 'FAQPage',
+      mainEntity: faqEntries.map((entry) => ({
+        '@type': 'Question',
+        name: entry.question,
+        acceptedAnswer: { '@type': 'Answer', text: entry.answer },
+      })),
+    });
+  }
+  return { '@context': 'https://schema.org', '@graph': graph };
 }
 
 /**

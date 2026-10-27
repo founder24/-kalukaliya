@@ -75,7 +75,14 @@ test('topicPageSchema matches English and Assamese visible topic content and cur
     chapter_title: 'Laws of Motion',
   };
   const english = {
-    topic: { title: 'Inertia', description: 'Inertia is resistance to a change in motion.' },
+    topic: {
+      title: 'Inertia',
+      description: 'Inertia is resistance to a change in motion.',
+      questions: [
+        { question: 'What is inertia?', answer: 'Inertia is an object’s resistance to changes in motion.' },
+        { question: 'Unanswered question?', answer: '' },
+      ],
+    },
     chapter,
     language: 'en',
     url: 'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia',
@@ -91,10 +98,17 @@ test('topicPageSchema matches English and Assamese visible topic content and cur
   assert.equal(englishResource.educationalAlignment.educationalFramework, 'AHSEC');
   assert.equal(englishResource.educationalAlignment.targetName, 'Physics');
   assert.equal(englishResource.isPartOf['@id'], english.parentUrl);
+  const englishFaq = englishSchema['@graph'].find((node) => node['@type'] === 'FAQPage');
+  assert.equal(englishFaq.mainEntity.length, 1);
+  assert.equal(englishFaq.mainEntity[0].acceptedAnswer.text, english.topic.questions[0].answer);
 
   const assamese = {
     ...english,
-    topic: { title: 'জড়তা', description: 'জড়তা হৈছে গতিৰ পৰিৱৰ্তনৰ প্ৰতি বস্তুৰ প্ৰতিৰোধ।' },
+    topic: {
+      title: 'জড়তা',
+      description: 'জড়তা হৈছে গতিৰ পৰিৱৰ্তনৰ প্ৰতি বস্তুৰ প্ৰতিৰোধ।',
+      questions: [{ question: 'জড়তা কি?', answer: 'জড়তা হৈছে গতিৰ পৰিৱৰ্তনৰ প্ৰতি বস্তুৰ প্ৰতিৰোধ।' }],
+    },
     language: 'as',
     url: 'https://syrabit.ai/as/ahsec/hs-1st-year/physics/laws-of-motion/topic/jarata',
     parentUrl: 'https://syrabit.ai/as/ahsec/hs-1st-year/physics/laws-of-motion',
@@ -103,10 +117,19 @@ test('topicPageSchema matches English and Assamese visible topic content and cur
   assert.equal(assameseSchema['@graph'][0].name, assamese.topic.title);
   assert.equal(assameseSchema['@graph'][0].description, assamese.topic.description);
   assert.equal(assameseSchema['@graph'][0].inLanguage, 'as-IN');
-  assert.equal(assameseSchema['@graph'].some((node) => node['@type'] === 'FAQPage'), false);
+  const assameseFaq = assameseSchema['@graph'].find((node) => node['@type'] === 'FAQPage');
+  assert.equal(assameseFaq.mainEntity[0].name, assamese.topic.questions[0].question);
+  assert.equal(assameseFaq.mainEntity[0].acceptedAnswer.text, assamese.topic.questions[0].answer);
 
   assert.deepEqual(buildSchemaForPageType('topic', { ...english, url: english.url }), englishSchema);
   assert.equal(topicPageSchema({ ...english, language: undefined }), null);
+  assert.equal(
+    topicPageSchema({
+      ...english,
+      topic: { ...english.topic, questions: [{ question: 'Missing answer?', answer: '' }] },
+    })['@graph'].some((node) => node['@type'] === 'FAQPage'),
+    false,
+  );
 
   const injected = injectJsonLdIntoHead('<html><head></head><body></body></html>', englishSchema);
   const json = injected.match(/<script type="application\/ld\+json" data-pm="1">([\s\S]*?)<\/script>/)?.[1];

@@ -1289,7 +1289,11 @@ async function main() {
                 assertGovernmentSpendingMultiplierDefinition(topic.definition);
               }
               const topicSchema = topicPageSchema({
-                topic: { title: topicTitle, description: topicNotes },
+                topic: {
+                  title: topicTitle,
+                  description: topicNotes,
+                  questions: pagePayload.topic.questions,
+                },
                 chapter: {
                   subject_name: subjName,
                   board_name: bName,

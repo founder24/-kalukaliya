@@ -1283,7 +1283,7 @@ export default function ChapterPage() {
           section={subjectName}
           pageType="topic"
           pageData={{
-            topic: { title: topicTitle, description: topicNotes },
+            topic: { title: topicTitle, description: topicNotes, questions },
             chapter: {
               subject_name: subjectName,
               board_name: boardName,
