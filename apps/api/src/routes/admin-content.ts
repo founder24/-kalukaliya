@@ -15,6 +15,7 @@ import { generate } from '../services/ai';
 import { enforceAuthRateLimit } from '../services/auth-rate-limit';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
+import { assessSubjectPublishReadiness } from '../services/subject-publishing-readiness';
 import type { Env } from '../types';
 import { runRagJob } from './staff';
 import type { CloudflareAnalyticsHealthResult } from '../types';
@@ -1588,6 +1589,46 @@ adminContentRouter.post('/content/bulk-status', async c => {
   const table = body.scope === 'subjects' ? 'subjects' : 'chapters';
   if (!ids.length) return c.json({ modified: 0 });
   const marks = ids.map(() => '?').join(',');
+  if (table === 'subjects' && status === 'published') {
+    const [subjectResult, syllabusResult] = await Promise.all([
+      c.env.DB.prepare(`
+        SELECT s.id, s.name, s.name_as, s.slug, s.description, s.publication_profile,
+               st.name AS stream_name, cl.name AS class_name, b.name AS board_name
+        FROM subjects s
+        LEFT JOIN streams st ON st.id = s.stream_id
+        LEFT JOIN classes cl ON cl.id = st.class_id
+        LEFT JOIN boards b ON b.id = cl.board_id
+        WHERE s.id IN (${marks})
+      `).bind(...ids).all<Record<string, unknown>>(),
+      c.env.DB.prepare(`
+        SELECT id, subject_id, title, title_as, slug, slug_as, status,
+               meta_description, meta_description_as, keywords, keywords_as,
+               notes_en, notes_as, qa_en, qa_as, published_topics, rag_updated_at, rag_indexed_at
+        FROM chapters
+        WHERE slug LIKE 'course-syllabus-%' AND subject_id IN (${marks})
+      `).bind(...ids).all<Record<string, unknown>>(),
+    ]);
+    const syllabiBySubject = new Map<string, Record<string, unknown>[]>();
+    for (const row of syllabusResult.results ?? []) {
+      const subjectId = String(row.subject_id ?? '');
+      const rows = syllabiBySubject.get(subjectId) ?? [];
+      rows.push(row);
+      syllabiBySubject.set(subjectId, rows);
+    }
+    const blocked = (subjectResult.results ?? [])
+      .filter((row) => row.publication_profile === 'bilingual_syllabus')
+      .map((row) => ({
+        subject_id: String(row.id),
+        readiness: assessSubjectPublishReadiness(row, syllabiBySubject.get(String(row.id)) ?? []),
+      }))
+      .filter((item) => !item.readiness.can_publish);
+    if (blocked.length) {
+      return c.json({
+        detail: 'One or more bilingual syllabus subjects are not ready: SEO, GEO, and AEO must each reach at least 90/100.',
+        blocked_subjects: blocked,
+      }, 422);
+    }
+  }
   const result = await c.env.DB.prepare(
     `UPDATE ${table} SET ${table === 'subjects' ? 'is_published' : 'status'} = ?, updated_at = ? WHERE id IN (${marks})`,
   ).bind(table === 'subjects' ? (status === 'published' ? 1 : 0) : status, now(), ...ids).run();

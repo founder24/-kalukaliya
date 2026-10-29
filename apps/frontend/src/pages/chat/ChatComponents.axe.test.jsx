@@ -11,6 +11,8 @@ vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/utils/api', () => ({
   API_BASE: '/api/v1',
+  WORKER_API: '/api/v1',
+  anonHeaders: () => ({}),
   getAnonId: () => null,
   postChatFeedback: vi.fn(),
   eduRequestSite: vi.fn(),

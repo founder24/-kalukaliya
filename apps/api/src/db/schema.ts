@@ -122,6 +122,7 @@ export const subjects = sqliteTable('subjects', {
   imageUrl: text('image_url'),
   pyqPapers: text('pyq_papers').default('[]'),                        // JSON PYQPaper[]
   isPublished: integer('is_published').default(0),
+  publicationProfile: text('publication_profile').notNull().default('standard'),
   createdAt: integer('created_at').default(sql`(unixepoch())`),
   updatedAt: integer('updated_at').default(sql`(unixepoch())`),
 }, (t) => [
