@@ -429,6 +429,42 @@ describe('Staff chapter edit round-trip through D1', () => {
     expect(mismatch.status).toBe(422);
   });
 
+  it('blocks an unready bilingual syllabus subject in the admin bulk publish path', async () => {
+    const name = `Bilingual Readiness Guard ${Date.now()}`;
+    const createdResponse = await workerFetch(new Request('http://worker/api/v1/staff/content/subjects', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        name,
+        name_as: 'দ্বিভাষিক প্ৰস্তুতি পৰীক্ষা',
+        board_id: 'b-test',
+        class_id: 'c-test',
+        stream_id: 's-test',
+        publication_profile: 'bilingual_syllabus',
+        status: 'draft',
+      }),
+    }));
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json() as { id: string };
+
+    const publishResponse = await workerFetch(new Request('http://worker/api/v1/admin/content/bulk-status', {
+      method: 'POST',
+      headers: { Cookie: `syrabit_admin_session=${await adminSessionToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'subjects', ids: [created.id], status: 'published' }),
+    }));
+    expect(publishResponse.status).toBe(422);
+    expect(await publishResponse.json()).toMatchObject({
+      blocked_subjects: [{
+        subject_id: created.id,
+        readiness: { required: true, can_publish: false },
+      }],
+    });
+
+    const stored = await sharedEnv.DB.prepare('SELECT is_published FROM subjects WHERE id = ?')
+      .bind(created.id).first<{ is_published: number }>();
+    expect(stored?.is_published).toBe(0);
+  });
+
   // ── Step 1: Create chapter ──────────────────────────────────────────────────
 
   it('Step 1 — POST creates a chapter and returns 201', async () => {

@@ -2212,7 +2212,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
   const [filterStream, setFilterStream] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showNewForm,  setShowNewForm]  = useState(false);
-  const [newForm,      setNewForm]      = useState({ name: '', name_as: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
+  const [newForm,      setNewForm]      = useState({ name: '', name_as: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '', publication_profile: 'standard' });
   const [creating,     setCreating]     = useState(false);
 
   const handleCreateSubject = async () => {
@@ -2221,7 +2221,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
     try {
       const res = await api().post('/staff/content/subjects', newForm);
       onSubjectCreated?.(res.data);
-      setNewForm({ name: '', name_as: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '' });
+      setNewForm({ name: '', name_as: '', board_id: '', class_id: '', stream_id: '', status: 'draft', description: '', publication_profile: 'standard' });
       setShowNewForm(false);
       toast.success('Subject created');
     } catch (err) {
@@ -2242,11 +2242,33 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
     try {
       await api().patch(`/staff/content/subjects/${subject.id}`, {
         name: name.trim(), name_as: nameAs.trim(), description: description.trim(), status,
+        publication_profile: subject.publication_profile || 'standard',
       });
       onSubjectUpdated?.({ ...subject, name: name.trim(), name_as: nameAs.trim() || null, description: description.trim() || null, status });
       toast.success('Subject updated');
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Update failed');
+    }
+  };
+
+  const handleProfileChange = async (subject, publicationProfile) => {
+    if (!['standard', 'bilingual_syllabus'].includes(publicationProfile)) return;
+    try {
+      const response = await api().patch(`/staff/content/subjects/${subject.id}`, {
+        publication_profile: publicationProfile,
+      });
+      onSubjectUpdated?.({
+        ...subject,
+        publication_profile: publicationProfile,
+        publish_readiness: publicationProfile === 'bilingual_syllabus'
+          ? response.data.publish_readiness
+          : null,
+      });
+      toast.success(publicationProfile === 'bilingual_syllabus'
+        ? 'Bilingual quality gate enabled'
+        : 'Standard publishing enabled');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Publishing profile update failed');
     }
   };
 
@@ -2350,6 +2372,27 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
               />
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-semibold text-gray-500 mb-1 uppercase tracking-wide">Publishing profile</label>
+              <select
+                className={`${inputCls} bg-white`}
+                value={newForm.publication_profile}
+                onChange={e => setNewForm(f => ({
+                  ...f,
+                  publication_profile: e.target.value,
+                  status: e.target.value === 'bilingual_syllabus' && f.status === 'published' ? 'draft' : f.status,
+                }))}
+              >
+                <option value="standard">Standard subject</option>
+                <option value="bilingual_syllabus">Bilingual syllabus course · quality-gated</option>
+              </select>
+              <p className="mt-1 text-[10px] leading-relaxed text-gray-500">
+                The bilingual profile requires at least 90/100 in SEO, GEO, and AEO before publishing. Add the paired syllabus in the chapter editor first.
+              </p>
+            </div>
+            <div />
+          </div>
           {/* Row 1b: Board */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -2402,7 +2445,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
                 onChange={e => setNewForm(f => ({...f, status: e.target.value}))}
               >
                 <option value="draft">Draft</option>
-                <option value="published">Published</option>
+                <option value="published" disabled={newForm.publication_profile === 'bilingual_syllabus'}>Published</option>
                 <option value="planned">Planned</option>
               </select>
             </div>
@@ -2492,6 +2535,7 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
                 onClick={() => onSelectSubject(subj)}
                 onEdit={() => handleEditSubject(subj)}
                 onDelete={() => handleDeleteSubject(subj)}
+                onProfileChange={handleProfileChange}
               />
             ))}
           </div>
@@ -2501,7 +2545,84 @@ function SubjectsView({ subjects, boards, classes, streams, loading, error, onRe
   );
 }
 
-function SubjectCard({ subject, boards, classes, onClick, onEdit, onDelete }) {
+function SubjectReadinessPanel({ readiness }) {
+  if (!readiness?.required) return null;
+  const scores = readiness.scores || {};
+  const dimensions = [['SEO', scores.seo], ['GEO', scores.geo], ['AEO', scores.aeo]];
+  const blockers = Array.isArray(readiness.blockers) ? readiness.blockers : [];
+  const improvements = Array.isArray(readiness.improvements) ? readiness.improvements : [];
+
+  return (
+    <div
+      className="mt-3 rounded-xl border border-violet-100 bg-violet-50/60 p-3"
+      onClick={event => event.stopPropagation()}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-violet-800">Publish readiness</span>
+        <span className={`text-[10px] font-semibold ${readiness.can_publish ? 'text-emerald-700' : 'text-amber-700'}`}>
+          {readiness.can_publish ? 'Ready · 90+ each' : '90+ in each required'}
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        {dimensions.map(([label, score]) => (
+          <div key={label} className="rounded-lg border border-violet-100 bg-white px-2 py-1.5 text-center">
+            <div className="text-[9px] text-gray-500">{label}</div>
+            <div className={`text-xs font-bold ${(score ?? 0) >= 90 ? 'text-emerald-700' : 'text-violet-800'}`}>{score ?? 0}/100</div>
+          </div>
+        ))}
+      </div>
+      {blockers.length > 0 && (
+        <details className="mt-2 text-[10px] text-gray-600" onClick={event => event.stopPropagation()}>
+          <summary className="cursor-pointer font-medium text-violet-800">
+            {blockers.length} item{blockers.length === 1 ? '' : 's'} keeping scores below 90
+          </summary>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            {blockers.map(item => <li key={item}>{item}</li>)}
+          </ul>
+        </details>
+      )}
+      {readiness.can_publish && improvements.length > 0 && (
+        <details className="mt-2 text-[10px] text-gray-600" onClick={event => event.stopPropagation()}>
+          <summary className="cursor-pointer font-medium text-violet-800">
+            {improvements.length} optional improvement{improvements.length === 1 ? '' : 's'} for scores below 100
+          </summary>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            {improvements.map(item => <li key={item}>{item}</li>)}
+          </ul>
+        </details>
+      )}
+      <div className="mt-3 border-t border-violet-100 pt-2">
+        <div className="text-[10px] font-bold text-violet-800">
+          Topic pages: {readiness.topic_pages?.ready ?? 0}/{readiness.topic_pages?.total ?? 0} complete
+        </div>
+        {(readiness.topic_pages?.topics ?? []).length > 0 ? (
+          <div className="mt-1.5 space-y-1.5">
+            {readiness.topic_pages.topics.slice(0, 3).map(topic => (
+              <div key={topic.topic_id} className="flex items-start justify-between gap-2 text-[9px] text-gray-600">
+                <span className="min-w-0 truncate">{topic.title_en || topic.title_as || topic.topic_id}</span>
+                <span className={`shrink-0 font-semibold ${topic.ready ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {topic.scores.seo}/{topic.scores.geo}/{topic.scores.aeo}
+                </span>
+              </div>
+            ))}
+            {readiness.topic_pages.total > 3 && (
+              <div className="text-[9px] text-gray-500">+{readiness.topic_pages.total - 3} more topic pages</div>
+            )}
+          </div>
+        ) : (
+          <p className="mt-1 text-[9px] leading-relaxed text-gray-500">
+            Topic scores appear after approved bilingual topic notes and explicitly linked question solutions are entered.
+          </p>
+        )}
+      </div>
+      <p className="mt-2 text-[9px] leading-relaxed text-gray-500">
+        Internal completeness checks, not ranking guarantees; source links are not independently verified. RAG freshness timestamps {readiness.rag_ready ? 'are current' : 'are not verified'}; vector presence is not checked here.
+      </p>
+    </div>
+  );
+}
+
+function SubjectCard({ subject, boards, classes, onClick, onEdit, onDelete, onProfileChange }) {
   const board = boards.find(b => b.id === subject.board_id);
   const cls   = classes.find(c => c.id === subject.class_id);
   // stream_name is resolved server-side and returned on the subject object
@@ -2532,6 +2653,20 @@ function SubjectCard({ subject, boards, classes, onClick, onEdit, onDelete }) {
         {(cls && courseName) && <span className="text-gray-300 flex-shrink-0">›</span>}
         {courseName && <span className="px-1.5 py-0.5 rounded bg-violet-50 border border-violet-100 text-violet-500 truncate max-w-[7rem]" title={courseName}>{courseName}</span>}
       </div>
+      <label className="mt-3 flex items-center gap-2 text-[10px] font-semibold text-gray-500" onClick={event => event.stopPropagation()}>
+        <span>Publishing profile</span>
+        <select
+          aria-label={`Publishing profile for ${subject.name}`}
+          value={subject.publication_profile || 'standard'}
+          onClick={event => event.stopPropagation()}
+          onChange={event => onProfileChange(subject, event.target.value)}
+          className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2 py-1 text-[10px] font-medium text-gray-700"
+        >
+          <option value="standard">Standard</option>
+          <option value="bilingual_syllabus">Bilingual quality gate</option>
+        </select>
+      </label>
+      <SubjectReadinessPanel readiness={subject.publish_readiness} />
     </div>
   );
 }

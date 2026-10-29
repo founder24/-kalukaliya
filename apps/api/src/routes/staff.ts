@@ -33,6 +33,7 @@ import { boards, classes, streams, subjects, chapters, chunks, contentAuditLog, 
 import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPassword, verifyToken } from '../middleware/auth';
 import { purgeChapterRag, purgeRagScope, reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
+import { assessSubjectPublishReadiness } from '../services/subject-publishing-readiness';
 import type { Env, JwtPayload } from '../types';
 import type { JWTPayload } from 'jose';
 
@@ -755,31 +756,57 @@ staffRouter.get('/content/streams', async (c) => {
 staffRouter.get('/content/subjects', async (c) => {
   const auth = await guard(c); if (!auth) return c.res;
   const db = createDb(c.env.DB);
-  const [allSubjects, allStreams, allClasses] = await Promise.all([
+  const [allSubjects, allStreams, allClasses, allBoards, syllabusResult] = await Promise.all([
     db.select({
       id: subjects.id, name: subjects.name, nameAs: subjects.nameAs, streamId: subjects.streamId,
       isPublished: subjects.isPublished, slug: subjects.slug,
-      description: subjects.description, updatedAt: subjects.updatedAt,
+      description: subjects.description, publicationProfile: subjects.publicationProfile, updatedAt: subjects.updatedAt,
     }).from(subjects),
     db.select({ id: streams.id, name: streams.name, classId: streams.classId }).from(streams),
     db.select({ id: classes.id, boardId: classes.boardId, name: classes.name }).from(classes),
+    db.select({ id: boards.id, name: boards.name }).from(boards),
+    c.env.DB.prepare(`
+      SELECT id, subject_id, title, title_as, slug, slug_as, status,
+             meta_description, meta_description_as, keywords, keywords_as,
+             notes_en, notes_as, qa_en, qa_as, published_topics, rag_updated_at, rag_indexed_at
+      FROM chapters
+      WHERE slug LIKE 'course-syllabus-%'
+    `).all<Record<string, unknown>>(),
   ]);
   const streamMap = new Map(allStreams.map(s => [s.id, s]));
   const classMap  = new Map(allClasses.map(cls => [cls.id, cls]));
+  const boardMap  = new Map(allBoards.map(board => [board.id, board]));
+  const syllabiBySubject = new Map<string, Record<string, unknown>[]>();
+  for (const row of syllabusResult.results ?? []) {
+    const subjectId = String(row.subject_id ?? '');
+    if (!subjectId) continue;
+    const existing = syllabiBySubject.get(subjectId) ?? [];
+    existing.push(row);
+    syllabiBySubject.set(subjectId, existing);
+  }
 
   return c.json(allSubjects.map(s => {
     const stream = s.streamId ? streamMap.get(s.streamId) : undefined;
     const cls    = stream ? classMap.get(stream.classId) : undefined;
+    const board  = cls ? boardMap.get(cls.boardId) : undefined;
+    const publishReadiness = assessSubjectPublishReadiness({
+      id: s.id, name: s.name, name_as: s.nameAs, slug: s.slug, description: s.description,
+      publication_profile: s.publicationProfile, stream_name: stream?.name, class_name: cls?.name, board_name: board?.name,
+    }, syllabiBySubject.get(s.id) ?? []);
     return {
       id:          s.id,
       name:        s.name,
       name_as:     s.nameAs ?? null,
       slug:        s.slug,
+      publication_profile: s.publicationProfile,
+      publish_readiness: publishReadiness,
       status:      s.isPublished ? 'published' : 'draft',
       stream_id:   s.streamId ?? null,
       stream_name: stream?.name ?? null,
       class_id:    cls?.id ?? null,
       board_id:    cls?.boardId ?? null,
+      class_name:  cls?.name ?? null,
+      board_name:  board?.name ?? null,
       description: s.description ?? null,
       updated_at:  s.updatedAt ? new Date(s.updatedAt * 1000).toISOString() : null,
     };
@@ -795,6 +822,23 @@ staffRouter.post('/content/subjects', async (c) => {
   if (body.status === 'published') { const publishDenied = await capabilityDenied(c, auth, 'content:publish'); if (publishDenied) return publishDenied; }
   const name = String(body['name'] ?? '').trim();
   if (!name) return c.json({ detail: 'name is required' }, 422);
+  const publicationProfile = String(body['publication_profile'] ?? 'standard');
+  if (!['standard', 'bilingual_syllabus'].includes(publicationProfile)) {
+    return c.json({ detail: 'publication_profile must be standard or bilingual_syllabus' }, 422);
+  }
+  if (body.status === 'published' && publicationProfile === 'bilingual_syllabus') {
+    const readiness = assessSubjectPublishReadiness({
+      name,
+      name_as: String(body['name_as'] ?? '').trim(),
+      slug: makeSlug(name),
+      description: String(body['description'] ?? '').trim(),
+      publication_profile: publicationProfile,
+    }, []);
+    return c.json({
+      detail: 'Create this subject as a draft, add and publish its bilingual course-syllabus page, then use the quality preflight to publish the subject card.',
+      publish_readiness: readiness,
+    }, 422);
+  }
 
   const db       = createDb(c.env.DB);
   const slug     = makeSlug(name);
@@ -831,14 +875,21 @@ staffRouter.post('/content/subjects', async (c) => {
     streamId: streamId ?? undefined,
     description: String(body['description'] ?? '').trim() || null,
     imageUrl:    String(body['image_url']   ?? '').trim() || null,
+    publicationProfile,
     isPublished: body['status'] === 'published' ? 1 : 0,
     pyqPapers:   '[]',
     createdAt:   now, updatedAt: now,
   });
 
   await auditLog(c.env, auth.sub ?? '', 'create_subject', 'subject', id, { name, streamId });
-  return c.json({ id, name, name_as: String(body['name_as'] ?? '').trim() || null, slug, status: body['status'] === 'published' ? 'published' : 'draft',
-    stream_id: streamId, stream_name: streamName, class_id: classId, board_id: boardId }, 201);
+  const publishReadiness = publicationProfile === 'bilingual_syllabus'
+    ? assessSubjectPublishReadiness({
+      id, name, name_as: String(body['name_as'] ?? '').trim(), slug, description: String(body['description'] ?? '').trim(),
+      publication_profile: publicationProfile, stream_name: streamName,
+    }, [])
+    : null;
+  return c.json({ id, name, name_as: String(body['name_as'] ?? '').trim() || null, slug, publication_profile: publicationProfile, status: body['status'] === 'published' ? 'published' : 'draft',
+    stream_id: streamId, stream_name: streamName, class_id: classId, board_id: boardId, publish_readiness: publishReadiness }, 201);
 });
 
 // ── Subject update ─────────────────────────────────────────────────────────────
@@ -851,13 +902,13 @@ staffRouter.patch('/content/subjects/:id', async (c) => {
   if ('status' in body) { const publishDenied = await capabilityDenied(c, auth, 'content:publish'); if (publishDenied) return publishDenied; }
   const db = createDb(c.env.DB);
 
-  const existing = await db.select({ id: subjects.id, slug: subjects.slug })
+  const existing = await db.select()
     .from(subjects).where(eq(subjects.id, subjectId)).get();
   if (!existing) return c.json({ detail: 'Subject not found' }, 404);
 
   type SubjectUpdate = Partial<{
     name: string; nameAs: string | null; slug: string; description: string | null; imageUrl: string | null;
-    isPublished: number; streamId: string | null; updatedAt: number;
+    isPublished: number; streamId: string | null; publicationProfile: string; updatedAt: number;
   }>;
   const updates: SubjectUpdate = { updatedAt: nowTs() };
 
@@ -868,6 +919,52 @@ staffRouter.patch('/content/subjects/:id', async (c) => {
   if ('status' in body)      updates.isPublished = body['status'] === 'published' ? 1 : 0;
   if ('stream_id' in body)   updates.streamId    = String(body['stream_id'] ?? '').trim() || null;
   if ('slug' in body)        updates.slug        = String(body['slug'] ?? '').trim() || existing.slug;
+  if ('publication_profile' in body) {
+    const profile = String(body['publication_profile'] ?? 'standard');
+    if (!['standard', 'bilingual_syllabus'].includes(profile)) {
+      return c.json({ detail: 'publication_profile must be standard or bilingual_syllabus' }, 422);
+    }
+    updates.publicationProfile = profile;
+  }
+
+  const publicationProfile = updates.publicationProfile ?? existing.publicationProfile ?? 'standard';
+  let publishReadiness: ReturnType<typeof assessSubjectPublishReadiness> | null = null;
+  if (publicationProfile === 'bilingual_syllabus') {
+    const [context, syllabusResult] = await Promise.all([
+      c.env.DB.prepare(`
+        SELECT s.id, s.name, s.name_as, s.slug, s.description, s.publication_profile,
+               st.name AS stream_name, cl.name AS class_name, b.name AS board_name
+        FROM subjects s
+        LEFT JOIN streams st ON st.id = s.stream_id
+        LEFT JOIN classes cl ON cl.id = st.class_id
+        LEFT JOIN boards b ON b.id = cl.board_id
+        WHERE s.id = ?
+      `).bind(subjectId).first<Record<string, unknown>>(),
+      c.env.DB.prepare(`
+        SELECT id, subject_id, title, title_as, slug, slug_as, status,
+               meta_description, meta_description_as, keywords, keywords_as,
+               notes_en, notes_as, qa_en, qa_as, published_topics, rag_updated_at, rag_indexed_at
+        FROM chapters
+        WHERE subject_id = ? AND slug LIKE 'course-syllabus-%'
+      `).bind(subjectId).all<Record<string, unknown>>(),
+    ]);
+    const candidate = {
+      ...(context ?? {}),
+      ...updates,
+      name: updates.name ?? context?.name ?? existing.name,
+      name_as: updates.nameAs ?? context?.name_as ?? existing.nameAs,
+      slug: updates.slug ?? context?.slug ?? existing.slug,
+      description: updates.description ?? context?.description ?? existing.description,
+      publication_profile: publicationProfile,
+    };
+    publishReadiness = assessSubjectPublishReadiness(candidate, syllabusResult.results ?? []);
+    if ((body.status === 'published' || existing.isPublished === 1) && !publishReadiness.can_publish) {
+      return c.json({
+        detail: 'This bilingual syllabus subject cannot be published until SEO, GEO, and AEO readiness each reach at least 90/100.',
+        publish_readiness: publishReadiness,
+      }, 422);
+    }
+  }
 
   await db.update(subjects).set(updates).where(eq(subjects.id, subjectId));
   await auditLog(c.env, auth.sub ?? '', 'update_subject', 'subject', subjectId, updates);
@@ -878,7 +975,7 @@ staffRouter.patch('/content/subjects/:id', async (c) => {
     c.env.CONTENT_KV.delete(`subject:${subjectId}:chapters`).catch(() => { /* best-effort */ });
   }
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, publish_readiness: publishReadiness });
 });
 
 // ── Subject delete ─────────────────────────────────────────────────────────────
