@@ -105,7 +105,7 @@ export default function VirtualSubjectGrid({
                 key={sub.id}
                 sub={sub}
                 chapters={chaptersBySubject.get(sub.id) || []}
-                isSaved={savedSet.has(sub.id)}
+                isSaved={sub.is_saved ?? savedSet.has(sub.id)}
                 onToggleSave={onToggleSave}
                 onAskAI={onAskAI}
                 index={row.start + i}
