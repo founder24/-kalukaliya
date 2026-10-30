@@ -34,6 +34,7 @@ import { extractBearer, hashPassword, isSessionValid, verifyAdminToken, verifyPa
 import { purgeChapterRag, purgeRagScope, reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import { assessSubjectPublishReadiness } from '../services/subject-publishing-readiness';
+import { BILINGUAL_SYLLABUS_READINESS_SELECT } from '../services/bilingual-syllabus-readiness-query';
 import type { Env, JwtPayload } from '../types';
 import type { JWTPayload } from 'jose';
 
@@ -766,11 +767,8 @@ staffRouter.get('/content/subjects', async (c) => {
     db.select({ id: classes.id, boardId: classes.boardId, name: classes.name }).from(classes),
     db.select({ id: boards.id, name: boards.name }).from(boards),
     c.env.DB.prepare(`
-      SELECT id, subject_id, title, title_as, slug, slug_as, status,
-             meta_description, meta_description_as, keywords, keywords_as,
-             notes_en, notes_as, qa_en, qa_as, published_topics, rag_updated_at, rag_indexed_at
-      FROM chapters
-      WHERE slug LIKE 'course-syllabus-%'
+      ${BILINGUAL_SYLLABUS_READINESS_SELECT}
+       WHERE c.slug LIKE 'course-syllabus-%'
     `).all<Record<string, unknown>>(),
   ]);
   const streamMap = new Map(allStreams.map(s => [s.id, s]));
@@ -941,11 +939,8 @@ staffRouter.patch('/content/subjects/:id', async (c) => {
         WHERE s.id = ?
       `).bind(subjectId).first<Record<string, unknown>>(),
       c.env.DB.prepare(`
-        SELECT id, subject_id, title, title_as, slug, slug_as, status,
-               meta_description, meta_description_as, keywords, keywords_as,
-               notes_en, notes_as, qa_en, qa_as, published_topics, rag_updated_at, rag_indexed_at
-        FROM chapters
-        WHERE subject_id = ? AND slug LIKE 'course-syllabus-%'
+        ${BILINGUAL_SYLLABUS_READINESS_SELECT}
+        WHERE c.subject_id = ? AND c.slug LIKE 'course-syllabus-%'
       `).bind(subjectId).all<Record<string, unknown>>(),
     ]);
     const candidate = {
@@ -960,7 +955,7 @@ staffRouter.patch('/content/subjects/:id', async (c) => {
     publishReadiness = assessSubjectPublishReadiness(candidate, syllabusResult.results ?? []);
     if ((body.status === 'published' || existing.isPublished === 1) && !publishReadiness.can_publish) {
       return c.json({
-        detail: 'This bilingual syllabus subject cannot be published until SEO, GEO, and AEO readiness each reach at least 90/100.',
+        detail: 'This bilingual syllabus subject cannot be published until SEO, GEO, AEO, and RAG index readiness each reach 100/100.',
         publish_readiness: publishReadiness,
       }, 422);
     }

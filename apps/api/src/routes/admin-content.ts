@@ -16,6 +16,7 @@ import { enforceAuthRateLimit } from '../services/auth-rate-limit';
 import { reindexChapterRag } from '../services/rag-indexing';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import { assessSubjectPublishReadiness } from '../services/subject-publishing-readiness';
+import { BILINGUAL_SYLLABUS_READINESS_SELECT } from '../services/bilingual-syllabus-readiness-query';
 import type { Env } from '../types';
 import { runRagJob } from './staff';
 import type { CloudflareAnalyticsHealthResult } from '../types';
@@ -1601,11 +1602,8 @@ adminContentRouter.post('/content/bulk-status', async c => {
         WHERE s.id IN (${marks})
       `).bind(...ids).all<Record<string, unknown>>(),
       c.env.DB.prepare(`
-        SELECT id, subject_id, title, title_as, slug, slug_as, status,
-               meta_description, meta_description_as, keywords, keywords_as,
-               notes_en, notes_as, qa_en, qa_as, published_topics, rag_updated_at, rag_indexed_at
-        FROM chapters
-        WHERE slug LIKE 'course-syllabus-%' AND subject_id IN (${marks})
+        ${BILINGUAL_SYLLABUS_READINESS_SELECT}
+         WHERE c.slug LIKE 'course-syllabus-%' AND c.subject_id IN (${marks})
       `).bind(...ids).all<Record<string, unknown>>(),
     ]);
     const syllabiBySubject = new Map<string, Record<string, unknown>[]>();
@@ -1624,7 +1622,7 @@ adminContentRouter.post('/content/bulk-status', async c => {
       .filter((item) => !item.readiness.can_publish);
     if (blocked.length) {
       return c.json({
-        detail: 'One or more bilingual syllabus subjects are not ready: SEO, GEO, and AEO must each reach at least 90/100.',
+        detail: 'One or more bilingual syllabus subjects are not ready: SEO, GEO, AEO, and RAG index readiness must each reach 100/100.',
         blocked_subjects: blocked,
       }, 422);
     }
