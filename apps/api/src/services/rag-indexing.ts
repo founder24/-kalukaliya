@@ -13,6 +13,8 @@ export type RagScope = 'notes' | 'qa' | 'pyq';
 type SourceType = 'notes' | 'important_questions' | 'pyq';
 const sourceFor: Record<RagScope, SourceType> = { notes: 'notes', qa: 'important_questions', pyq: 'pyq' };
 const VECTORIZE_DELETE_BATCH_SIZE = 100;
+const VECTOR_ID_MAX_BYTES = 64;
+const EMBEDDING_DIMENSIONS = 1024;
 const now = () => Math.floor(Date.now() / 1000);
 
 export function batchVectorIds(ids: string[]): string[][] {
@@ -36,6 +38,48 @@ function words(text: string): string[] {
 function notes(value: string | null, sections: string | null): string | null {
   const parsed = parse(sections);
   return parsed.length ? parsed.map(s => [s.title ? `## ${s.title}` : '', s.content ?? ''].filter(Boolean).join('\n')).join('\n\n') : value;
+}
+function vectorIdByteLength(id: string): number {
+  return new TextEncoder().encode(id).byteLength;
+}
+async function chapterVectorKey(chapterId: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(chapterId));
+  return [...new Uint8Array(digest).slice(0, 16)]
+    .map(value => value.toString(16).padStart(2, '0')).join('');
+}
+function buildVectorId(chapterKey: string, medium: 'english' | 'assamese', scope: RagScope, index: number): string {
+  const id = `c${chapterKey}_${medium === 'english' ? 'en' : 'as'}_${scope}_${index}`;
+  if (vectorIdByteLength(id) > VECTOR_ID_MAX_BYTES) throw new Error('Generated Vectorize ID exceeds 64 bytes');
+  return id;
+}
+function parseEmbeddingVectors(response: unknown, expectedCount: number): number[][] {
+  const data = response && typeof response === 'object'
+    ? (response as { data?: unknown }).data
+    : undefined;
+  if (!Array.isArray(data) || data.length !== expectedCount) {
+    throw new Error('Embedding provider returned an unexpected vector count');
+  }
+  const vectors = data.map((item): number[] | null => {
+    const values = Array.isArray(item)
+      ? item
+      : item && typeof item === 'object' && Array.isArray((item as { values?: unknown }).values)
+        ? (item as { values: unknown[] }).values
+        : null;
+    if (!values || values.length !== EMBEDDING_DIMENSIONS
+      || values.some(value => typeof value !== 'number' || !Number.isFinite(value))) return null;
+    return values as number[];
+  });
+  if (vectors.some(vector => vector === null)) {
+    throw new Error('Embedding provider returned a vector with an invalid dimension or value');
+  }
+  return vectors as number[][];
+}
+async function embedContent(env: Env, content: string[]): Promise<number[][]> {
+  if (!content.length) return [];
+  const response = await (env.AI as unknown as {
+    run(model: string, input: { text: string[] }): Promise<unknown>;
+  }).run('@cf/baai/bge-m3', { text: content });
+  return parseEmbeddingVectors(response, content.length);
 }
 export function qaTextFromApprovedPairs(value: string | null, pyqOnly = false): string | null {
   const parsed = parse(value);
@@ -81,7 +125,9 @@ export async function purgeRagScope(env: Env, chapterId: string, scope: RagScope
   const ids = mapped.map(row => row.vectorId).filter((id): id is string => Boolean(id));
   // Deterministic legacy IDs must be swept to prevent stale tails after older deployments.
   for (const medium of ['english', 'assamese']) for (let index = 0; index < 500; index++) ids.push(`${chapterId}_${medium}_${sourceType}_${index}`);
-  const unique = [...new Set(ids)];
+  // Vectorize cannot contain IDs over 64 UTF-8 bytes. Older question IDs could
+  // exceed that limit; skip those impossible IDs while still removing their D1 mappings.
+  const unique = [...new Set(ids)].filter(id => vectorIdByteLength(id) <= VECTOR_ID_MAX_BYTES);
   for (const batch of batchVectorIds(unique)) await env.VECTORIZE.deleteByIds(batch);
   await db.delete(chunks).where(and(eq(chunks.chapterId, chapterId), eq(chunks.sourceType, sourceType)));
 }
@@ -90,9 +136,18 @@ export async function purgeChapterRag(env: Env, chapterId: string): Promise<void
   for (const scope of ['notes', 'qa', 'pyq'] as RagScope[]) await purgeRagScope(env, chapterId, scope);
 }
 
-async function ingest(env: Env, chapterId: string, subjectId: string, text: string, medium: 'english' | 'assamese', scope: RagScope): Promise<number> {
-  const content = words(text);
+async function ingest(
+  env: Env,
+  chapterId: string,
+  subjectId: string,
+  content: string[],
+  values: number[][],
+  medium: 'english' | 'assamese',
+  scope: RagScope,
+  chapterKey: string,
+): Promise<number> {
   if (!content.length) return 0;
+  if (content.length !== values.length) throw new Error('Embedding count does not match RAG chunk count');
   const hierarchy = await env.DB.prepare(`
     SELECT subjects.name AS subjectName, subjects.slug AS subjectSlug,
            streams.id AS streamId, streams.name AS streamName,
@@ -123,11 +178,11 @@ async function ingest(env: Env, chapterId: string, subjectId: string, text: stri
     ...(hierarchy?.boardId && { boardId: hierarchy.boardId }),
     ...(hierarchy?.boardName && { boardName: hierarchy.boardName }),
   };
-  const response = await (env.AI as unknown as { run(model: string, input: { text: string[] }): Promise<{ data: Array<{ values: number[] }> }> })
-    .run('@cf/baai/bge-m3', { text: content });
-  const entries = content.map((item, index) => ({ content: item, values: response.data[index]?.values, id: `${chapterId}_${medium}_${sourceFor[scope]}_${index}` }))
-    .filter((entry): entry is { content: string; values: number[]; id: string } => Boolean(entry.values?.length));
-  if (!entries.length) throw new Error('Embedding provider returned no vectors');
+  const entries = content.map((item, index) => ({
+    content: item,
+    values: values[index]!,
+    id: buildVectorId(chapterKey, medium, scope, index),
+  }));
   await env.VECTORIZE.upsert(entries.map(entry => ({ id: entry.id, values: entry.values, metadata: { chapterId, subjectId, medium, sourceType: sourceFor[scope], chunkType: 'text', content: entry.content.slice(0, 512), ...hierarchyMetadata } })));
   try {
     const db = createDb(env.DB);
@@ -158,10 +213,28 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
   const result = {} as Record<RagScope, { chunks: number; error?: string; skipped?: string }>;
   for (const scope of requested) {
     try {
-      await purgeRagScope(env, chapterId, scope);
       const [en, as] = text[scope];
-      if (!en?.trim() && !as?.trim()) { result[scope] = { chunks: 0, skipped: 'no content' }; continue; }
-      result[scope] = { chunks: (en ? await ingest(env, chapterId, chapter.subjectId, en, 'english', scope) : 0) + (as ? await ingest(env, chapterId, chapter.subjectId, as, 'assamese', scope) : 0) };
+      const englishContent = en?.trim() ? words(en) : [];
+      const assameseContent = as?.trim() ? words(as) : [];
+      // Validate both language responses before removing the existing vectors.
+      const [englishVectors, assameseVectors, chapterKey] = await Promise.all([
+        embedContent(env, englishContent),
+        embedContent(env, assameseContent),
+        chapterVectorKey(chapterId),
+      ]);
+      await purgeRagScope(env, chapterId, scope);
+      if (!englishContent.length && !assameseContent.length) {
+        result[scope] = { chunks: 0, skipped: 'no content' };
+        continue;
+      }
+      result[scope] = {
+        chunks: (englishContent.length
+          ? await ingest(env, chapterId, chapter.subjectId, englishContent, englishVectors, 'english', scope, chapterKey)
+          : 0)
+          + (assameseContent.length
+            ? await ingest(env, chapterId, chapter.subjectId, assameseContent, assameseVectors, 'assamese', scope, chapterKey)
+            : 0),
+      };
     } catch (error) { result[scope] = { chunks: 0, error: error instanceof Error ? error.message : String(error) }; }
   }
   if (requested.includes('notes') && !result.notes.error) await db.update(chapters).set({ ragIndexedAt: now(), updatedAt: now() }).where(eq(chapters.id, chapterId));
