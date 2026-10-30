@@ -57,6 +57,7 @@ import {
 } from "./_prerender-chapter-policy.mjs";
 import {
   includeChapterParentSubjectPaths,
+  readChapterSitemapPaths,
   readSubjectSitemapPaths,
 } from "./_prerender-output-coverage.mjs";
 import { canonicalTopicSitemapPath } from "./_topic-sitemap-path.mjs";
@@ -472,9 +473,10 @@ function pickChapterListFields(ch) {
 function pickChapterPayload(c) {
   const keys = [
     "chapter_id", "title", "topic_title", "chapter_title",
-    "subject_name", "board_name", "class_name", "stream_name",
+    "title_as", "subject_name", "subject_name_as",
+    "board_name", "class_name", "stream_name",
     "subject_slug", "board_slug", "class_slug", "stream_slug",
-    "chapter_slug", "content", "content_as", "content_type",
+    "chapter_slug", "slug_as", "content", "content_as", "content_type",
     "has_assamese", "meta_description", "word_count",
     "generated_at", "updated_at", "bing_keywords",
     // P0 #1 of the AI-visibility plan — FAQPage JSON-LD seed pulled
@@ -503,9 +505,10 @@ function pickChapterPayload(c) {
 // chapter without parseable MCQs never blocks the rest of the chapter
 // snapshot. The runtime useEffect in ChapterPage will still try to
 // fetch on the client for non-prerendered routes.
-async function fetchChapterFaqEntries(chapterId) {
+async function fetchChapterFaqEntries(chapterId, language = "en") {
   if (!chapterId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/faq-jsonld`;
+  const langQuery = language === "as" ? "?lang=as" : "";
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/faq-jsonld${langQuery}`;
   try {
     const payload = await fetchJson(url);
     const entries = Array.isArray(payload?.entries) ? payload.entries : null;
@@ -524,9 +527,10 @@ async function fetchChapterFaqEntries(chapterId) {
 // failure semantics as fetchChapterFaqEntries: any error returns
 // null and the runtime useEffect in ChapterPage takes over for the
 // SPA path.
-async function fetchChapterPublishedTopics(chapterId) {
+async function fetchChapterPublishedTopics(chapterId, language = "en") {
   if (!chapterId) return null;
-  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-published`;
+  const langQuery = language === "as" ? "?lang=as" : "";
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics-published${langQuery}`;
   try {
     const payload = await fetchJson(url);
     const topics = Array.isArray(payload?.topics) ? payload.topics : null;
@@ -615,13 +619,7 @@ function readPublishedChapterPaths() {
     );
   }
   const xml = fs.readFileSync(chapterSitemap, "utf-8");
-  const paths = new Set();
-  for (const match of xml.matchAll(/<loc>\s*(?:https?:\/\/[^/]+)?([^<\s]+)\s*<\/loc>/gi)) {
-    const pathname = match[1].replace(/\/+$/, "");
-    // Chapter URLs are precisely /board/class/subject/chapter. Do not turn
-    // topic or auxiliary URLs into chapter snapshots by accident.
-    if (pathname.split("/").filter(Boolean).length === 4) paths.add(pathname);
-  }
+  const paths = readChapterSitemapPaths(xml);
   if (paths.size === 0) {
     throw new Error("[prerender-routes] chapter sitemap contains zero chapter URLs");
   }
@@ -1140,6 +1138,13 @@ async function main() {
       }
 
       const chapterData = clean(pickChapterPayload(chapterPayload));
+      const localizedChapterSlug = String(chapterData.slug_as || "").trim();
+      const localizedChapterUrl = localizedChapterSlug
+        ? `/as${url}/${localizedChapterSlug}`
+        : null;
+      const hasPublishedAssamesePage = Boolean(
+        localizedChapterUrl && publishedChapterPaths.has(localizedChapterUrl),
+      );
       // P0 #1 of the AI-visibility plan — fetch FAQPage entries built
       // from the chapter's MCQs and bake them into BOTH:
       //   (a) the chapter preload, so the runtime useEffect in
@@ -1158,9 +1163,13 @@ async function main() {
       // bounded chapter concurrency while issuing one parallel enrichment
       // round per chapter.
       const [faqEntries, publishedTopics, topicsRelated] = await Promise.all([
-        fetchChapterFaqEntries(chapterData.chapter_id),
-        fetchChapterPublishedTopics(chapterData.chapter_id),
-        fetchChapterTopicsRelated(chapterData.chapter_id),
+        fetchChapterFaqEntries(chapterData.chapter_id, "en"),
+        fetchChapterPublishedTopics(chapterData.chapter_id, "en"),
+        fetchChapterTopicsRelated(
+          chapterData.chapter_id,
+          "en",
+          chapterUrl.slice(0, chapterUrl.lastIndexOf("/")),
+        ),
       ]);
       if (faqEntries) {
         chapterData.faq_entries = faqEntries;
@@ -1218,6 +1227,10 @@ async function main() {
               `${chapterTitle} notes for ${subjName}. Complete study material for ${bName} ${cName} students.`,
             canonical: chapterCanonical,
             ogImageAlt: `${chapterTitle} — ${subjName} | Syrabit.ai`,
+            language: "en",
+            alternateUrl: hasPublishedAssamesePage
+              ? `https://syrabit.ai${localizedChapterUrl}`
+              : null,
           },
         });
         // P0 #1 — bake FAQPage JSON-LD into byte-zero HTML so AI
@@ -1228,6 +1241,83 @@ async function main() {
         const out = writeRoute(chapterUrl, html);
         chapterOutputPaths.add(out);
         chaptersWritten = chapterOutputPaths.size;
+        if (hasPublishedAssamesePage) {
+          const asLookupPath = streamSlug
+            ? `${board}/${classSlug}/${streamSlug}/${subjectSlug}/${encodeURIComponent(localizedChapterSlug)}`
+            : `${board}/${classSlug}/${subjectSlug}/${encodeURIComponent(localizedChapterSlug)}`;
+          const asPayload = await fetchJson(
+            `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapter-by-slug-as/${asLookupPath}`,
+          );
+          if (
+            !asPayload ||
+            asPayload.has_assamese !== true ||
+            !String(asPayload.title || asPayload.chapter_title || "").trim() ||
+            !String(asPayload.meta_description || "").trim() ||
+            !String(asPayload.content_as || "").trim() ||
+            String(asPayload.slug_as || "").trim() !== localizedChapterSlug
+          ) {
+            throw new Error(
+              `Assamese page ${localizedChapterUrl} is listed in the sitemap but its localized content is incomplete`,
+            );
+          }
+
+          const asChapterData = clean(pickChapterPayload(asPayload));
+          const [asFaqEntries, asPublishedTopics, asTopicsRelated] = await Promise.all([
+            fetchChapterFaqEntries(asChapterData.chapter_id, "as"),
+            fetchChapterPublishedTopics(asChapterData.chapter_id, "as"),
+            fetchChapterTopicsRelated(
+              asChapterData.chapter_id,
+              "as",
+              `/as${url}`,
+            ),
+          ]);
+          if (!asFaqEntries || asFaqEntries.length < 2) {
+            throw new Error(
+              `Assamese page ${localizedChapterUrl} is listed in the sitemap without complete FAQ answers`,
+            );
+          }
+          asChapterData.faq_entries = asFaqEntries;
+          if (asPublishedTopics) asChapterData.published_topics = asPublishedTopics;
+          if (asTopicsRelated) asChapterData.topics_related = asTopicsRelated;
+
+          const asPreload = {
+            board,
+            classSlug,
+            subjectSlug,
+            chapterSlug: localizedChapterSlug,
+            data: asChapterData,
+          };
+          const asTitle = String(
+            asPayload.title || asPayload.chapter_title || asPayload.title_as,
+          ).trim();
+          const asSubjectName = String(
+            asPayload.subject_name_as || asTitle,
+          ).trim();
+          const asInlineScripts = [
+            `<script>window.__CHAPTER_PRELOAD__=${JSON.stringify(asPreload).replace(/</g, "\\u003c")};</script>`,
+          ];
+          let asHtml = await renderOne(renderRoute, htmlTemplate, {
+            url: localizedChapterUrl,
+            seed: { chapterPreload: asPreload },
+            hydrateKind: "chapter",
+            inlineScripts: asInlineScripts,
+            head: {
+              title: `${asTitle} — ${asSubjectName} | Syrabit.ai`,
+              description: asPayload.meta_description,
+              canonical: `https://syrabit.ai${localizedChapterUrl}`,
+              ogImageAlt: `${asTitle} — ${asSubjectName} | Syrabit.ai`,
+              language: "as",
+              alternateUrl: chapterCanonical,
+            },
+          });
+          asHtml = injectFaqJsonLdIntoHead(asHtml, asFaqEntries);
+          const asOut = writeRoute(localizedChapterUrl, asHtml);
+          chapterOutputPaths.add(asOut);
+          chaptersWritten = chapterOutputPaths.size;
+          console.log(
+            `[prerender-routes] Assamese chapter ${localizedChapterUrl} → ${path.relative(distDir, asOut)}`,
+          );
+        }
         for (const topic of publishedTopics || []) {
           const locales = [
             { path: `${chapterUrl}/topic/${topic.topic_slug}`, title: topic.title, definition: topic.definition },

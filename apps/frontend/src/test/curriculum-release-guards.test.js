@@ -467,6 +467,29 @@ describe("chapter output coverage", () => {
     );
   });
 
+  it("includes encoded Assamese chapter URLs in strict sitemap output coverage", () => {
+    const localizedChapter = "/as/ahsec/hs-1st-year/physics/গতিৰ-নিয়ম";
+    const expectedPaths = readChapterSitemapPaths(
+      `<urlset><url><loc>https://syrabit.ai${encodeURI(localizedChapter)}</loc></url></urlset>`,
+    );
+    const pages = [
+      {
+        rel: `${localizedChapter.slice(1)}/index.html`,
+        body: '<div data-hydrate="chapter">',
+      },
+    ];
+
+    expect(expectedPaths).toEqual(new Set([localizedChapter]));
+    expect(
+      validateChapterOutputCoverage({
+        pages,
+        expectedPaths,
+        manifestCount: 1,
+        strict: true,
+      }),
+    ).toEqual({ chaptersOnDisk: 1, failures: [] });
+  });
+
   it("fails strict release coverage when the chapter sitemap is missing", () => {
     const result = validateChapterOutputCoverage({
       pages: [

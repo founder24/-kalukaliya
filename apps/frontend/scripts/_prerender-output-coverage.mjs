@@ -25,7 +25,8 @@ export function collectPrerenderOutputPaths(pages) {
     const segments = route.split("/").filter(Boolean);
     // Topic pages use ChapterPage for SSR and hydration too, but have a
     // separate sitemap/output contract from chapter routes.
-    if (segments.length === 4) chapters.add(route);
+    if (segments.length === 4 && segments[0] !== "as") chapters.add(route);
+    if (segments.length === 5 && segments[0] === "as") chapters.add(route);
   }
 
   return { subjects, chapters, topics };
@@ -49,7 +50,13 @@ function readSitemapPaths(xml, isExpectedRoute) {
 export function readChapterSitemapPaths(xml) {
   return readSitemapPaths(
     xml,
-    (route) => route.split("/").filter(Boolean).length === 4,
+    (route) => {
+      const segments = route.split("/").filter(Boolean);
+      return (
+        (segments.length === 4 && segments[0] !== "as") ||
+        (segments.length === 5 && segments[0] === "as")
+      );
+    },
   );
 }
 

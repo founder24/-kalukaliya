@@ -29,6 +29,7 @@ import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
 import { resolveTopicPageContent, type TopicPageLanguage } from '../services/topic-page';
+import { faqEntriesFromJson, faqJsonLd } from '../services/faq-jsonld';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
@@ -722,42 +723,6 @@ contentRouter.get('/chapter-by-slug-as/:board/:classSlug/:streamSlug/:subjectSlu
 function safeParse<T = unknown>(json: string | null | undefined): T | null {
   if (!json) return null;
   try { return JSON.parse(json) as T; } catch { return null; }
-}
-
-type PublicFaqEntry = { question: string; answer: string };
-
-function faqEntriesFromJson(json: string | null | undefined, language: 'en' | 'as'): PublicFaqEntry[] {
-  const parsed = safeParse<unknown>(json);
-  if (!Array.isArray(parsed)) return [];
-  return parsed.flatMap((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-    const row = item as Record<string, unknown>;
-    const getText = (...keys: string[]) => keys
-      .map(key => row[key])
-      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      ?.trim() ?? '';
-    const question = language === 'as' ? getText('question_as', 'question') : getText('question_en', 'question');
-    const answer = language === 'as'
-      ? getText('answer_as', 'solution_as', 'answer', 'solution', 'explanation_as')
-      : getText('answer_en', 'answer', 'solution', 'explanation');
-    const hasExpectedScript = language === 'as'
-      ? /[\u0980-\u09FF]/u.test(question) && /[\u0980-\u09FF]/u.test(answer)
-      : /\p{Script=Latin}{2,}/u.test(question) && /\p{Script=Latin}{2,}/u.test(answer);
-    return question.length > 5 && answer.length > 10 && hasExpectedScript ? [{ question, answer }] : [];
-  });
-}
-
-function faqJsonLd(entries: PublicFaqEntry[]): Record<string, unknown> | null {
-  if (entries.length < 2) return null;
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: entries.slice(0, 20).map(({ question, answer }) => ({
-      '@type': 'Question',
-      name: question,
-      acceptedAnswer: { '@type': 'Answer', text: answer },
-    })),
-  };
 }
 
 // ── GET /library-bundle ────────────────────────────────────────────────────────

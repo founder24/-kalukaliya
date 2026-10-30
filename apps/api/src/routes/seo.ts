@@ -8,6 +8,7 @@
 import { Hono } from 'hono';
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
 import { completeTopicPageLanguages } from '../services/topic-page';
+import { faqEntriesFromJson } from '../services/faq-jsonld';
 import type { Env } from '../types';
 
 export const seoRouter = new Hono<{ Bindings: Env }>();
@@ -18,12 +19,17 @@ const RSS_CONTENT_TYPE = 'application/rss+xml; charset=utf-8';
 
 type ContentUrl = {
   title: string;
+  titleAs: string | null;
   subjectName: string;
   subjectSlug: string;
   boardSlug: string;
   classSlug: string;
   chapterSlug: string;
+  chapterSlugAs: string | null;
   notesEn: string | null;
+  notesAs: string | null;
+  metaDescriptionAs: string | null;
+  contentType: string | null;
   publishedTopics: string | null;
   qaEn: string | null;
   qaAs: string | null;
@@ -50,6 +56,31 @@ function rfc822(value: number | null): string {
 
 function contentUrl(row: Pick<ContentUrl, 'boardSlug' | 'classSlug' | 'subjectSlug' | 'chapterSlug'>): string {
   return `${SITE_URL}/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}`;
+}
+
+function assameseContentUrl(row: ContentUrl): string {
+  return `${SITE_URL}/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${encodeURIComponent(row.chapterSlugAs ?? '')}`;
+}
+
+function hasCompleteAssameseChapterPage(row: ContentUrl): boolean {
+  const hasAssameseScript = (text: string | null | undefined) =>
+    Boolean(text && /[\u0980-\u09FF]/u.test(text));
+  if (
+    !row.notesEn?.trim() ||
+    !row.titleAs?.trim() ||
+    !row.chapterSlugAs?.trim() ||
+    !row.notesAs?.trim() ||
+    !row.metaDescriptionAs?.trim() ||
+    !hasAssameseScript(row.titleAs) ||
+    !hasAssameseScript(row.notesAs) ||
+    !hasAssameseScript(row.metaDescriptionAs) ||
+    row.contentType === 'question_paper' ||
+    row.contentType === 'pyq'
+  ) return false;
+
+  const englishFaqs = faqEntriesFromJson(row.qaEn, 'en');
+  const assameseFaqs = faqEntriesFromJson(row.qaAs, 'as');
+  return assameseFaqs.length >= 5 && englishFaqs.length === assameseFaqs.length;
 }
 
 function topicEntries(rows: ContentUrl[]): string[] {
@@ -94,8 +125,9 @@ function xmlResponse(content: string, contentType = XML_CONTENT_TYPE): Response 
 async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<ContentUrl[]> {
   const subjectFilter = subjectSlug ? 'AND s.slug = ?' : '';
   const statement = c.env.DB.prepare(`
-    SELECT c.title, c.slug AS chapter_slug, c.notes_en, c.published_topics,
-           c.qa_en, c.qa_as,
+    SELECT c.title, c.title_as, c.slug AS chapter_slug, c.slug_as AS chapter_slug_as,
+           c.notes_en, c.notes_as, c.meta_description_as, c.content_type,
+           c.published_topics, c.qa_en, c.qa_as,
            c.updated_at, c.created_at, s.name AS subject_name, s.slug AS subject_slug,
            b.slug AS board_slug, cl.slug AS class_slug
     FROM chapters c
@@ -111,12 +143,17 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
     : await statement.all<Record<string, string | number | null>>();
   return (result.results ?? []).map((row) => ({
     title: String(row.title ?? ''),
+    titleAs: typeof row.title_as === 'string' ? row.title_as : null,
     subjectName: String(row.subject_name ?? ''),
     subjectSlug: String(row.subject_slug ?? ''),
     boardSlug: String(row.board_slug ?? ''),
     classSlug: String(row.class_slug ?? ''),
     chapterSlug: String(row.chapter_slug ?? ''),
+    chapterSlugAs: typeof row.chapter_slug_as === 'string' ? row.chapter_slug_as : null,
     notesEn: typeof row.notes_en === 'string' ? row.notes_en : null,
+    notesAs: typeof row.notes_as === 'string' ? row.notes_as : null,
+    metaDescriptionAs: typeof row.meta_description_as === 'string' ? row.meta_description_as : null,
+    contentType: typeof row.content_type === 'string' ? row.content_type : null,
     publishedTopics: typeof row.published_topics === 'string' ? row.published_topics : null,
     qaEn: typeof row.qa_en === 'string' ? row.qa_en : null,
     qaAs: typeof row.qa_as === 'string' ? row.qa_as : null,
@@ -310,10 +347,17 @@ seoRouter.get('/sitemap-chapters.xml', async (c) => {
   const rows = await publishedContent(c);
   const entries = new Map<string, string>();
   for (const row of rows) {
-    if (!row.notesEn?.trim()) continue;
-    const location = contentUrl(row);
-    if (!entries.has(location)) {
-      entries.set(location, urlEntry(location, date(row.updatedAt), '0.7'));
+    if (row.notesEn?.trim()) {
+      const location = contentUrl(row);
+      if (!entries.has(location)) {
+        entries.set(location, urlEntry(location, date(row.updatedAt), '0.7'));
+      }
+    }
+    if (hasCompleteAssameseChapterPage(row)) {
+      const location = assameseContentUrl(row);
+      if (!entries.has(location)) {
+        entries.set(location, urlEntry(location, date(row.updatedAt), '0.7'));
+      }
     }
   }
   return xmlResponse(urlSet([...entries.values()]));
