@@ -609,9 +609,12 @@ async function resolveChapterBySlug(
     c.header('Cache-Control', 'public, max-age=60, s-maxage=300');
   }
 
-  // Parse JSON fields
+  // Parse localized, complete Q&A pairs for public FAQ metadata.
   let topicsArr: unknown[] = [];
-  let faqArr: unknown[] = [];
+  const faqEligible = !['question_paper', 'pyq'].includes(chapterRow.contentType ?? '');
+  const faqArr = faqEligible
+    ? faqEntriesFromJson(useSlugAs ? chapterRow.qaAs : chapterRow.qaEn, useSlugAs ? 'as' : 'en')
+    : [];
   try { topicsArr = JSON.parse(chapterRow.publishedTopics ?? '[]') as unknown[]; } catch { /* leave empty */ }
   const displayTitle = useSlugAs ? (chapterRow.titleAs?.trim() || chapterRow.title) : chapterRow.title;
   const displayDescription = useSlugAs
@@ -675,7 +678,7 @@ async function resolveChapterBySlug(
     chapter_number:  chapterRow.chapterNumber ?? null,
     topics:          displayTopics,
     published_topics: displayPublishedTopics,
-    faq_jsonld:      faqArr,
+    faq_jsonld:      faqJsonLd(faqArr),
     faq_entries:     faqArr,
     prev_chapter:    prevCh ? {
       chapter_id:    prevCh.id,
@@ -719,6 +722,42 @@ contentRouter.get('/chapter-by-slug-as/:board/:classSlug/:streamSlug/:subjectSlu
 function safeParse<T = unknown>(json: string | null | undefined): T | null {
   if (!json) return null;
   try { return JSON.parse(json) as T; } catch { return null; }
+}
+
+type PublicFaqEntry = { question: string; answer: string };
+
+function faqEntriesFromJson(json: string | null | undefined, language: 'en' | 'as'): PublicFaqEntry[] {
+  const parsed = safeParse<unknown>(json);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const row = item as Record<string, unknown>;
+    const getText = (...keys: string[]) => keys
+      .map(key => row[key])
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      ?.trim() ?? '';
+    const question = language === 'as' ? getText('question_as', 'question') : getText('question_en', 'question');
+    const answer = language === 'as'
+      ? getText('answer_as', 'solution_as', 'answer', 'solution', 'explanation_as')
+      : getText('answer_en', 'answer', 'solution', 'explanation');
+    const hasExpectedScript = language === 'as'
+      ? /[\u0980-\u09FF]/u.test(question) && /[\u0980-\u09FF]/u.test(answer)
+      : /\p{Script=Latin}{2,}/u.test(question) && /\p{Script=Latin}{2,}/u.test(answer);
+    return question.length > 5 && answer.length > 10 && hasExpectedScript ? [{ question, answer }] : [];
+  });
+}
+
+function faqJsonLd(entries: PublicFaqEntry[]): Record<string, unknown> | null {
+  if (entries.length < 2) return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: entries.slice(0, 20).map(({ question, answer }) => ({
+      '@type': 'Question',
+      name: question,
+      acceptedAnswer: { '@type': 'Answer', text: answer },
+    })),
+  };
 }
 
 // ── GET /library-bundle ────────────────────────────────────────────────────────
@@ -1222,35 +1261,26 @@ contentRouter.get('/chapters/:chapterId/pyq-images', async (c) => {
 contentRouter.get('/chapters/:chapterId/faq-jsonld', async (c) => {
   const db = createDb(c.env.DB);
   const chapterId = c.req.param('chapterId') as string;
+  const language = c.req.query('lang') === 'as' ? 'as' : 'en';
 
-  const ch = await db.select({ id: chapters.id, title: chapters.title, qaEn: chapters.qaEn })
-    .from(chapters).where(eq(chapters.id, chapterId)).get();
+  const ch = await db.select({
+    id: chapters.id,
+    contentType: chapters.contentType,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
+  }).from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!ch) return c.json({ detail: 'Chapter not found' }, 404);
+  if (ch.contentType === 'question_paper' || ch.contentType === 'pyq') {
+    return c.json({ chapter_id: ch.id, entries: [], faq_jsonld: null });
+  }
 
-  type QAItem = { question?: string; answer?: string; solution?: string };
-  const qaArr = safeParse<QAItem[]>(ch.qaEn) ?? [];
-  const entries = qaArr.flatMap((item) => {
-    const question = item.question?.trim() ?? '';
-    const answer = item.answer?.trim() || item.solution?.trim() || '';
-    return question.length > 5 && answer.length > 10
-      ? [{ question, answer }]
-      : [];
-  });
-
-  const faqJsonLd = entries.length >= 2 ? {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: entries.slice(0, 20).map(q => ({
-      '@type': 'Question',
-      name: q.question,
-      acceptedAnswer: { '@type': 'Answer', text: q.answer },
-    })),
-  } : null;
+  const entries = faqEntriesFromJson(language === 'as' ? ch.qaAs : ch.qaEn, language);
 
   return c.json({
     chapter_id: ch.id,
+    language,
     entries: entries.slice(0, 20),
-    faq_jsonld: faqJsonLd,
+    faq_jsonld: faqJsonLd(entries),
   });
 });
 

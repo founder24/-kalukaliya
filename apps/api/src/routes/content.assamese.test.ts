@@ -166,13 +166,27 @@ beforeAll(async () => {
       )
     `),
     env.DB.prepare(`
-      INSERT INTO chapters (id, subject_id, title, slug, status, qa_en)
-      VALUES ('faq-complete', 'related-subject', 'FAQ fixture', 'faq-complete', 'published', ?)
-    `).bind(JSON.stringify([
-      { question: 'A complete question one?', answer: 'A reviewed answer with enough detail.' },
-      { question: 'A question with no answer?', answer: '' },
-      { question: 'A complete question two?', solution: 'A reviewed solution with enough detail.' },
-    ])),
+      INSERT INTO chapters (id, subject_id, title, title_as, slug, slug_as, status, notes_en, notes_as, qa_en, qa_as)
+      VALUES ('faq-complete', 'related-subject', 'FAQ fixture', 'FAQ উদাহৰণ',
+        'faq-complete', 'faq-example', 'published', 'A short chapter summary.', 'এটা সৰু অধ্যায়ৰ সাৰাংশ।', ?, ?)
+    `).bind(
+      JSON.stringify([
+        { question: 'A complete question one?', answer: 'A reviewed answer with enough detail.' },
+        { question: 'A question with no answer?', answer: '' },
+        { question: 'A complete question two?', solution: 'A reviewed solution with enough detail.' },
+      ]),
+      JSON.stringify([
+        { question: 'সম্পূৰ্ণ প্ৰশ্ন এটা কি?', answer: 'পৰীক্ষিত উত্তৰটোত যথেষ্ট বিৱৰণ আছে।' },
+        { question: 'উত্তৰ নথকা প্ৰশ্ন নেকি?', answer: '' },
+        { question: 'সম্পূৰ্ণ প্ৰশ্ন দুটা কি?', solution: 'পৰীক্ষিত সমাধানটোত যথেষ্ট বিৱৰণ আছে।' },
+      ]),
+    ),
+    env.DB.prepare(`
+      INSERT INTO chapters (id, subject_id, title, slug, status, content_type, qa_en, qa_as)
+      VALUES ('faq-question-paper', 'related-subject', 'FAQ question paper', 'faq-question-paper',
+        'published', 'question_paper', '[{"question":"A question?","answer":"An answer that must not be exposed."}]',
+        '[{"question":"এটা প্ৰশ্ন?","answer":"প্ৰদৰ্শন কৰিব নলগীয়া উত্তৰ।"}]')
+    `),
   ]);
 });
 
@@ -201,6 +215,30 @@ describe('Assamese public content metadata', () => {
         ],
       },
     });
+  });
+
+  it('keeps Assamese FAQ content localized and excludes question papers', async () => {
+    const response = await get('/api/v1/content/chapters/faq-complete/faq-jsonld?lang=as');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      language: 'as',
+      entries: [
+        { question: 'সম্পূৰ্ণ প্ৰশ্ন এটা কি?', answer: 'পৰীক্ষিত উত্তৰটোত যথেষ্ট বিৱৰণ আছে।' },
+        { question: 'সম্পূৰ্ণ প্ৰশ্ন দুটা কি?', answer: 'পৰীক্ষিত সমাধানটোত যথেষ্ট বিৱৰণ আছে।' },
+      ],
+      faq_jsonld: { '@type': 'FAQPage', mainEntity: [{ name: 'সম্পূৰ্ণ প্ৰশ্ন এটা কি?' }, { name: 'সম্পূৰ্ণ প্ৰশ্ন দুটা কি?' }] },
+    });
+    const chapter = await get('/api/v1/content/chapter-by-slug-as/ahsec/class-12/science/related-subject/faq-example');
+    expect(chapter.status).toBe(200);
+    await expect(chapter.json()).resolves.toMatchObject({
+      faq_entries: [
+        { question: 'সম্পূৰ্ণ প্ৰশ্ন এটা কি?', answer: 'পৰীক্ষিত উত্তৰটোত যথেষ্ট বিৱৰণ আছে।' },
+        { question: 'সম্পূৰ্ণ প্ৰশ্ন দুটা কি?', answer: 'পৰীক্ষিত সমাধানটোত যথেষ্ট বিৱৰণ আছে।' },
+      ],
+      faq_jsonld: { '@type': 'FAQPage', mainEntity: [{ name: 'সম্পূৰ্ণ প্ৰশ্ন এটা কি?' }, { name: 'সম্পূৰ্ণ প্ৰশ্ন দুটা কি?' }] },
+    });
+    const paper = await get('/api/v1/content/chapters/faq-question-paper/faq-jsonld?lang=as');
+    await expect(paper.json()).resolves.toMatchObject({ entries: [], faq_jsonld: null });
   });
 
   it('prefers translated chapter metadata, slug, and topic titles', async () => {
