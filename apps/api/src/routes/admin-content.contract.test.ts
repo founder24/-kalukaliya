@@ -65,7 +65,7 @@ beforeAll(async () => {
     AI: {
       run: async (model: string, input: { text?: string[] }) => (
         model === '@cf/baai/bge-m3'
-          ? { data: (input.text ?? []).map(() => ({ values: [0.01, 0.02] })) }
+          ? { data: (input.text ?? []).map(() => Array(1024).fill(0.01)) }
           : { response: 'Generated contract-test notes.' }
       ),
     } as unknown as Ai,

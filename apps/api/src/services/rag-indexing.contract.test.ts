@@ -12,6 +12,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_ROOT = path.resolve(__dirname, '../../');
 const CHAPTER_ID = 'worker-atomic-chapter';
 const SUBJECT_ID = 'worker-atomic-subject';
+const LONG_CHAPTER_ID = `worker-atomic-${'x'.repeat(60)}`;
+const fakeEmbeddings = (text: string[] | undefined) => ({
+  data: (text ?? []).map(() => Array(1024).fill(0.01)),
+});
 
 function migrations(): string[] {
   return fs.readdirSync(path.join(API_ROOT, 'drizzle/migrations'))
@@ -32,6 +36,7 @@ type StoredVector = {
 
 class CredentialFreeVectorize {
   readonly records = new Map<string, StoredVector>();
+  readonly deleteCalls: string[][] = [];
 
   constructor() {
     this.records.set(`${CHAPTER_ID}_english_notes_0`, {
@@ -48,6 +53,10 @@ class CredentialFreeVectorize {
   }
 
   async deleteByIds(ids: string[]): Promise<{ count: number }> {
+    if (ids.some(id => new TextEncoder().encode(id).byteLength > 64)) {
+      throw new Error('Vectorize IDs may not exceed 64 bytes');
+    }
+    this.deleteCalls.push([...ids]);
     for (const id of ids) this.records.delete(id);
     return { count: ids.length };
   }
@@ -144,7 +153,7 @@ describe('Worker RAG repair consistency', () => {
         AI: {
           run: async (model: string, input: { text?: string[] }) => (
             model === '@cf/baai/bge-m3'
-              ? { data: (input.text ?? []).map(() => ({ values: [0.01, 0.02] })) }
+              ? fakeEmbeddings(input.text)
               : { response: '' }
           ),
         } as unknown as Ai,
@@ -216,6 +225,109 @@ describe('Worker RAG repair consistency', () => {
       expect(new Set(finalRows.results.map(row => row.vector_id))).toEqual(
         new Set(vectorize.matches().map(vector => vector.id)),
       );
+    } finally {
+      await proxy.dispose();
+    }
+  });
+
+  it('preserves existing vectors when the provider returns a malformed embedding response', async () => {
+    const proxy = await getPlatformProxy<Env>({
+      configPath: path.join(API_ROOT, 'wrangler.toml'),
+      remoteBindings: false,
+      persist: false,
+    });
+
+    try {
+      const vectorize = new CredentialFreeVectorize();
+      const env = {
+        ...proxy.env,
+        AI: { run: async () => ({ data: [] }) } as unknown as Ai,
+        VECTORIZE: vectorize,
+      } as unknown as Env;
+
+      for (const statement of migrations()) await env.DB.prepare(statement).run();
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO boards (id, name, slug) VALUES ('worker-atomic-board', 'Board', 'worker-atomic-board')`),
+        env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('worker-atomic-class', 'worker-atomic-board', 'Class', 'worker-atomic-class')`),
+        env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('worker-atomic-stream', 'worker-atomic-class', 'Science', 'worker-atomic-stream')`),
+        env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES (?, 'worker-atomic-stream', 'Physics', 'worker-atomic-subject', 1)`).bind(SUBJECT_ID),
+        env.DB.prepare(`INSERT INTO chapters (id, subject_id, title, slug, status, rag_text) VALUES (?, ?, 'Atomic repair chapter', 'atomic-repair-chapter', 'published', ?)`)
+          .bind(CHAPTER_ID, SUBJECT_ID, freshNotes()),
+        env.DB.prepare(`
+          INSERT INTO chunks
+            (id, chapter_id, subject_id, source_type, medium, chunk_type, content, vector_id, metadata)
+          VALUES ('old-chunk', ?, ?, 'notes', 'english', 'text', 'stale pre-repair chunk', ?, '{}')
+        `).bind(CHAPTER_ID, SUBJECT_ID, `${CHAPTER_ID}_english_notes_0`),
+      ]);
+
+      const result = await reindexChapterRag(env, CHAPTER_ID, ['notes']);
+      const remaining = await env.DB.prepare(`
+        SELECT vector_id, content FROM chunks
+        WHERE chapter_id = ? AND source_type = 'notes' AND medium = 'english'
+      `).bind(CHAPTER_ID).all<{ vector_id: string; content: string }>();
+
+      expect(result.notes?.error).toContain('unexpected vector count');
+      expect(vectorize.records.has(`${CHAPTER_ID}_english_notes_0`)).toBe(true);
+      expect(remaining.results).toEqual([
+        expect.objectContaining({
+          vector_id: `${CHAPTER_ID}_english_notes_0`,
+          content: 'stale pre-repair chunk',
+        }),
+      ]);
+      expect(vectorize.deleteCalls).toEqual([]);
+    } finally {
+      await proxy.dispose();
+    }
+  });
+
+  it('uses short stable IDs for bilingual QA even when legacy IDs exceed Vectorize limits', async () => {
+    const proxy = await getPlatformProxy<Env>({
+      configPath: path.join(API_ROOT, 'wrangler.toml'),
+      remoteBindings: false,
+      persist: false,
+    });
+
+    try {
+      const vectorize = new CredentialFreeVectorize();
+      const env = {
+        ...proxy.env,
+        AI: {
+          run: async (_model: string, input: { text?: string[] }) => fakeEmbeddings(input.text),
+        } as unknown as Ai,
+        VECTORIZE: vectorize,
+      } as unknown as Env;
+
+      for (const statement of migrations()) await env.DB.prepare(statement).run();
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO boards (id, name, slug) VALUES ('worker-atomic-board', 'Board', 'worker-atomic-board')`),
+        env.DB.prepare(`INSERT INTO classes (id, board_id, name, slug) VALUES ('worker-atomic-class', 'worker-atomic-board', 'Class', 'worker-atomic-class')`),
+        env.DB.prepare(`INSERT INTO streams (id, class_id, name, slug) VALUES ('worker-atomic-stream', 'worker-atomic-class', 'Science', 'worker-atomic-stream')`),
+        env.DB.prepare(`INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES (?, 'worker-atomic-stream', 'Physics', 'worker-atomic-subject', 1)`).bind(SUBJECT_ID),
+        env.DB.prepare(`
+          INSERT INTO chapters (id, subject_id, title, slug, status, content_type, qa_en, qa_as)
+          VALUES (?, ?, 'Bilingual QA chapter', 'bilingual-qa-chapter', 'published', 'syllabus',
+            '[{"question":"What is democracy?","answer":"Rule by the people."}]',
+            '[{"question":"গণতন্ত্ৰ কি?","answer":"জনসাধাৰণৰ দ্বাৰা শাসন।"}]')
+        `).bind(LONG_CHAPTER_ID, SUBJECT_ID),
+        env.DB.prepare(`
+          INSERT INTO chunks
+            (id, chapter_id, subject_id, source_type, medium, chunk_type, content, vector_id, metadata)
+          VALUES ('legacy-long-id', ?, ?, 'important_questions', 'assamese', 'text', 'legacy mapping', ?, '{}')
+        `).bind(LONG_CHAPTER_ID, SUBJECT_ID, `${LONG_CHAPTER_ID}_assamese_important_questions_0`),
+      ]);
+
+      const result = await reindexChapterRag(env, LONG_CHAPTER_ID, ['qa']);
+      const rows = await env.DB.prepare(`
+        SELECT vector_id, medium FROM chunks
+        WHERE chapter_id = ? AND source_type = 'important_questions'
+      `).bind(LONG_CHAPTER_ID).all<{ vector_id: string; medium: string }>();
+
+      expect(result.qa).toEqual({ chunks: 2 });
+      expect(rows.results).toHaveLength(2);
+      expect(rows.results.map(row => row.medium).sort()).toEqual(['assamese', 'english']);
+      expect(rows.results.every(row => new TextEncoder().encode(row.vector_id).byteLength <= 64)).toBe(true);
+      expect(vectorize.deleteCalls.flat().every(id => new TextEncoder().encode(id).byteLength <= 64)).toBe(true);
+      expect([...vectorize.records.values()].filter(row => row.metadata.sourceType === 'important_questions')).toHaveLength(2);
     } finally {
       await proxy.dispose();
     }
