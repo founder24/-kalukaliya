@@ -38,6 +38,44 @@ function textContent(fragment) {
     .trim();
 }
 
+function faqQuestionCount(html) {
+  let max = 0;
+  const collect = (value) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) collect(entry);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const type = value["@type"];
+    if (
+      (type === "FAQPage" || (Array.isArray(type) && type.includes("FAQPage"))) &&
+      Array.isArray(value.mainEntity)
+    ) {
+      const completeQuestions = value.mainEntity.filter((entry) =>
+        entry &&
+        typeof entry === "object" &&
+        String(entry.name || "").trim() &&
+        entry.acceptedAnswer &&
+        typeof entry.acceptedAnswer === "object" &&
+        String(entry.acceptedAnswer.text || "").trim(),
+      );
+      max = Math.max(max, completeQuestions.length);
+    }
+    if (value["@graph"]) collect(value["@graph"]);
+  };
+
+  for (const match of html.matchAll(
+    /<script\b(?=[^>]*\btype=["']application\/ld\+json["'])[^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    try {
+      collect(JSON.parse(match[1]));
+    } catch {
+      // Invalid JSON-LD is not FAQ evidence.
+    }
+  }
+  return max;
+}
+
 function renderedRootContent(html) {
   const rootOpen = html.match(/<div\b(?=[^>]*\bid\s*=\s*(["'])root\1)[^>]*>/i);
   if (!rootOpen || rootOpen.index == null) return null;
@@ -142,6 +180,7 @@ function validateRenderedPage({ distDir, filename, loc }) {
   }
 
   const html = fs.readFileSync(outputPath, "utf8");
+  const headContent = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] || "";
   const title = textContent((html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "");
   const rootContent = renderedRootContent(html);
   const h1 = textContent(
@@ -163,6 +202,27 @@ function validateRenderedPage({ distDir, filename, loc }) {
   const expectedCanonical = `${CANONICAL_SITE_ORIGIN}${route}`;
   const expectedMarkerPath = route;
   const isTopicPage = /\/topic\/[^/]+$/i.test(route);
+  const isChapterSitemap = /sitemap-chapters\.xml$/i.test(filename);
+  const isAssameseChapter = isChapterSitemap && route.startsWith("/as/") && !isTopicPage;
+  const isMakersSyllabus =
+    isChapterSitemap &&
+    !isTopicPage &&
+    route.includes("/course-syllabus-mdc-01013-makers-of-modern-assam-semester-1");
+  const htmlLang = html.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1]?.toLowerCase();
+  const descriptionTag = tags.find(
+    (tag) =>
+      tag.startsWith("<meta") &&
+      (attribute(tag, "name") || "").toLowerCase() === "description",
+  );
+  const description = descriptionTag ? attribute(descriptionTag, "content") || "" : "";
+  const faqCount = faqQuestionCount(headContent);
+  const robotsTag = tags.find(
+    (tag) =>
+      tag.startsWith("<meta") &&
+      (attribute(tag, "name") || "").toLowerCase() === "robots",
+  );
+  const robotsContent = robotsTag ? (attribute(robotsTag, "content") || "").toLowerCase() : "";
+  const renderedWords = textContent(rootContent || "").split(/\s+/).filter(Boolean).length;
 
   if (!title) issues.push(`${loc}: rendered title is missing`);
   if (GENERIC_SHELL.test(title)) issues.push(`${loc}: rendered title is the generic SPA shell`);
@@ -193,9 +253,86 @@ function validateRenderedPage({ distDir, filename, loc }) {
   if (!new RegExp(`\\bdata-hydrate=["']${hydrationKind}["']`, "i").test(html)) {
     issues.push(`${loc}: prerendered ${hydrationKind} hydration marker is missing`);
   }
+  if (isAssameseChapter) {
+    if (htmlLang !== "as") {
+      issues.push(`${loc}: Assamese chapter HTML lang must be as (got ${htmlLang || "missing"})`);
+    }
+    if (
+      !/[\u0980-\u09FF]/u.test(title) ||
+      !/[\u0980-\u09FF]/u.test(h1) ||
+      !/[\u0980-\u09FF]/u.test(description)
+    ) {
+      issues.push(`${loc}: Assamese chapter title, H1, and description must use Assamese content`);
+    }
+    if (faqCount < 5) {
+      issues.push(`${loc}: Assamese chapter FAQPage JSON-LD needs at least five complete questions`);
+    }
+    if (robotsContent.includes("noindex")) {
+      issues.push(`${loc}: Assamese chapter sitemap page must not be marked noindex`);
+    }
+  }
+  if (isMakersSyllabus) {
+    const expectedLanguage = route.startsWith("/as/") ? "as" : "en";
+    if (htmlLang !== expectedLanguage) {
+      issues.push(`${loc}: Makers of Modern Assam page has the wrong HTML language`);
+    }
+    if (!description.trim()) {
+      issues.push(`${loc}: Makers of Modern Assam page is missing its description metadata`);
+    }
+    if (
+      expectedLanguage === "as" &&
+      (!/[\u0980-\u09FF]/u.test(title) ||
+        !/[\u0980-\u09FF]/u.test(h1) ||
+        !/[\u0980-\u09FF]/u.test(description))
+    ) {
+      issues.push(`${loc}: Assamese syllabus title, H1, and description must use Assamese content`);
+    }
+    if (
+      expectedLanguage === "en" &&
+      (!/Makers of Modern Assam/i.test(title) || !/Makers of Modern Assam/i.test(h1))
+    ) {
+      issues.push(`${loc}: English syllabus title and H1 must identify Makers of Modern Assam`);
+    }
+    if (expectedLanguage === "en" && !/\p{Script=Latin}/u.test(description)) {
+      issues.push(`${loc}: English syllabus description must use English content`);
+    }
+    if (renderedWords < 40) {
+      issues.push(`${loc}: syllabus HTML must include its substantial chapter notes and answers`);
+    }
+    if (robotsContent.includes("noindex")) {
+      issues.push(`${loc}: published syllabus page must not be marked noindex`);
+    }
+    if (faqCount !== 5) {
+      issues.push(`${loc}: Makers of Modern Assam page must contain exactly five FAQPage questions (got ${faqCount})`);
+    }
+    const alternateTags = tags.filter((tag) =>
+      tag.startsWith("<link") &&
+      (attribute(tag, "rel") || "").toLowerCase() === "alternate",
+    );
+    const alternateByLocale = new Map(
+      alternateTags.map((tag) => [
+        (attribute(tag, "hreflang") || "").toLowerCase(),
+        attribute(tag, "href"),
+      ]),
+    );
+    const expectedEnglishPath = route.startsWith("/as/") ? route.slice(3) : route;
+    const expectedAssamesePath = route.startsWith("/as/") ? route : `/as${route}`;
+    const localePathsMatch = ["en", "as"].every((locale) => {
+      const href = alternateByLocale.get(locale);
+      if (!href) return false;
+      try {
+        return normalizedPathname(new URL(href, pageUrl.origin).pathname) ===
+          (locale === "en" ? expectedEnglishPath : expectedAssamesePath);
+      } catch {
+        return false;
+      }
+    });
+    if (!localePathsMatch) {
+      issues.push(`${loc}: bilingual syllabus page must declare en and as alternate links`);
+    }
+  }
   if (isTopicPage) {
     const topicTitle = h1;
-    const htmlLang = html.match(/<html\b[^>]*\blang=["']([^"']+)["']/i)?.[1]?.toLowerCase();
     const expectedLang = route.startsWith("/as/") ? "as" : "en";
     if (htmlLang !== expectedLang) {
       issues.push(`${loc}: topic language must be ${expectedLang} (got ${htmlLang || "missing"})`);

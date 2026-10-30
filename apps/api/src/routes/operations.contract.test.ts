@@ -412,6 +412,84 @@ describe('Worker-native site-operation routes', () => {
     expect(await emptyTopicIndex.text()).not.toContain('sitemap-topics.xml');
   });
 
+  it('sitemaps only complete paired Assamese chapter pages', async () => {
+    const englishFaqs = Array.from({ length: 5 }, (_, index) => ({
+      question_en: `What does this course examine in section ${index + 1}?`,
+      answer_en: `It examines social and political change in modern Assam in section ${index + 1}.`,
+    }));
+    const assameseFaqs = Array.from({ length: 5 }, (_, index) => ({
+      question_as: `এই পাঠ্যক্ৰমৰ ${index + 1} নং অংশত কি আলোচনা কৰা হৈছে?`,
+      answer_as: `ই আধুনিক অসমৰ সামাজিক আৰু ৰাজনৈতিক পৰিৱৰ্তন ${index + 1} নং অংশত আলোচনা কৰে।`,
+    }));
+    const complete = {
+      ...chapterRows[0]!,
+      title_as: 'আধুনিক অসমৰ পাঠ্যক্ৰম',
+      chapter_slug_as: 'আধুনিক-অসমৰ-পাঠ্যক্ৰম',
+      notes_as: 'অসমীয়া ভাষাত লিখা সম্পূৰ্ণ পাঠ্যক্ৰমৰ টোকা।',
+      meta_description_as: 'আধুনিক অসমৰ ইতিহাস আৰু সমাজৰ অসমীয়া পাঠ্যক্ৰম।',
+      content_type: 'chapter',
+      qa_en: JSON.stringify(englishFaqs),
+      qa_as: JSON.stringify(assameseFaqs),
+    };
+    const rows = [
+      complete,
+      { ...complete },
+      { ...complete },
+      {
+        ...complete,
+        chapter_slug: 'missing-assamese-answers',
+        chapter_slug_as: 'অসমীয়া-উত্তৰ-নাই',
+        qa_as: JSON.stringify(assameseFaqs.slice(0, 1)),
+      },
+      {
+        ...complete,
+        chapter_slug: 'incomplete-five-faq-pair',
+        chapter_slug_as: 'পাঁচটা-প্ৰশ্ন-অসম্পূৰ্ণ',
+        qa_en: JSON.stringify(englishFaqs.slice(0, 4)),
+        qa_as: JSON.stringify(assameseFaqs.slice(0, 4)),
+      },
+      {
+        ...complete,
+        chapter_slug: 'missing-assamese-description',
+        chapter_slug_as: 'অসমীয়া-বিৱৰণ-নাই',
+        meta_description_as: '',
+      },
+      {
+        ...complete,
+        chapter_slug: 'missing-assamese-slug',
+        chapter_slug_as: '',
+      },
+      {
+        ...complete,
+        chapter_slug: 'english-only-assamese-metadata',
+        chapter_slug_as: 'english-only-assamese-metadata',
+        meta_description_as: 'English description only.',
+      },
+      {
+        ...complete,
+        chapter_slug: 'question-paper',
+        chapter_slug_as: 'প্ৰশ্নকাকত',
+        content_type: 'question_paper',
+      },
+    ];
+    const env = {
+      ...testEnv(),
+      DB: { prepare: () => ({ all: async () => ({ results: rows }) }) },
+    } as unknown as Env;
+    const response = await api.fetch(request('/api/v1/seo/sitemap-chapters.xml'), env);
+    const xml = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(xml).toContain('/as/ahsec/class-12/physics/%E0%A6%86%E0%A6%A7%E0%A7%81%E0%A6%A8%E0%A6%BF%E0%A6%95-%E0%A6%85%E0%A6%B8%E0%A6%AE%E0%A7%B0-%E0%A6%AA%E0%A6%BE%E0%A6%A0%E0%A7%8D%E0%A6%AF%E0%A6%95%E0%A7%8D%E0%A7%B0%E0%A6%AE');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/missing-assamese-answers');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/incomplete-five-faq-pair');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/missing-assamese-description');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/missing-assamese-slug');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/english-only-assamese-metadata');
+    expect(xml).not.toContain('/as/ahsec/class-12/physics/%E0%A6%AA%E0%A7%8D%E0%A7%B0%E0%A6%B6%E0%A7%8D%E0%A6%A8%E0%A6%95%E0%A6%BE%E0%A6%A4');
+    expect((xml.match(/\/as\//g) ?? []).length).toBe(1);
+  });
+
   it('sitemaps only complete reviewed topic pages with explicit question links', async () => {
     const substantial = Array.from({ length: 40 }, (_, i) => `concept${i}`).join(' ');
     const row = {

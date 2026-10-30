@@ -28,16 +28,23 @@ export function batchVectorIds(ids: string[]): string[][] {
 function parse(value: string | null): Array<Record<string, string>> {
   try { return value ? JSON.parse(value) as Array<Record<string, string>> : []; } catch { return []; }
 }
-function words(text: string): string[] {
-  const all = text.trim().split(/\s+/);
-  if (all.length <= 400) return all.length ? [text.trim()] : [];
+export function splitRagText(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const all = trimmed.split(/\s+/);
+  if (all.length <= 400) return [trimmed];
   const result: string[] = [];
   for (let start = 0; start < all.length; start += 350) result.push(all.slice(start, start + 400).join(' '));
   return result;
 }
-function notes(value: string | null, sections: string | null): string | null {
+export function notesTextForRag(value: string | null, sections: string | null): string | null {
   const parsed = parse(sections);
-  return parsed.length ? parsed.map(s => [s.title ? `## ${s.title}` : '', s.content ?? ''].filter(Boolean).join('\n')).join('\n\n') : value;
+  return parsed.length ? parsed.map(s => [s.title ? '## ' + s.title : '', s.content ?? ''].filter(Boolean).join('\n')).join('\n\n') : value;
+}
+export function publishedTopicTextForRag(value: string | null, medium: 'english' | 'assamese'): string {
+  return parse(value).filter(topic => topic.status === 'published')
+    .map(topic => [medium === 'english' ? topic.title : topic.title_as || topic.title, medium === 'english' ? topic.content : topic.content_as].filter(Boolean).join('\n'))
+    .filter(Boolean).join('\n\n');
 }
 function vectorIdByteLength(id: string): number {
   return new TextEncoder().encode(id).byteLength;
@@ -198,13 +205,11 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
   const db = createDb(env.DB);
   const chapter = await db.select().from(chapters).where(eq(chapters.id, chapterId)).get();
   if (!chapter) throw new Error('Chapter not found');
-  const topicText = parse(chapter.publishedTopics).filter(topic => topic.status === 'published')
-    .map(topic => [topic.title, topic.content].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
-  const topicTextAs = parse(chapter.publishedTopics).filter(topic => topic.status === 'published')
-    .map(topic => [topic.title_as || topic.title, topic.content_as].filter(Boolean).join('\n')).filter(Boolean).join('\n\n');
+  const topicText = publishedTopicTextForRag(chapter.publishedTopics, 'english');
+  const topicTextAs = publishedTopicTextForRag(chapter.publishedTopics, 'assamese');
   const append = (base: string | null, topics: string) => [base, topics].filter(Boolean).join('\n\n') || null;
   const text: Record<RagScope, [string | null, string | null]> = {
-    notes: [append(notes(chapter.ragText ?? chapter.notesEn, chapter.ragSectionsEn), topicText), append(notes(chapter.ragTextAs ?? chapter.notesAs, chapter.ragSectionsAs), topicTextAs)],
+    notes: [append(notesTextForRag(chapter.ragText ?? chapter.notesEn, chapter.ragSectionsEn), topicText), append(notesTextForRag(chapter.ragTextAs ?? chapter.notesAs, chapter.ragSectionsAs), topicTextAs)],
     qa: [qaTextFromApprovedPairs(chapter.qaEn), qaTextFromApprovedPairs(chapter.qaAs)],
     // Chapter rag_text belongs to notes, never PYQ. File-only PYQs have no
     // extractable text and are deliberately not embedded until OCR text exists.
@@ -214,8 +219,8 @@ export async function reindexChapterRag(env: Env, chapterId: string, requested: 
   for (const scope of requested) {
     try {
       const [en, as] = text[scope];
-      const englishContent = en?.trim() ? words(en) : [];
-      const assameseContent = as?.trim() ? words(as) : [];
+      const englishContent = en?.trim() ? splitRagText(en) : [];
+      const assameseContent = as?.trim() ? splitRagText(as) : [];
       // Validate both language responses before removing the existing vectors.
       const [englishVectors, assameseVectors, chapterKey] = await Promise.all([
         embedContent(env, englishContent),

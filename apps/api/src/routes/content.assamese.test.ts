@@ -518,3 +518,49 @@ describe('Assamese public content metadata', () => {
     expect(assamese.cross_chapter).toEqual([]);
   });
 });
+
+describe('MDC-01013 bilingual FAQ answer migration', () => {
+  it('expands each published stream copy and marks its RAG index stale', async () => {
+    const ids = [
+      '6a90409b-3488-47ef-b443-e4c2f1bdf469',
+      '9bf76bd3-b7c5-4a51-b66c-10d3a0b69d8d',
+      'fe2d8e57-7d3a-4066-8d8c-9f6986b5c623',
+    ];
+    const shortQa = JSON.stringify(Array.from({ length: 5 }, (_, index) => ({
+      question: `Question ${index + 1}?`,
+      answer: 'Short answer.',
+    })));
+    await env.DB.batch(ids.map((id, index) => env.DB.prepare(`
+      INSERT INTO chapters (
+        id, subject_id, title, slug, status, content_type, qa_en, qa_as
+      ) VALUES (?, ?, 'MDC-01013 fixture', 'course-syllabus-mdc-01013-makers-of-modern-assam-semester-1',
+        'published', 'notes', ?, ?)
+    `).bind(id, `fixture-subject-${index}`, shortQa, shortQa)));
+
+    const migration = fs.readFileSync(
+      path.join(API_ROOT, 'drizzle/migrations/0051_expand_mdc01013_bilingual_faq_answers.sql'),
+      'utf8',
+    );
+    for (const statement of migration.split(';').map(fragment => fragment.split('\n')
+      .filter(line => line.trim() && !line.trim().startsWith('--')).join('\n').trim()).filter(Boolean)) {
+      await env.DB.prepare(statement).run();
+    }
+
+    const rows = await env.DB.prepare(`
+      SELECT id, qa_en, qa_as, rag_updated_at
+      FROM chapters
+      WHERE id IN (${ids.map(() => '?').join(', ')})
+      ORDER BY id
+    `).bind(...ids).all<{ id: string; qa_en: string; qa_as: string; rag_updated_at: number | null }>();
+    expect(rows.results).toHaveLength(3);
+    for (const row of rows.results) {
+      const answersEn = (JSON.parse(row.qa_en) as Array<{ answer: string }>).map(item => item.answer);
+      const answersAs = (JSON.parse(row.qa_as) as Array<{ answer: string }>).map(item => item.answer);
+      expect(answersEn).toHaveLength(5);
+      expect(answersAs).toHaveLength(5);
+      expect(answersEn.every(answer => answer.trim().split(/\s+/u).length >= 20)).toBe(true);
+      expect(answersAs.every(answer => answer.trim().split(/\s+/u).length >= 20)).toBe(true);
+      expect(row.rag_updated_at).toBeGreaterThan(0);
+    }
+  });
+});

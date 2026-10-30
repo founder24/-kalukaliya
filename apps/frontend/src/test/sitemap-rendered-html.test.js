@@ -12,6 +12,12 @@ function createDist({
   omitPage = false,
   malformedTopic = false,
   chapterRoute = "/ahsec/hs-1st-year/physics/laws-of-motion",
+  assameseChapterRoute = null,
+  assameseFaqCount = 2,
+  assameseHtmlLang = "as",
+  assameseDescription = "আধুনিক অসমৰ ইতিহাস আৰু সমাজৰ অসমীয়া পাঠ্যক্ৰম।",
+  assameseRobotsNoindex = false,
+  englishFaqCount = 5,
   subjectOrigin = "https://syrabit.ai",
   duplicateTopicLoc = null,
 } = {}) {
@@ -32,7 +38,9 @@ function createDist({
   );
   fs.writeFileSync(
     path.join(root, "sitemap-chapters.xml"),
-    `<urlset><url><loc>https://syrabit.ai${encodeURI(chapterRoute)}</loc></url></urlset>`,
+    `<urlset><url><loc>https://syrabit.ai${encodeURI(chapterRoute)}</loc></url>
+      ${assameseChapterRoute ? `<url><loc>https://syrabit.ai${encodeURI(assameseChapterRoute)}</loc></url>` : ""}
+    </urlset>`,
   );
   fs.writeFileSync(
     path.join(root, "sitemap-topics.xml"),
@@ -44,20 +52,45 @@ function createDist({
   fs.writeFileSync(path.join(root, "sitemap-static.xml"), "<urlset></urlset>");
 
   const shellTitle = "Syrabit.ai — Educational Browser For Assam Board Students";
+  const isMakersSyllabus = chapterRoute.includes(
+    "/course-syllabus-mdc-01013-makers-of-modern-assam-semester-1",
+  );
   const chapterTitle = genericShell
     ? shellTitle
-    : "Laws of Motion — Physics | AHSEC Notes";
+    : isMakersSyllabus
+      ? "Makers of Modern Assam — Gauhati University FYUGP Notes"
+      : "Laws of Motion — Physics | AHSEC Notes";
+  const englishFaq = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: Array.from({ length: englishFaqCount }, (_, index) => ({
+      "@type": "Question",
+      name: `Question ${index + 1} about the course?`,
+      acceptedAnswer: { "@type": "Answer", text: `A reviewed course answer number ${index + 1}.` },
+    })),
+  };
+  const bilingualAlternates = assameseChapterRoute
+    ? `<link rel="alternate" hreflang="en" href="https://syrabit.ai${encodeURI(chapterRoute)}">
+       <link rel="alternate" hreflang="as" href="https://syrabit.ai${encodeURI(assameseChapterRoute)}">`
+    : "";
+  const englishCourseText = Array.from(
+    { length: 45 },
+    (_, index) => `syllabus notes ${index}`,
+  ).join(" ");
   const subjectHtml = `<html><head><title>Physics — AHSEC Notes</title>
     <link rel="canonical" href="https://syrabit.ai/ahsec/hs-1st-year/physics">
     <meta name="syrabit-prerender-path" content="/ahsec/hs-1st-year/physics"></head>
     <body><noscript><h1>${shellTitle}</h1></noscript>
       <div id="root" data-hydrate="subject"><main><h1>Physics</h1></main></div>
     </body></html>`;
-  const chapterHtml = `<html><head><title>${chapterTitle}</title>
+  const chapterHtml = `<html lang="en"><head><title>${chapterTitle}</title>
+    <meta name="description" content="${isMakersSyllabus ? "Gauhati University FYUGP Semester 1 syllabus for MDC-01013." : "Study notes for Laws of Motion."}">
     <link rel="canonical" href="https://syrabit.ai${encodeURI(chapterRoute)}">
+    ${bilingualAlternates}
+    ${isMakersSyllabus ? `<script type="application/ld+json" data-pm="1">${JSON.stringify(englishFaq)}</script>` : ""}
     <meta name="syrabit-prerender-path" content="${chapterRoute}"></head>
     <body><noscript><h1>${shellTitle}</h1></noscript>
-      <div id="root" data-hydrate="chapter"><main><h1>${genericShell ? shellTitle : "Laws of Motion"}</h1></main></div>
+      <div id="root" data-hydrate="chapter"><main><h1>${genericShell ? shellTitle : isMakersSyllabus ? "Makers of Modern Assam" : "Laws of Motion"}</h1>${isMakersSyllabus ? `<p>${englishCourseText}</p>` : ""}</main></div>
     </body></html>`;
   const topicBody = malformedTopic
     ? `<h1>Inertia</h1><p>Short.</p>`
@@ -80,6 +113,41 @@ function createDist({
       path.join(chapterOutputDir, "index.html"),
       chapterHtml,
     );
+  }
+  if (assameseChapterRoute) {
+    const localizedFaq = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: Array.from({ length: assameseFaqCount }, (_, index) => ({
+        "@type": "Question",
+        name: `অসমীয়া প্ৰশ্ন ${index + 1}?`,
+        acceptedAnswer: { "@type": "Answer", text: `অসমীয়া উত্তৰ ${index + 1} এই পাঠ্যক্ৰমৰ বিষয়ে।` },
+      })),
+    };
+    const localizedTitle = "আধুনিক অসমৰ নিৰ্মাতা সকল";
+    const englishCanonical = `https://syrabit.ai${encodeURI(chapterRoute)}`;
+    const localizedCanonical = `https://syrabit.ai${encodeURI(assameseChapterRoute)}`;
+    const localizedCourseText = Array.from(
+      { length: 45 },
+      (_, index) => `অসমীয়া পাঠ্যক্ৰমৰ টোকা ${index}`,
+    ).join(" ");
+    const localizedHtml = `<html lang="${assameseHtmlLang}"><head><title>${localizedTitle} — গুৱাহাটী বিশ্ববিদ্যালয় | Syrabit.ai</title>
+      <meta name="description" content="${assameseDescription}">
+      ${assameseRobotsNoindex ? `<meta name="robots" content="noindex">` : ""}
+      <link rel="canonical" href="${localizedCanonical}">
+      <link rel="alternate" hreflang="en" href="${englishCanonical}">
+      <link rel="alternate" hreflang="as" href="${localizedCanonical}">
+      <meta name="syrabit-prerender-path" content="${assameseChapterRoute}">
+      <script type="application/ld+json" data-pm="1">${JSON.stringify(localizedFaq)}</script></head>
+      <body><noscript><h1>${shellTitle}</h1></noscript>
+        <div id="root" data-hydrate="chapter"><main><h1>${localizedTitle}</h1><p>${assameseDescription} ${localizedCourseText}</p></main></div>
+      </body></html>`;
+    const localizedOutputDir = path.join(
+      root,
+      ...assameseChapterRoute.split("/").filter(Boolean),
+    );
+    fs.mkdirSync(localizedOutputDir, { recursive: true });
+    fs.writeFileSync(path.join(localizedOutputDir, "index.html"), localizedHtml);
   }
   fs.mkdirSync(
     path.join(root, "ahsec/hs-1st-year/physics/laws-of-motion/topic/inertia"),
@@ -111,6 +179,63 @@ describe("sitemap rendered HTML release check", () => {
 
     expect(result.checked).toBe(3);
     expect(result.errors).toEqual([]);
+  });
+
+  it("accepts paired syllabus pages with Assamese metadata and FAQ schema in initial HTML", () => {
+    const englishRoute =
+      "/degree/1st-semester/makers-of-modern-assam-mdc-01013/course-syllabus-mdc-01013-makers-of-modern-assam-semester-1";
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({
+        chapterRoute: englishRoute,
+        assameseChapterRoute: `/as${englishRoute}`,
+        assameseFaqCount: 5,
+      }),
+    });
+
+    expect(result.checked).toBe(4);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects an Assamese syllabus snapshot without five matching FAQ answers", () => {
+    const englishRoute =
+      "/degree/1st-semester/makers-of-modern-assam-mdc-01013/course-syllabus-mdc-01013-makers-of-modern-assam-semester-1";
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({
+        chapterRoute: englishRoute,
+        assameseChapterRoute: `/as${englishRoute}`,
+        assameseFaqCount: 4,
+      }),
+    });
+
+    expect(result.errors.some((error) => error.includes("exactly five FAQPage questions"))).toBe(true);
+  });
+
+  it("rejects Assamese sitemap pages with English metadata or the wrong document language", () => {
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({
+        assameseChapterRoute: "/as/ahsec/hs-1st-year/physics/গতিৰ-নিয়ম",
+        assameseHtmlLang: "en",
+        assameseDescription: "English description only.",
+      }),
+    });
+
+    expect(result.errors.some((error) => error.includes("HTML lang must be as"))).toBe(true);
+    expect(result.errors.some((error) => error.includes("title, H1, and description"))).toBe(true);
+  });
+
+  it("rejects a published bilingual syllabus page marked noindex", () => {
+    const englishRoute =
+      "/degree/1st-semester/makers-of-modern-assam-mdc-01013/course-syllabus-mdc-01013-makers-of-modern-assam-semester-1";
+    const result = verifySitemapRenderedHtml({
+      distDir: createDist({
+        chapterRoute: englishRoute,
+        assameseChapterRoute: `/as${englishRoute}`,
+        assameseFaqCount: 5,
+        assameseRobotsNoindex: true,
+      }),
+    });
+
+    expect(result.errors.some((error) => error.includes("must not be marked noindex"))).toBe(true);
   });
 
   it("rejects a subject sitemap URL on a non-canonical host", () => {

@@ -19,6 +19,7 @@ import StatusQuickToggle from './content-editor/StatusQuickToggle';
 import RagJobsPanel from './content-editor/RagJobsPanel';
 import PublishJobsPanel from './content-editor/PublishJobTracker';
 import TopicAnswerManager from './content-editor/TopicAnswerManager';
+import SubjectReadinessPanel from './content-editor/SubjectReadinessPanel';
 
 import { SectionErrorBoundary } from '@/components/ErrorBoundary';
 export default function AdminContentEditor({ adminToken, user, onNavigate, hubContext, onHubContext, onHierarchyChange, staffMode = false }) {
@@ -927,6 +928,9 @@ export default function AdminContentEditor({ adminToken, user, onNavigate, hubCo
                         </button>
                       )}
                     </div>
+                    {subjectData?.publish_readiness?.required && (
+                      <SubjectReadinessPanel readiness={subjectData.publish_readiness} />
+                    )}
                     {!staffMode && <ThumbnailStudio adminToken={adminToken} selSubject={selSubject} subjectData={subjectData} onReload={() => reloadAll()} />}
                     {chaptersLoading ? (
                       <div className="flex items-center justify-center py-16 gap-3">
