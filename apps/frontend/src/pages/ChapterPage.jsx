@@ -612,7 +612,7 @@ export default function ChapterPage() {
     if (!data?.chapter_id) return;
     let cancelled = false;
     apiClient()
-      .get(`/content/chapters/${data.chapter_id}/faq-jsonld`)
+      .get(`/content/chapters/${data.chapter_id}/faq-jsonld${isAssamesePath ? '?lang=as' : ''}`)
       .then(r => {
         if (cancelled) return;
         const entries = r?.data?.entries;
@@ -620,7 +620,7 @@ export default function ChapterPage() {
       })
       .catch(() => { /* 404 expected when no parseable MCQs — silent skip */ });
     return () => { cancelled = true; };
-  }, [data?.chapter_id]);
+  }, [data?.chapter_id, isAssamesePath]);
 
   // Reset content tab when the chapter changes so students never see a blank
   // content area after cross-chapter navigation. If the URL already carries a
