@@ -12,7 +12,7 @@ import {
   LIBRARY_SEO_URL,
 } from '@/lib/librarySeo';
 import { Analytics } from '@/utils/analytics';
-import { groupLibrarySubjects } from '@/utils/librarySubjectGrouping';
+import { deduplicateSharedSubjects, groupLibrarySubjects } from '@/utils/librarySubjectGrouping';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useContentLang } from '@/context/LanguageContext';
@@ -208,7 +208,14 @@ export default function LibraryPage() {
   );
   const { data: savedSubjects = [] } = useSavedSubjects(user);
   const toggleSaved = useToggleSavedSubject(user);
-  const handleToggleSave = useCallback((id) => toggleSaved.mutate(id), [toggleSaved]);
+  const handleToggleSave = useCallback(async (id, duplicateIds = []) => {
+    const savedCopies = [id, ...duplicateIds].filter((subjectId) => savedSubjects.includes(subjectId));
+    if (savedCopies.length) {
+      for (const subjectId of savedCopies) await toggleSaved.mutateAsync(subjectId);
+      return;
+    }
+    toggleSaved.mutate(id);
+  }, [toggleSaved, savedSubjects]);
 
   useEffect(() => {
     const handleContentUploaded = () => {
@@ -262,6 +269,12 @@ export default function LibraryPage() {
   }, [subjects, streamMap, classMap, boardMap]);
 
   const savedSubjectsSet = useMemo(() => new Set(savedSubjects), [savedSubjects]);
+  const catalogSubjects = useMemo(
+    () => enrichedSubjects
+      .filter((subject) => !subject.status || ['published', 'active'].includes(subject.status))
+      .map((subject) => ({ ...subject, is_saved: savedSubjectsSet.has(subject.id) })),
+    [enrichedSubjects, savedSubjectsSet],
+  );
   const dynamicStreamChips = useMemo(() => {
     const streamSlugs = new Set();
     const chips = [];
@@ -327,26 +340,34 @@ export default function LibraryPage() {
   const filteredSubjects = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
     const seen = new Set();
-    return enrichedSubjects.filter((sub) => {
+    const matchingSubjects = enrichedSubjects.filter((sub) => {
       if (seen.has(sub.id)) return false;
       seen.add(sub.id);
       if (sub.status && !['published', 'active'].includes(sub.status)) return false;
       if (activeFilter === 'saved') {
         if (!savedSubjectsSet.has(sub.id)) return false;
       } else if (activeFilter.startsWith('class:')) {
-        if (`class:${classMap.get(streamMap.get(sub.stream_id)?.class_id)?.id}` !== activeFilter) return false;
+        if ('class:' + classMap.get(streamMap.get(sub.stream_id)?.class_id)?.id !== activeFilter) return false;
       } else if (activeFilter !== 'all') {
         if (sub.streamSlug !== activeFilter) return false;
       }
       if (q && searchScore(sub, q) === 0) return false;
       return true;
     });
+    return deduplicateSharedSubjects(
+      matchingSubjects.map((sub) => ({ ...sub, is_saved: savedSubjectsSet.has(sub.id) })),
+      streamMap,
+      catalogSubjects,
+    );
   }, [enrichedSubjects, activeFilter, deferredQuery, savedSubjectsSet,
-      classMap, streamMap, searchScore]);
-
+      classMap, streamMap, searchScore, catalogSubjects]);
+  const uniqueCatalogSubjects = useMemo(
+    () => deduplicateSharedSubjects(catalogSubjects, streamMap, catalogSubjects),
+    [catalogSubjects, streamMap],
+  );
   const totalSeoTopics = useMemo(() => {
-    return enrichedSubjects.reduce((sum, s) => sum + (s.seo_stats?.topic_count || 0), 0);
-  }, [enrichedSubjects]);
+    return uniqueCatalogSubjects.reduce((sum, subject) => sum + (subject.seo_stats?.topic_count || 0), 0);
+  }, [uniqueCatalogSubjects]);
 
   // JSON-LD now emitted via PageMeta (pageType="library"); see src/lib/jsonld.js
 
@@ -528,12 +549,12 @@ export default function LibraryPage() {
   // below-fold remainder after hydration. This prevents React from replacing
   // an already-painted LCP card when localStorage ranking becomes available.
   const stableBrowserSubjects = useMemo(
-    () => groupLibrarySubjects(filteredSubjects, streamMap, classMap),
-    [filteredSubjects, streamMap, classMap],
+    () => groupLibrarySubjects(filteredSubjects, streamMap, classMap, catalogSubjects),
+    [filteredSubjects, streamMap, classMap, catalogSubjects],
   );
   const rankedBrowserSubjects = useMemo(
-    () => groupLibrarySubjects(rankedSubjects, streamMap, classMap),
-    [rankedSubjects, streamMap, classMap],
+    () => groupLibrarySubjects(rankedSubjects, streamMap, classMap, catalogSubjects),
+    [rankedSubjects, streamMap, classMap, catalogSubjects],
   );
   const browserSubjects = useMemo(() => {
     const stableFirstChunk = stableBrowserSubjects.slice(0, VIRTUAL_CHUNK);
@@ -564,7 +585,7 @@ export default function LibraryPage() {
   );
 
   const seoTitle = LIBRARY_SEO_TITLE;
-  const seoDescription = getLibrarySeoDescription(subjects.length, totalSeoTopics);
+  const seoDescription = getLibrarySeoDescription(uniqueCatalogSubjects.length, totalSeoTopics);
   const seoKeywords = LIBRARY_SEO_KEYWORDS;
 
   if (bundleLoading) {
@@ -872,7 +893,7 @@ export default function LibraryPage() {
                       key={sub.id}
                       sub={sub}
                       chapters={chaptersBySubject.get(sub.id) || []}
-                      isSaved={savedSubjects.includes(sub.id)}
+                      isSaved={sub.is_saved ?? savedSubjects.includes(sub.id)}
                       onToggleSave={handleToggleSave}
                       onAskAI={handleAskAI}
                       index={index}

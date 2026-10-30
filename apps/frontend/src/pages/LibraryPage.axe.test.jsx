@@ -51,7 +51,13 @@ vi.mock('@/hooks/useUser', () => ({
 }));
 
 vi.mock('./library/SubjectCard', () => ({
-  default: ({ sub }) => <div data-testid="library-subject-card" data-subject-id={sub.id} />,
+  default: ({ sub }) => (
+    <div
+      data-testid="library-subject-card"
+      data-subject-id={sub.id}
+      data-streams={(sub.available_stream_names || []).join(" | ")}
+    />
+  ),
 }));
 
 vi.mock('./library/VirtualSubjectGrid', () => ({
@@ -168,6 +174,38 @@ describe('LibraryPage — axe accessibility audit', () => {
     });
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it('renders a shared course once and lists all of its streams', async () => {
+    const sharedBundle = {
+      boards: [{ id: 'degree', name: 'Degree' }],
+      classes: [{ id: 'semester-1', name: '1st Semester', board_id: 'degree' }],
+      streams: [
+        { id: '6a19e10d4d8e6ddb2deb7dca', class_id: 'semester-1', name: 'B.A.', slug: 'ba' },
+        { id: '6a19e10d4d8e6ddb2deb7dcb', class_id: 'semester-1', name: 'B.Com', slug: 'bcom' },
+        { id: '6a19e10e4d8e6ddb2deb7dcc', class_id: 'semester-1', name: 'B.Sc', slug: 'bsc' },
+      ],
+      subjects: [
+        { id: 'd6140f1e-b264-4f10-a943-9345d145ec13', slug: 'makers-of-modern-assam-mdc-01013', name: 'Makers of Modern Assam (MDC-01013)', stream_id: '6a19e10d4d8e6ddb2deb7dca' },
+        { id: '181f185b-cbf2-4bd0-a412-994d09286b71', slug: 'makers-of-modern-assam-mdc-01013', name: 'Makers of Modern Assam (MDC-01013)', stream_id: '6a19e10d4d8e6ddb2deb7dcb' },
+        { id: '6cce092a-49c5-4f68-8a25-f8b0e3d50052', slug: 'makers-of-modern-assam-mdc-01013', name: 'Makers of Modern Assam (MDC-01013)', stream_id: '6a19e10e4d8e6ddb2deb7dcc' },
+      ],
+    };
+    vi.mocked(useLibraryBundleSlim).mockReturnValue({ data: sharedBundle, isLoading: false });
+    vi.mocked(useLibraryBundleBoot).mockReturnValue({ data: sharedBundle });
+    vi.mocked(useLibraryBundle).mockReturnValue({
+      data: sharedBundle, isFetching: false, refetch: vi.fn(),
+    });
+
+    let container;
+    await act(async () => {
+      ({ container } = render(<LibraryPage />));
+    });
+
+    const cards = [...container.querySelectorAll('[data-testid="library-subject-card"]')];
+    expect(cards).toHaveLength(1);
+    expect(cards[0].getAttribute('data-subject-id')).toBe('d6140f1e-b264-4f10-a943-9345d145ec13');
+    expect(cards[0].getAttribute('data-streams')).toBe('B.A. | B.Com | B.Sc');
   });
 
   it('keeps the first twenty SSR-visible cards stable after personalized ranking hydrates', async () => {

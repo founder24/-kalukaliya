@@ -32,6 +32,10 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
   const queryClient = useQueryClient();
   const { contentLang } = useContentLang();
   const isAs = contentLang === 'as';
+  const displayStreamNames = (Array.isArray(sub.available_stream_names) && sub.available_stream_names.length
+    ? sub.available_stream_names
+    : [sub.streamName]).filter(Boolean);
+  const displayStreamName = displayStreamNames.join(' · ');
   const thumbColors = useMemo(() => THUMB_GRADIENTS[sub.gradient] || THUMB_GRADIENTS.math, [sub.gradient]);
   const tags = useMemo(() => Array.isArray(sub.tags) ? sub.tags : [], [sub.tags]);
   const visibleTags = useMemo(() => tags.slice(0, 3), [tags]);
@@ -53,14 +57,14 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
     e.preventDefault();
     const parts = [sub.name];
     if (sub.description) parts.push(sub.description);
-    const meta = [sub.board_name || sub.boardName, sub.class_name || sub.className, sub.stream_name || sub.streamName].filter(Boolean).join(' · ');
+    const meta = [sub.board_name || sub.boardName, sub.class_name || sub.className, displayStreamName].filter(Boolean).join(' · ');
     if (meta) parts.push(meta);
     const chCount = chapters.length || sub.chapter_count || sub.chapterCount || 0;
     if (chCount > 0) parts.push(`${chCount} chapters`);
     if (sub.tags?.length) parts.push(`Topics: ${sub.tags.join(', ')}`);
     parts.push('Study on Syrabit.ai');
     share(sub.name, subjectLandingPath, { text: parts.join('\n') });
-  }, [sub, chapters.length, subjectLandingPath, share]);
+  }, [sub, chapters.length, subjectLandingPath, share, displayStreamName]);
 
   const handlePrefetch = useCallback(() => {
     if (sub.boardSlug && sub.classSlug && sub.slug) {
@@ -157,7 +161,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
             <Layers size={10} className="text-white" />
           </div>
           <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: thumbColors[0] }}>
-            {sub.streamName || sub.boardName || 'Subject'}
+            {displayStreamName || sub.boardName || 'Subject'}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -204,11 +208,11 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
                 <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
                   {sub.className}
                 </span>
-                {sub.streamName && (
+                {displayStreamName && (
                   <>
                     <span className="text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>·</span>
                     <span className="text-[11px] font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                      {sub.streamName}
+                      {displayStreamName}
                     </span>
                   </>
                 )}
@@ -460,7 +464,7 @@ const SubjectCard = memo(function SubjectCard({ sub, chapters = [], isSaved, onT
       >
         <button
           type="button"
-          onClick={() => { onToggleSave(sub.id); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
+          onClick={() => { onToggleSave(sub.id, sub.duplicate_subject_ids || []); try { Analytics.subjectBookmarked(sub.name, !isSaved); } catch {} }}
           aria-label={isSaved ? `Unsave ${sub.name}` : `Save ${sub.name}`}
           className="flex items-center justify-center gap-1.5 h-11 sm:h-9 rounded-lg text-xs font-semibold transition-all duration-200 active:scale-95"
           style={
