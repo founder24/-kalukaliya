@@ -74,7 +74,7 @@ describe('chapter-scoped chat retrieval', () => {
   });
 
   it('embeds a direct chapter question and filters its topic lookup to that chapter', async () => {
-    const aiRun = vi.fn(async () => ({ data: [{ values: [0.1, 0.2, 0.3] }] }));
+    const aiRun = vi.fn(async () => ({ data: [[0.1, 0.2, 0.3]] }));
     const vectorizeQuery = vi.fn(async (
       _embedding: number[],
       _options: { filter?: Record<string, string> },
