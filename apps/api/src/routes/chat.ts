@@ -1220,11 +1220,24 @@ export async function releaseQuotaReservation(
 async function embedQuery(ai: Ai, text: string): Promise<number[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const result = await ai.run('@cf/baai/bge-m3' as any, { text: [text] });
-  // bge-m3 returns { data: [{ values: number[], shape: number[] }] }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = (result as any).data as { values: number[] }[] | undefined;
-  if (!data?.[0]?.values?.length) throw new Error('bge-m3 returned no embedding');
-  return data[0].values;
+  // Workers AI returns the native number[][] shape. Keep accepting the older
+  // { values } wrapper too, so local bindings and existing test fixtures work.
+  const data = result && typeof result === 'object'
+    ? (result as { data?: unknown }).data
+    : undefined;
+  const item = Array.isArray(data) && data.length === 1 ? data[0] : undefined;
+  const vector = Array.isArray(item)
+    ? item
+    : item && typeof item === 'object' && Array.isArray((item as { values?: unknown }).values)
+      ? (item as { values: unknown[] }).values
+      : null;
+  if (
+    !vector?.length
+    || vector.some(value => typeof value !== 'number' || !Number.isFinite(value))
+  ) {
+    throw new Error('bge-m3 returned an invalid embedding');
+  }
+  return vector as number[];
 }
 
 /** Query Vectorize, filtered by medium and optional metadata fields. */
