@@ -10,6 +10,7 @@ import { sanitizeAnalyticsPayload } from './operations';
 import type { Env } from '../types';
 
 const chapterRows = [{
+  subject_id: 'physics-subject',
   title: 'Newton’s Laws',
   chapter_slug: 'newtons-laws',
   notes_en: 'A complete explanation of Newton’s laws of motion for students.',
@@ -28,6 +29,17 @@ const chapterRows = [{
   created_at: 1_735_603_200,
   subject_name: 'Physics',
   subject_slug: 'physics',
+  stream_name: 'Science',
+  stream_slug: 'science',
+  board_slug: 'ahsec',
+  class_slug: 'class-12',
+}];
+const subjectCardRows = [{
+  subject_id: 'physics-subject',
+  subject_name: 'Physics',
+  subject_slug: 'physics',
+  stream_name: 'Science',
+  stream_slug: 'science',
   board_slug: 'ahsec',
   class_slug: 'class-12',
 }];
@@ -45,7 +57,13 @@ function testEnv(config: Record<string, string | undefined> = {}): Env {
           const key = String(bindings[0] ?? '');
           return config[key] === undefined ? null : { value: config[key] };
         },
-        all: async () => ({ results: query.includes('FROM chapters') ? chapterRows : [] }),
+        all: async () => ({
+          results: query.includes('FROM subjects s')
+            ? subjectCardRows
+            : query.includes('FROM chapters')
+              ? chapterRows
+              : [],
+        }),
       };
       return statement;
     },
@@ -321,13 +339,15 @@ describe('Worker-native site-operation routes', () => {
 
   it('serves changelog and D1-derived crawler artifacts with their expected contracts', async () => {
     const env = testEnv();
-    const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms] = await Promise.all([
+    const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms, fullIndex, subjectDirectory] = await Promise.all([
       api.fetch(request('/api/v1/changelog'), env),
       api.fetch(request('/api/v1/seo/sitemap-chapters.xml'), env),
       api.fetch(request('/api/v1/seo/feed.json'), env),
       api.fetch(request('/api/v1/seo/feed.xml'), env),
       api.fetch(request('/api/v1/seo/feed/notes.xml'), env),
+      api.fetch(request('/api/v1/seo/llms.txt'), env),
       api.fetch(request('/api/v1/seo/llms-full.txt'), env),
+      api.fetch(request('/api/v1/seo/tollbit/subjects.json'), env),
     ]);
 
     await expect(changelog.json()).resolves.toEqual([{
@@ -346,7 +366,142 @@ describe('Worker-native site-operation routes', () => {
     await expect(rssFeed.text()).resolves.toContain('<rss version="2.0"');
     expect(notesFeed.headers.get('Content-Type')).toContain('application/rss+xml');
     await expect(notesFeed.text()).resolves.toContain('Study Notes &amp; Exam Prep');
-    await expect(llms.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
+    expect(llms.headers.get('Content-Type')).toContain('text/plain');
+    const llmsText = await llms.text();
+    expect(llmsText).toContain('Sitemap index: https://syrabit.ai/sitemap-index.xml');
+    expect(llmsText).toContain('Tollbit subject directory (JSON): https://syrabit.ai/tollbit/subjects.json');
+    expect(llmsText).toContain('Total published chapters: 1');
+    expect(llmsText).toContain('section coverage is not uniform');
+    expect(llmsText).not.toContain('FAQPage');
+    await expect(fullIndex.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
+    expect(subjectDirectory.headers.get('Content-Type')).toContain('application/json');
+    await expect(subjectDirectory.json()).resolves.toMatchObject({
+      schema_version: '1.0',
+      subject_count: 1,
+      subject_sitemap_count: 1,
+      chapter_page_count: 1,
+      source_sitemaps: {
+        subjects: 'https://syrabit.ai/sitemap-subjects.xml',
+        chapters: 'https://syrabit.ai/sitemap-chapters.xml',
+      },
+      subjects: [{
+        id: 'ahsec/class-12/physics',
+        title: 'Physics',
+        url: 'https://syrabit.ai/ahsec/class-12/physics',
+        stream_names: ['Science'],
+        chapter_pages: [{
+          title: 'Newton’s Laws',
+          url: 'https://syrabit.ai/ahsec/class-12/physics/newtons-laws',
+          language: 'en',
+        }],
+      }],
+    });
+  });
+
+  it('groups shared course cards once and lists only eligible canonical chapter pages', async () => {
+    const sharedCardRows = [
+      {
+        subject_id: 'shared-bcom',
+        subject_name: 'Shared Course — B.Com',
+        subject_slug: 'shared-course',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        stream_name: 'B.Com',
+        stream_slug: 'bcom',
+      },
+      {
+        subject_id: 'shared-ba',
+        subject_name: 'Shared Course — B.A.',
+        subject_slug: 'shared-course',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        stream_name: 'B.A.',
+        stream_slug: 'ba',
+      },
+      {
+        subject_id: 'shared-bsc',
+        subject_name: 'Shared Course — B.Sc.',
+        subject_slug: 'shared-course',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        stream_name: 'B.Sc.',
+        stream_slug: 'bsc',
+      },
+      {
+        subject_id: 'empty-subject',
+        subject_name: 'Published Card Without Chapters',
+        subject_slug: 'empty-course',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        stream_name: 'B.A.',
+        stream_slug: 'ba',
+      },
+    ];
+    const sharedChapterRows = [
+      {
+        ...chapterRows[0]!,
+        subject_id: 'shared-bcom',
+        title: 'Unit I — B.Com record',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+      },
+      {
+        ...chapterRows[0]!,
+        subject_id: 'shared-ba',
+        title: 'Unit I — B.A. record',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+      },
+      {
+        ...chapterRows[0]!,
+        subject_id: 'shared-bsc',
+        title: 'Unindexed empty chapter',
+        chapter_slug: 'empty-notes',
+        notes_en: '',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+      },
+    ];
+    const env = {
+      ...testEnv(),
+      DB: {
+        prepare: (query: string) => ({
+          all: async () => ({
+            results: query.includes('FROM subjects s') ? sharedCardRows : sharedChapterRows,
+          }),
+        }),
+      },
+    } as unknown as Env;
+
+    const response = await api.fetch(request('/api/v1/seo/tollbit/subjects.json'), env);
+    const directory = await response.json() as {
+      subject_count: number;
+      subjects: Array<{
+        title: string;
+        included_in_subject_sitemap: boolean;
+        stream_names: string[];
+        chapter_pages: Array<{ url: string }>;
+      }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(directory.subject_count).toBe(2);
+    const sharedCourse = directory.subjects.find((subject) => subject.title === 'Shared Course — B.A.');
+    const emptyCourse = directory.subjects.find((subject) => subject.title === 'Published Card Without Chapters');
+    expect(sharedCourse).toBeDefined();
+    expect(sharedCourse?.included_in_subject_sitemap).toBe(true);
+    expect(sharedCourse?.stream_names).toEqual(['B.A.', 'B.Com', 'B.Sc.']);
+    expect(sharedCourse?.chapter_pages).toHaveLength(1);
+    expect(sharedCourse?.chapter_pages[0]?.url).toBe(
+      'https://syrabit.ai/degree/1st-semester/shared-course/newtons-laws',
+    );
+    expect(emptyCourse).toMatchObject({
+      included_in_subject_sitemap: false,
+      chapter_pages: [],
+    });
   });
 
   it('serves Content-Signal as an active directive from the API robots endpoint', async () => {

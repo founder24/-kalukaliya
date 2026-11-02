@@ -20,6 +20,58 @@ describe('Pages worker route fallbacks', () => {
     expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow');
   });
 
+  it('keeps authenticated API traffic on the first-party API origin', async () => {
+    const apiFetch = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', apiFetch);
+    const request = new Request('https://syrabit.ai/api/v1/admin/content', {
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer test-session',
+        Cookie: 'session=test-cookie',
+      },
+    });
+
+    const response = await pagesWorker.fetch(request, {
+      API_BACKEND_URL: 'https://api.syrabit.ai',
+      ASSETS: { fetch: async () => new Response('missing', { status: 404 }) },
+    });
+
+    expect(response.status).toBe(200);
+    const upstream = apiFetch.mock.calls[0][0];
+    expect(upstream.url).toBe('https://api.syrabit.ai/api/v1/admin/content');
+    expect(upstream.headers.get('authorization')).toBe('Bearer test-session');
+    expect(upstream.headers.get('cookie')).toBe('session=test-cookie');
+    expect(upstream.url).not.toContain('tollbit');
+  });
+
+  it('proxies the public Tollbit subject directory with a JSON response', async () => {
+    const backendFetch = vi.fn(async () => new Response(
+      JSON.stringify({ schema_version: '1.0', subjects: [] }),
+      { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+    ));
+    vi.stubGlobal('fetch', backendFetch);
+
+    const response = await pagesWorker.fetch(
+      new Request('https://syrabit.ai/tollbit/subjects.json', {
+        headers: { 'User-Agent': 'OAI-SearchBot/1.0' },
+      }),
+      {
+        SEO_BACKEND_URL: 'https://api.syrabit.ai',
+        ASSETS: { fetch: async () => new Response('missing', { status: 404 }) },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(String(backendFetch.mock.calls[0][0])).toBe(
+      'https://api.syrabit.ai/api/v1/seo/tollbit/subjects.json',
+    );
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toEqual({
+      schema_version: '1.0',
+      subjects: [],
+    });
+  });
+
   it('does not return a generic SPA shell as successful crawler HTML', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(genericShell, {
       status: 200,
