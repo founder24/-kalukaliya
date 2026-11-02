@@ -10,6 +10,7 @@ import { sanitizeAnalyticsPayload } from './operations';
 import type { Env } from '../types';
 
 const chapterRows = [{
+  subject_id: 'physics-subject',
   title: 'Newton’s Laws',
   chapter_slug: 'newtons-laws',
   notes_en: 'A complete explanation of Newton’s laws of motion for students.',
@@ -33,6 +34,15 @@ const chapterRows = [{
   board_slug: 'ahsec',
   class_slug: 'class-12',
 }];
+const subjectCardRows = [{
+  subject_id: 'physics-subject',
+  subject_name: 'Physics',
+  subject_slug: 'physics',
+  stream_name: 'Science',
+  stream_slug: 'science',
+  board_slug: 'ahsec',
+  class_slug: 'class-12',
+}];
 
 function testEnv(config: Record<string, string | undefined> = {}): Env {
   const database = {
@@ -47,7 +57,13 @@ function testEnv(config: Record<string, string | undefined> = {}): Env {
           const key = String(bindings[0] ?? '');
           return config[key] === undefined ? null : { value: config[key] };
         },
-        all: async () => ({ results: query.includes('FROM chapters') ? chapterRows : [] }),
+        all: async () => ({
+          results: query.includes('FROM subjects s')
+            ? subjectCardRows
+            : query.includes('FROM chapters')
+              ? chapterRows
+              : [],
+        }),
       };
       return statement;
     },
@@ -362,6 +378,7 @@ describe('Worker-native site-operation routes', () => {
     await expect(subjectDirectory.json()).resolves.toMatchObject({
       schema_version: '1.0',
       subject_count: 1,
+      subject_sitemap_count: 1,
       chapter_page_count: 1,
       source_sitemaps: {
         subjects: 'https://syrabit.ai/sitemap-subjects.xml',
@@ -382,43 +399,81 @@ describe('Worker-native site-operation routes', () => {
   });
 
   it('groups shared course cards once and lists only eligible canonical chapter pages', async () => {
-    const sharedSubjectRows = [
+    const sharedCardRows = [
       {
-        ...chapterRows[0]!,
-        title: 'Unit I — B.Com record',
+        subject_id: 'shared-bcom',
         subject_name: 'Shared Course — B.Com',
+        subject_slug: 'shared-course',
         board_slug: 'degree',
         class_slug: '1st-semester',
-        subject_slug: 'shared-course',
         stream_name: 'B.Com',
         stream_slug: 'bcom',
       },
       {
-        ...chapterRows[0]!,
-        title: 'Unit I — B.A. record',
+        subject_id: 'shared-ba',
         subject_name: 'Shared Course — B.A.',
+        subject_slug: 'shared-course',
         board_slug: 'degree',
         class_slug: '1st-semester',
-        subject_slug: 'shared-course',
         stream_name: 'B.A.',
         stream_slug: 'ba',
       },
       {
-        ...chapterRows[0]!,
-        title: 'Unindexed empty chapter',
-        chapter_slug: 'empty-notes',
-        notes_en: '',
+        subject_id: 'shared-bsc',
         subject_name: 'Shared Course — B.Sc.',
+        subject_slug: 'shared-course',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        stream_name: 'B.Sc.',
+        stream_slug: 'bsc',
+      },
+      {
+        subject_id: 'empty-subject',
+        subject_name: 'Published Card Without Chapters',
+        subject_slug: 'empty-course',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        stream_name: 'B.A.',
+        stream_slug: 'ba',
+      },
+    ];
+    const sharedChapterRows = [
+      {
+        ...chapterRows[0]!,
+        subject_id: 'shared-bcom',
+        title: 'Unit I — B.Com record',
         board_slug: 'degree',
         class_slug: '1st-semester',
         subject_slug: 'shared-course',
-        stream_name: 'B.Sc.',
-        stream_slug: 'bsc',
+      },
+      {
+        ...chapterRows[0]!,
+        subject_id: 'shared-ba',
+        title: 'Unit I — B.A. record',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+      },
+      {
+        ...chapterRows[0]!,
+        subject_id: 'shared-bsc',
+        title: 'Unindexed empty chapter',
+        chapter_slug: 'empty-notes',
+        notes_en: '',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
       },
     ];
     const env = {
       ...testEnv(),
-      DB: { prepare: () => ({ all: async () => ({ results: sharedSubjectRows }) }) },
+      DB: {
+        prepare: (query: string) => ({
+          all: async () => ({
+            results: query.includes('FROM subjects s') ? sharedCardRows : sharedChapterRows,
+          }),
+        }),
+      },
     } as unknown as Env;
 
     const response = await api.fetch(request('/api/v1/seo/tollbit/subjects.json'), env);
@@ -426,20 +481,27 @@ describe('Worker-native site-operation routes', () => {
       subject_count: number;
       subjects: Array<{
         title: string;
+        included_in_subject_sitemap: boolean;
         stream_names: string[];
         chapter_pages: Array<{ url: string }>;
       }>;
     };
 
     expect(response.status).toBe(200);
-    expect(directory.subject_count).toBe(1);
-    expect(directory.subjects).toHaveLength(1);
-    expect(directory.subjects[0]?.title).toBe('Shared Course — B.A.');
-    expect(directory.subjects[0]?.stream_names).toEqual(['B.A.', 'B.Com', 'B.Sc.']);
-    expect(directory.subjects[0]?.chapter_pages).toHaveLength(1);
-    expect(directory.subjects[0]?.chapter_pages[0]?.url).toBe(
+    expect(directory.subject_count).toBe(2);
+    const sharedCourse = directory.subjects.find((subject) => subject.title === 'Shared Course — B.A.');
+    const emptyCourse = directory.subjects.find((subject) => subject.title === 'Published Card Without Chapters');
+    expect(sharedCourse).toBeDefined();
+    expect(sharedCourse?.included_in_subject_sitemap).toBe(true);
+    expect(sharedCourse?.stream_names).toEqual(['B.A.', 'B.Com', 'B.Sc.']);
+    expect(sharedCourse?.chapter_pages).toHaveLength(1);
+    expect(sharedCourse?.chapter_pages[0]?.url).toBe(
       'https://syrabit.ai/degree/1st-semester/shared-course/newtons-laws',
     );
+    expect(emptyCourse).toMatchObject({
+      included_in_subject_sitemap: false,
+      chapter_pages: [],
+    });
   });
 
   it('serves Content-Signal as an active directive from the API robots endpoint', async () => {

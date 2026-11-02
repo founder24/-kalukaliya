@@ -18,6 +18,7 @@ const XML_CONTENT_TYPE = 'application/xml; charset=utf-8';
 const RSS_CONTENT_TYPE = 'application/rss+xml; charset=utf-8';
 
 type ContentUrl = {
+  subjectId: string;
   title: string;
   titleAs: string | null;
   subjectName: string;
@@ -37,6 +38,16 @@ type ContentUrl = {
   qaAs: string | null;
   updatedAt: number | null;
   createdAt: number | null;
+};
+
+type PublishedSubjectCard = {
+  subjectId: string;
+  subjectName: string;
+  subjectSlug: string;
+  streamName: string | null;
+  streamSlug: string | null;
+  boardSlug: string;
+  classSlug: string;
 };
 
 function xml(value: string): string {
@@ -85,7 +96,7 @@ function hasCompleteAssameseChapterPage(row: ContentUrl): boolean {
   return assameseFaqs.length >= 5 && englishFaqs.length === assameseFaqs.length;
 }
 
-function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
+function buildTollbitSubjectDirectory(cards: PublishedSubjectCard[], rows: ContentUrl[]) {
   type ChapterPage = {
     title: string;
     url: string;
@@ -100,15 +111,17 @@ function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
     url: string;
     boardSlug: string;
     classSlug: string;
+    subjectIds: Set<string>;
+    includedInSubjectSitemap: boolean;
     streamNames: Set<string>;
     chapterPages: Map<string, ChapterPage>;
   };
 
   const entries = new Map<string, SubjectEntry>();
-  for (const row of rows) {
-    const id = `${row.boardSlug}/${row.classSlug}/${row.subjectSlug}`;
-    const streamKey = (row.streamSlug || row.streamName || '').trim().toLowerCase();
-    const streamName = row.streamName?.trim() || row.streamSlug?.trim() || '';
+  for (const card of cards) {
+    const id = `${card.boardSlug}/${card.classSlug}/${card.subjectSlug}`;
+    const streamKey = (card.streamSlug || card.streamName || '').trim().toLowerCase();
+    const streamName = card.streamName?.trim() || card.streamSlug?.trim() || '';
     const isBa = streamKey.replace(/[^a-z]/g, '') === 'ba'
       || streamName.toLowerCase().replace(/[^a-z]/g, '') === 'ba';
     let entry = entries.get(id);
@@ -116,12 +129,14 @@ function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
     if (!entry) {
       entry = {
         id,
-        title: row.subjectName,
+        title: card.subjectName,
         titleStreamKey: streamKey,
         titleIsBa: isBa,
-        url: `${SITE_URL}/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}`,
-        boardSlug: row.boardSlug,
-        classSlug: row.classSlug,
+        url: `${SITE_URL}/${card.boardSlug}/${card.classSlug}/${card.subjectSlug}`,
+        boardSlug: card.boardSlug,
+        classSlug: card.classSlug,
+        subjectIds: new Set<string>(),
+        includedInSubjectSitemap: false,
         streamNames: new Set<string>(),
         chapterPages: new Map<string, ChapterPage>(),
       };
@@ -132,16 +147,24 @@ function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
     ) {
       // Match the library's shared-course card rule: use the B.A. record as
       // the representative where available, without duplicating the card.
-      entry.title = row.subjectName;
+      entry.title = card.subjectName;
       entry.titleStreamKey = streamKey;
       entry.titleIsBa = isBa;
     }
 
+    entry.subjectIds.add(card.subjectId);
     if (streamName) entry.streamNames.add(streamName);
+  }
+
+  for (const row of rows) {
+    const id = `${row.boardSlug}/${row.classSlug}/${row.subjectSlug}`;
+    const entry = entries.get(id);
+    if (!entry || !entry.subjectIds.has(row.subjectId)) continue;
+    entry.includedInSubjectSitemap = true;
 
     const addChapterPage = (url: string, title: string, language: 'en' | 'as') => {
-      if (!entry!.chapterPages.has(url)) {
-        entry!.chapterPages.set(url, {
+      if (!entry.chapterPages.has(url)) {
+        entry.chapterPages.set(url, {
           title,
           url,
           language,
@@ -169,6 +192,7 @@ function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
       url: entry.url,
       board_slug: entry.boardSlug,
       class_slug: entry.classSlug,
+      included_in_subject_sitemap: entry.includedInSubjectSitemap,
       stream_names: [...entry.streamNames].sort((a, b) => a.localeCompare(b, 'en')),
       chapter_pages: [...entry.chapterPages.values()].sort((a, b) =>
         a.url.localeCompare(b.url, 'en'),
@@ -184,6 +208,7 @@ function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
       chapters: `${SITE_URL}/sitemap-chapters.xml`,
     },
     subject_count: subjects.length,
+    subject_sitemap_count: subjects.filter((subject) => subject.included_in_subject_sitemap).length,
     chapter_page_count: subjects.reduce((total, subject) => total + subject.chapter_pages.length, 0),
     subjects,
   };
@@ -231,7 +256,7 @@ function xmlResponse(content: string, contentType = XML_CONTENT_TYPE): Response 
 async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<ContentUrl[]> {
   const subjectFilter = subjectSlug ? 'AND s.slug = ?' : '';
   const statement = c.env.DB.prepare(`
-    SELECT c.title, c.title_as, c.slug AS chapter_slug, c.slug_as AS chapter_slug_as,
+    SELECT c.subject_id, c.title, c.title_as, c.slug AS chapter_slug, c.slug_as AS chapter_slug_as,
            c.notes_en, c.notes_as, c.meta_description_as, c.content_type,
            c.published_topics, c.qa_en, c.qa_as,
            c.updated_at, c.created_at, s.name AS subject_name,
@@ -249,6 +274,7 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
     ? await statement.bind(subjectSlug).all<Record<string, string | number | null>>()
     : await statement.all<Record<string, string | number | null>>();
   return (result.results ?? []).map((row) => ({
+    subjectId: String(row.subject_id ?? ''),
     title: String(row.title ?? ''),
     titleAs: typeof row.title_as === 'string' ? row.title_as : null,
     subjectName: String(row.subject_name ?? ''),
@@ -269,6 +295,38 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
     updatedAt: typeof row.updated_at === 'number' ? row.updated_at : null,
     createdAt: typeof row.created_at === 'number' ? row.created_at : null,
   }));
+}
+
+async function publishedSubjectCards(c: { env: Env }): Promise<PublishedSubjectCard[]> {
+  const result = await c.env.DB.prepare(`
+    SELECT s.id AS subject_id, s.name AS subject_name, s.slug AS subject_slug,
+           str.name AS stream_name, str.slug AS stream_slug,
+           b.slug AS board_slug, cl.slug AS class_slug
+    FROM subjects s
+    INNER JOIN streams str ON str.id = s.stream_id
+    INNER JOIN classes cl ON cl.id = str.class_id
+    INNER JOIN boards b ON b.id = cl.board_id
+    WHERE s.is_published = 1
+    ORDER BY b.slug, cl.slug, s.slug, str.slug
+  `).all<{
+    subject_id: string;
+    subject_name: string;
+    subject_slug: string;
+    stream_name: string | null;
+    stream_slug: string | null;
+    board_slug: string;
+    class_slug: string;
+  }>();
+
+  return (result.results ?? []).map((row) => ({
+    subjectId: String(row.subject_id ?? ''),
+    subjectName: String(row.subject_name ?? ''),
+    subjectSlug: String(row.subject_slug ?? ''),
+    streamName: typeof row.stream_name === 'string' ? row.stream_name : null,
+    streamSlug: typeof row.stream_slug === 'string' ? row.stream_slug : null,
+    boardSlug: String(row.board_slug ?? ''),
+    classSlug: String(row.class_slug ?? ''),
+  })).filter((row) => row.subjectId && row.subjectName && row.subjectSlug && row.boardSlug && row.classSlug);
 }
 
 function urlSet(entries: string[]): string {
@@ -478,7 +536,8 @@ seoRouter.get('/sitemap-topics.xml', async (c) => {
 });
 
 seoRouter.get('/tollbit/subjects.json', async (c) => {
-  const directory = buildTollbitSubjectDirectory(await publishedContent(c));
+  const [cards, rows] = await Promise.all([publishedSubjectCards(c), publishedContent(c)]);
+  const directory = buildTollbitSubjectDirectory(cards, rows);
   return new Response(JSON.stringify(directory), {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
