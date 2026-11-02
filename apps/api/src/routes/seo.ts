@@ -445,19 +445,34 @@ seoRouter.get('/llms.txt', async (c) => {
   const count = (await publishedContent(c)).length;
   return c.text(`# Syrabit.ai
 
-> Syrabit.ai is the educational browser for AHSEC, SEBA, Degree, FYUGP, and NEP students in Assam.
+> Public educational library for students in Assam, with AHSEC, SEBA, and published undergraduate Degree/FYUGP materials.
 
-Technology stack: Cloudflare Workers, D1, R2, KV, Vectorize, Workers AI, and Cloudflare Pages.
+Coverage and available languages vary by subject and chapter. The live library and content index are the source of truth for what is currently published.
 
 Total published chapters: ${count}
-Full content index: ${SITE_URL}/llms-full.txt
 
-Explore:
+## Discover published content
+
+- Library: ${SITE_URL}/library
+- Full content index: ${SITE_URL}/llms-full.txt
+- Sitemap index: ${SITE_URL}/sitemap-index.xml
+- Robots policy: ${SITE_URL}/robots.txt
+- AI usage notes: ${SITE_URL}/ai.txt
+
+## Content and citations
+
+- Pages may contain study notes, questions, previous-year questions, or topic material where published; section coverage is not uniform.
+- English and Assamese content are published per page and section. Do not assume a complete translation or answer set unless that page provides it.
+- Topic pages are listed for indexing only when they meet the current publication and language-completeness requirements.
+- Cite the canonical page actually used, including its language and chapter. Distinguish syllabus documents, study notes, question banks, and past exam papers.
+- This index helps discovery; it is not a substitute for the cited page or source.
+
+## About
+
 - ${SITE_URL}/library
 - ${SITE_URL}/technology
 - ${SITE_URL}/about
 
-Contact: founder@syrabit.ai
 `, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=600' });
 });
 

@@ -321,12 +321,13 @@ describe('Worker-native site-operation routes', () => {
 
   it('serves changelog and D1-derived crawler artifacts with their expected contracts', async () => {
     const env = testEnv();
-    const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms] = await Promise.all([
+    const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms, fullIndex] = await Promise.all([
       api.fetch(request('/api/v1/changelog'), env),
       api.fetch(request('/api/v1/seo/sitemap-chapters.xml'), env),
       api.fetch(request('/api/v1/seo/feed.json'), env),
       api.fetch(request('/api/v1/seo/feed.xml'), env),
       api.fetch(request('/api/v1/seo/feed/notes.xml'), env),
+      api.fetch(request('/api/v1/seo/llms.txt'), env),
       api.fetch(request('/api/v1/seo/llms-full.txt'), env),
     ]);
 
@@ -346,7 +347,13 @@ describe('Worker-native site-operation routes', () => {
     await expect(rssFeed.text()).resolves.toContain('<rss version="2.0"');
     expect(notesFeed.headers.get('Content-Type')).toContain('application/rss+xml');
     await expect(notesFeed.text()).resolves.toContain('Study Notes &amp; Exam Prep');
-    await expect(llms.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
+    expect(llms.headers.get('Content-Type')).toContain('text/plain');
+    const llmsText = await llms.text();
+    expect(llmsText).toContain('Sitemap index: https://syrabit.ai/sitemap-index.xml');
+    expect(llmsText).toContain('Total published chapters: 1');
+    expect(llmsText).toContain('section coverage is not uniform');
+    expect(llmsText).not.toContain('FAQPage');
+    await expect(fullIndex.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
   });
 
   it('serves Content-Signal as an active directive from the API robots endpoint', async () => {
