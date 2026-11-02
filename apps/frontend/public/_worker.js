@@ -81,7 +81,7 @@ const DEFAULT_SEO_BACKEND = "https://syrabit-api-prod.axomxplain.workers.dev";
 // the matching backend route and force the correct Content-Type. Cached
 // at the edge for an hour (matches _headers s-maxage).
 const SEO_PASSTHROUGH_RE =
-  /^\/(?:sitemap-topics\.xml|sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
+  /^\/(?:sitemap-topics\.xml|sitemap[a-z0-9_-]*\.xml|sitemap-index\.xml|feed\.xml|feed\.json|rss\.xml|feed\/[a-z0-9_-]+\.xml|llms\.txt|llms-full\.txt|robots\.txt|tollbit\/subjects\.json|api\/v1\/seo\/sitemap[a-z0-9_-]*\.xml|api\/v1\/seo\/feed\.json)$/i;
 // IndexNow keyfiles (32-hex .txt or *indexnow*.txt) are intentionally
 // excluded — they're shipped as static assets in dist/ so the Pages
 // ASSETS pipeline serves them directly. Routing them through the
@@ -98,7 +98,7 @@ const SEO_PASSTHROUGH_RE =
 function isNativeSeoArtifact(pathname) {
   return (
     /^\/api\/v1\/seo\//i.test(pathname) ||
-    /^\/(?:sitemap[a-z0-9_-]*\.xml|feed(?:\/[a-z0-9_-]+)?\.xml|feed\.json|rss\.xml|llms(?:-full)?\.txt|robots\.txt)$/i.test(pathname)
+    /^\/(?:sitemap[a-z0-9_-]*\.xml|feed(?:\/[a-z0-9_-]+)?\.xml|feed\.json|rss\.xml|llms(?:-full)?\.txt|robots\.txt|tollbit\/subjects\.json)$/i.test(pathname)
   );
 }
 
@@ -132,7 +132,7 @@ async function sitemapProxy(request, env, url) {
     : ((env && env.BACKEND_BOT_URL) || DEFAULT_BACKEND);
   const backendPath = backendPathForSeo(url.pathname);
   const backendUrl = backend + backendPath + url.search;
-  const isXml = !/\.txt$/i.test(url.pathname);
+  const isXml = /\.xml$/i.test(url.pathname);
   try {
     const resp = await fetch(backendUrl, {
       method: request.method,
@@ -191,8 +191,10 @@ async function sitemapProxy(request, env, url) {
 // Browser API traffic normally uses the same-origin path so staff requests do
 // not need a CORS preflight. The Pages Worker forwards the original
 // Authorization, application cookies, and Cloudflare Access cookies/assertion
-// to the protected API origin. The API Worker remains the authority for both
-// application authentication and route authorization.
+// to the first-party protected API origin. The API Worker remains the authority
+// for both application authentication and route authorization. A zone-managed
+// Tollbit Snippet executes before this Worker, so it must independently exclude
+// /api and other private paths; this proxy is not a security guard for it.
 async function apiProxy(request, env, url) {
   const backend = (env && env.API_BACKEND_URL) || DEFAULT_BACKEND;
   const backendUrl = backend + url.pathname + url.search;
@@ -234,7 +236,9 @@ function seoUpstreamError(request, url, isXml, reason) {
   if (request.method !== "HEAD") {
     body = isXml
       ? `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${reason} -->\n`
-      : `# ${reason}\n`;
+      : /\.json$/i.test(url.pathname)
+        ? JSON.stringify({ error: "seo_artifact_unavailable", detail: reason })
+        : `# ${reason}\n`;
   }
   return new Response(body, {
     status: 503,

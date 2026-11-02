@@ -8,6 +8,7 @@ Coverage and available languages vary by subject and chapter. The live library a
 
 - Library: https://syrabit.ai/library
 - Full content index: https://syrabit.ai/llms-full.txt
+- Tollbit subject directory (JSON): https://syrabit.ai/tollbit/subjects.json
 - Sitemap index: https://syrabit.ai/sitemap-index.xml
 - Robots policy: https://syrabit.ai/robots.txt
 - AI usage notes: https://syrabit.ai/ai.txt

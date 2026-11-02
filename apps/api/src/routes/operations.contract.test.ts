@@ -28,6 +28,8 @@ const chapterRows = [{
   created_at: 1_735_603_200,
   subject_name: 'Physics',
   subject_slug: 'physics',
+  stream_name: 'Science',
+  stream_slug: 'science',
   board_slug: 'ahsec',
   class_slug: 'class-12',
 }];
@@ -321,7 +323,7 @@ describe('Worker-native site-operation routes', () => {
 
   it('serves changelog and D1-derived crawler artifacts with their expected contracts', async () => {
     const env = testEnv();
-    const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms, fullIndex] = await Promise.all([
+    const [changelog, sitemap, jsonFeed, rssFeed, notesFeed, llms, fullIndex, subjectDirectory] = await Promise.all([
       api.fetch(request('/api/v1/changelog'), env),
       api.fetch(request('/api/v1/seo/sitemap-chapters.xml'), env),
       api.fetch(request('/api/v1/seo/feed.json'), env),
@@ -329,6 +331,7 @@ describe('Worker-native site-operation routes', () => {
       api.fetch(request('/api/v1/seo/feed/notes.xml'), env),
       api.fetch(request('/api/v1/seo/llms.txt'), env),
       api.fetch(request('/api/v1/seo/llms-full.txt'), env),
+      api.fetch(request('/api/v1/seo/tollbit/subjects.json'), env),
     ]);
 
     await expect(changelog.json()).resolves.toEqual([{
@@ -350,10 +353,93 @@ describe('Worker-native site-operation routes', () => {
     expect(llms.headers.get('Content-Type')).toContain('text/plain');
     const llmsText = await llms.text();
     expect(llmsText).toContain('Sitemap index: https://syrabit.ai/sitemap-index.xml');
+    expect(llmsText).toContain('Tollbit subject directory (JSON): https://syrabit.ai/tollbit/subjects.json');
     expect(llmsText).toContain('Total published chapters: 1');
     expect(llmsText).toContain('section coverage is not uniform');
     expect(llmsText).not.toContain('FAQPage');
     await expect(fullIndex.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
+    expect(subjectDirectory.headers.get('Content-Type')).toContain('application/json');
+    await expect(subjectDirectory.json()).resolves.toMatchObject({
+      schema_version: '1.0',
+      subject_count: 1,
+      chapter_page_count: 1,
+      source_sitemaps: {
+        subjects: 'https://syrabit.ai/sitemap-subjects.xml',
+        chapters: 'https://syrabit.ai/sitemap-chapters.xml',
+      },
+      subjects: [{
+        id: 'ahsec/class-12/physics',
+        title: 'Physics',
+        url: 'https://syrabit.ai/ahsec/class-12/physics',
+        stream_names: ['Science'],
+        chapter_pages: [{
+          title: 'Newton’s Laws',
+          url: 'https://syrabit.ai/ahsec/class-12/physics/newtons-laws',
+          language: 'en',
+        }],
+      }],
+    });
+  });
+
+  it('groups shared course cards once and lists only eligible canonical chapter pages', async () => {
+    const sharedSubjectRows = [
+      {
+        ...chapterRows[0]!,
+        title: 'Unit I — B.Com record',
+        subject_name: 'Shared Course — B.Com',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+        stream_name: 'B.Com',
+        stream_slug: 'bcom',
+      },
+      {
+        ...chapterRows[0]!,
+        title: 'Unit I — B.A. record',
+        subject_name: 'Shared Course — B.A.',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+        stream_name: 'B.A.',
+        stream_slug: 'ba',
+      },
+      {
+        ...chapterRows[0]!,
+        title: 'Unindexed empty chapter',
+        chapter_slug: 'empty-notes',
+        notes_en: '',
+        subject_name: 'Shared Course — B.Sc.',
+        board_slug: 'degree',
+        class_slug: '1st-semester',
+        subject_slug: 'shared-course',
+        stream_name: 'B.Sc.',
+        stream_slug: 'bsc',
+      },
+    ];
+    const env = {
+      ...testEnv(),
+      DB: { prepare: () => ({ all: async () => ({ results: sharedSubjectRows }) }) },
+    } as unknown as Env;
+
+    const response = await api.fetch(request('/api/v1/seo/tollbit/subjects.json'), env);
+    const directory = await response.json() as {
+      subject_count: number;
+      subjects: Array<{
+        title: string;
+        stream_names: string[];
+        chapter_pages: Array<{ url: string }>;
+      }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(directory.subject_count).toBe(1);
+    expect(directory.subjects).toHaveLength(1);
+    expect(directory.subjects[0]?.title).toBe('Shared Course — B.A.');
+    expect(directory.subjects[0]?.stream_names).toEqual(['B.A.', 'B.Com', 'B.Sc.']);
+    expect(directory.subjects[0]?.chapter_pages).toHaveLength(1);
+    expect(directory.subjects[0]?.chapter_pages[0]?.url).toBe(
+      'https://syrabit.ai/degree/1st-semester/shared-course/newtons-laws',
+    );
   });
 
   it('serves Content-Signal as an active directive from the API robots endpoint', async () => {

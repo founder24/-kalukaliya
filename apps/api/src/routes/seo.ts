@@ -21,6 +21,8 @@ type ContentUrl = {
   title: string;
   titleAs: string | null;
   subjectName: string;
+  streamName: string | null;
+  streamSlug: string | null;
   subjectSlug: string;
   boardSlug: string;
   classSlug: string;
@@ -83,6 +85,110 @@ function hasCompleteAssameseChapterPage(row: ContentUrl): boolean {
   return assameseFaqs.length >= 5 && englishFaqs.length === assameseFaqs.length;
 }
 
+function buildTollbitSubjectDirectory(rows: ContentUrl[]) {
+  type ChapterPage = {
+    title: string;
+    url: string;
+    language: 'en' | 'as';
+    last_modified: string | null;
+  };
+  type SubjectEntry = {
+    id: string;
+    title: string;
+    titleStreamKey: string;
+    titleIsBa: boolean;
+    url: string;
+    boardSlug: string;
+    classSlug: string;
+    streamNames: Set<string>;
+    chapterPages: Map<string, ChapterPage>;
+  };
+
+  const entries = new Map<string, SubjectEntry>();
+  for (const row of rows) {
+    const id = `${row.boardSlug}/${row.classSlug}/${row.subjectSlug}`;
+    const streamKey = (row.streamSlug || row.streamName || '').trim().toLowerCase();
+    const streamName = row.streamName?.trim() || row.streamSlug?.trim() || '';
+    const isBa = streamKey.replace(/[^a-z]/g, '') === 'ba'
+      || streamName.toLowerCase().replace(/[^a-z]/g, '') === 'ba';
+    let entry = entries.get(id);
+
+    if (!entry) {
+      entry = {
+        id,
+        title: row.subjectName,
+        titleStreamKey: streamKey,
+        titleIsBa: isBa,
+        url: `${SITE_URL}/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}`,
+        boardSlug: row.boardSlug,
+        classSlug: row.classSlug,
+        streamNames: new Set<string>(),
+        chapterPages: new Map<string, ChapterPage>(),
+      };
+      entries.set(id, entry);
+    } else if (
+      (isBa && !entry.titleIsBa)
+      || (isBa === entry.titleIsBa && streamKey.localeCompare(entry.titleStreamKey) < 0)
+    ) {
+      // Match the library's shared-course card rule: use the B.A. record as
+      // the representative where available, without duplicating the card.
+      entry.title = row.subjectName;
+      entry.titleStreamKey = streamKey;
+      entry.titleIsBa = isBa;
+    }
+
+    if (streamName) entry.streamNames.add(streamName);
+
+    const addChapterPage = (url: string, title: string, language: 'en' | 'as') => {
+      if (!entry!.chapterPages.has(url)) {
+        entry!.chapterPages.set(url, {
+          title,
+          url,
+          language,
+          last_modified: date(row.updatedAt) || null,
+        });
+      }
+    };
+    if (row.notesEn?.trim()) {
+      addChapterPage(contentUrl(row), row.title || 'Untitled', 'en');
+    }
+    if (hasCompleteAssameseChapterPage(row)) {
+      addChapterPage(assameseContentUrl(row), row.titleAs || row.title || 'Untitled', 'as');
+    }
+  }
+
+  const subjects = [...entries.values()]
+    .sort((a, b) =>
+      a.boardSlug.localeCompare(b.boardSlug, 'en')
+      || a.classSlug.localeCompare(b.classSlug, 'en')
+      || a.title.localeCompare(b.title, 'en'),
+    )
+    .map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      url: entry.url,
+      board_slug: entry.boardSlug,
+      class_slug: entry.classSlug,
+      stream_names: [...entry.streamNames].sort((a, b) => a.localeCompare(b, 'en')),
+      chapter_pages: [...entry.chapterPages.values()].sort((a, b) =>
+        a.url.localeCompare(b.url, 'en'),
+      ),
+    }));
+
+  return {
+    schema_version: '1.0',
+    publisher: { name: 'Syrabit.ai', url: SITE_URL },
+    access_note: 'Listing a URL does not grant access to its page content.',
+    source_sitemaps: {
+      subjects: `${SITE_URL}/sitemap-subjects.xml`,
+      chapters: `${SITE_URL}/sitemap-chapters.xml`,
+    },
+    subject_count: subjects.length,
+    chapter_page_count: subjects.reduce((total, subject) => total + subject.chapter_pages.length, 0),
+    subjects,
+  };
+}
+
 function topicEntries(rows: ContentUrl[]): string[] {
   const entries = new Map<string, string>();
   for (const row of rows) {
@@ -128,7 +234,8 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
     SELECT c.title, c.title_as, c.slug AS chapter_slug, c.slug_as AS chapter_slug_as,
            c.notes_en, c.notes_as, c.meta_description_as, c.content_type,
            c.published_topics, c.qa_en, c.qa_as,
-           c.updated_at, c.created_at, s.name AS subject_name, s.slug AS subject_slug,
+           c.updated_at, c.created_at, s.name AS subject_name,
+           str.name AS stream_name, str.slug AS stream_slug, s.slug AS subject_slug,
            b.slug AS board_slug, cl.slug AS class_slug
     FROM chapters c
     JOIN subjects s ON s.id = c.subject_id
@@ -145,6 +252,8 @@ async function publishedContent(c: { env: Env }, subjectSlug?: string): Promise<
     title: String(row.title ?? ''),
     titleAs: typeof row.title_as === 'string' ? row.title_as : null,
     subjectName: String(row.subject_name ?? ''),
+    streamName: typeof row.stream_name === 'string' ? row.stream_name : null,
+    streamSlug: typeof row.stream_slug === 'string' ? row.stream_slug : null,
     subjectSlug: String(row.subject_slug ?? ''),
     boardSlug: String(row.board_slug ?? ''),
     classSlug: String(row.class_slug ?? ''),
@@ -368,6 +477,16 @@ seoRouter.get('/sitemap-topics.xml', async (c) => {
   return xmlResponse(urlSet(topicEntries(rows)));
 });
 
+seoRouter.get('/tollbit/subjects.json', async (c) => {
+  const directory = buildTollbitSubjectDirectory(await publishedContent(c));
+  return new Response(JSON.stringify(directory), {
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'public, max-age=300, s-maxage=600',
+    },
+  });
+});
+
 seoRouter.get('/robots.txt', (c) => c.text(
   ROBOTS_TXT,
   200,
@@ -455,6 +574,7 @@ Total published chapters: ${count}
 
 - Library: ${SITE_URL}/library
 - Full content index: ${SITE_URL}/llms-full.txt
+- Tollbit subject directory (JSON): ${SITE_URL}/tollbit/subjects.json
 - Sitemap index: ${SITE_URL}/sitemap-index.xml
 - Robots policy: ${SITE_URL}/robots.txt
 - AI usage notes: ${SITE_URL}/ai.txt
