@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('adsConfig account gating', () => {
   beforeEach(() => {
@@ -8,7 +8,6 @@ describe('adsConfig account gating', () => {
   });
 
   afterEach(() => vi.unstubAllEnvs());
-  });
 
   it('preserves AdSense outside Monetag learning pages and disables replaced slots', async () => {
     const { ADSENSE_PLACEMENT_ENV_KEYS } = await import('./adsenseSlotConfig');
