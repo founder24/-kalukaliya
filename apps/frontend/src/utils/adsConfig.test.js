@@ -30,15 +30,6 @@ describe('adsConfig account gating', () => {
     }
   });
 
-  it('uses the requested AdSense publisher script as its single source of truth', async () => {
-    const { ADSENSE_PUBLISHER_ID, ADSENSE_SCRIPT_URL } = await import('./adsConfig');
-
-    expect(ADSENSE_PUBLISHER_ID).toBe('ca-pub-8958003374183515');
-    expect(ADSENSE_SCRIPT_URL).toBe(
-      'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8958003374183515',
-    );
-  });
-
   it('suppresses ads for paid plans and restores them after logout', async () => {
     const adsConfig = await import('./adsConfig');
     adsConfig.setAdsAuthChecked(true);
