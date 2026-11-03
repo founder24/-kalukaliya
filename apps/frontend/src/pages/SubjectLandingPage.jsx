@@ -15,6 +15,7 @@ import { MobileNavSwitch } from '@/components/layout/MobileNavSwitch';
 import { useContentLang } from '@/context/LanguageContext';
 import { seoRelatedByChapter } from '@/utils/api';
 import { siblingsAsRelated } from '@/utils/siblingChapter';
+import MonetagPageAds from '@/components/ads/MonetagPageAds';
 
 export default function SubjectLandingPage() {
   const { board, classSlug, subjectSlug } = useParams();
@@ -257,6 +258,7 @@ export default function SubjectLandingPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <MonetagPageAds />
       <PageMeta
         title={`${subjectName} — ${boardName} ${className} Notes & Study Material`}
         description={subject.description || `Complete ${subjectName} study material for ${boardName} ${className} students. Notes, MCQs, important questions, and AI-powered tutoring.`}

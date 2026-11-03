@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PageTracker } from "@/utils/usePageTracking";
 import { AuthProvider } from "@/context/AuthContext";
 import { LanguageProvider } from "@/context/LanguageContext";
@@ -19,6 +19,9 @@ const LazyToaster = lazy(() => import("sonner").then(m => ({ default: m.Toaster 
 const LazyGlobalSeo = lazy(() => import("@/components/seo/GlobalSeo"));
 import { apiClient } from "@/utils/api";
 import { probeImageResizer } from "@/utils/imageCdn";
+import { shouldForceMonetagDocumentNavigation } from "@/utils/monetagAds";
+
+const useClientLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 // ── React Query client ────────────────────────────────────────────────────────
 // `queryClient` lives in its own leaf module (`./queryClient`) so it has no
@@ -267,6 +270,26 @@ function LegacyTopicRedirect() {
 
 // ── Routes (extracted so SSR can render them inside a StaticRouter) ───────
 export function AppRoutes() {
+  const location = useLocation();
+  const previousPath = useRef(location.pathname);
+
+  useClientLayoutEffect(() => {
+    const shouldReload = shouldForceMonetagDocumentNavigation(
+      previousPath.current,
+      location.pathname,
+    );
+    previousPath.current = location.pathname;
+
+    if (shouldReload && typeof window !== 'undefined') {
+      // Monetag's tags install page-level listeners/widgets with no
+      // documented SPA teardown. A full document navigation clears them
+      // before another route such as Chat or Library is rendered.
+      window.location.replace(
+        `${location.pathname}${location.search}${location.hash}`,
+      );
+    }
+  }, [location.pathname, location.search, location.hash]);
+
   return (
     <>
       <Routes>

@@ -3,7 +3,8 @@ import { expect, test, type BrowserContext, type Page, type Route } from '@playw
 const FIXTURE_ROUTE = '/ahsec/class-12/physics/release-ad-fixture';
 const PRODUCTION_ROUTE = process.env.E2E_ADS_PRODUCTION_PATH
   || '/ahsec/hs-1st-year/physics/laws-of-motion';
-const GOOGLE_LOADER = '**/pagead/js/adsbygoogle.js*';
+const MONETAG_ONCLICK = 'https://al5sm.com/tag.min.js';
+const MONETAG_IN_PAGE_PUSH = 'https://nap5k.com/tag.min.js';
 
 const fixtureChapter = {
   chapter_id: 'release-ad-fixture',
@@ -27,52 +28,22 @@ const fixtureChapter = {
   ],
 };
 
-function googleLoaderFixture(mode: 'fill' | 'no-fill') {
-  return `
-    (() => {
-      const mode = ${JSON.stringify(mode)};
-      const fill = () => {
-        if (mode !== 'fill') return;
-        document.querySelectorAll('ins.adsbygoogle').forEach((slot) => {
-          if (slot.querySelector('iframe[data-ad-fixture-fill]')) return;
-          const iframe = document.createElement('iframe');
-          iframe.title = 'Advertisement';
-          iframe.src = 'about:blank';
-          iframe.dataset.adFixtureFill = 'true';
-          iframe.style.display = 'block';
-          iframe.style.width = '100%';
-          iframe.style.height = '90px';
-          slot.appendChild(iframe);
-        });
-      };
-      const queued = Array.isArray(window.adsbygoogle) ? window.adsbygoogle : [];
-      window.adsbygoogle = {
-        push() {
-          fill();
-          return 1;
-        },
-      };
-      new MutationObserver(fill).observe(document.documentElement, {
-        childList: true,
-        subtree: true,
-      });
-      queued.forEach(() => fill());
-      fill();
-    })();
-  `;
-}
-
-async function fulfillGoogleLoader(route: Route, mode: 'fill' | 'no-fill') {
+async function fulfillMonetagTag(route: Route) {
   await route.fulfill({
     status: 200,
     contentType: 'application/javascript',
-    body: googleLoaderFixture(mode),
+    // Test-only provider stub. Never contacts the ad network or opens ads.
+    body: 'window.__monetagTestLoadCount = (window.__monetagTestLoadCount || 0) + 1;',
   });
 }
 
-async function installFixture(page: Page, mode: 'fill' | 'no-fill') {
-  await page.addInitScript(() => {
-    localStorage.removeItem('syrabit_ads_optout');
+async function installFixture(
+  page: Page,
+  { adOptOut = false }: { adOptOut?: boolean } = {},
+) {
+  await page.addInitScript((optOut) => {
+    if (optOut) localStorage.setItem('syrabit_ads_optout', '1');
+    else localStorage.removeItem('syrabit_ads_optout');
     // Make every lazy slot eligible immediately. This only affects the
     // deterministic fixture; the production smoke keeps the browser native.
     window.IntersectionObserver = class {
@@ -96,7 +67,8 @@ async function installFixture(page: Page, mode: 'fill' | 'no-fill') {
     } as unknown as typeof IntersectionObserver;
   });
 
-  await page.route(GOOGLE_LOADER, (route) => fulfillGoogleLoader(route, mode));
+  await page.route(MONETAG_ONCLICK, fulfillMonetagTag);
+  await page.route(MONETAG_IN_PAGE_PUSH, fulfillMonetagTag);
   await page.route('**/api/v1/**', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -134,84 +106,35 @@ async function installFixture(page: Page, mode: 'fill' | 'no-fill') {
   }));
 }
 
-async function readSlots(page: Page) {
-  return page.locator('[data-ad-placement] ins.adsbygoogle').evaluateAll((slots) => slots.map((slot) => {
-    const parent = slot.parentElement;
-    const parentRect = parent?.getBoundingClientRect();
-    const rect = slot.getBoundingClientRect();
-    return {
-      placement: parent?.getAttribute('data-ad-placement') || '',
-      slot: slot.getAttribute('data-ad-slot') || '',
-      format: slot.getAttribute('data-ad-format') || '',
-      layout: slot.getAttribute('data-ad-layout') || '',
-      height: rect.height,
-      parentHeight: parentRect?.height || 0,
-      iframeCount: slot.querySelectorAll('iframe').length,
-    };
-  }));
-}
-
-async function expectFixtureTab(
-  page: Page,
-  tab: 'notes' | 'qa' | 'pyq',
-  expectedPlacements: string[],
-  mode: 'fill' | 'no-fill',
-) {
+async function expectFixtureTab(page: Page, tab: 'notes' | 'qa' | 'pyq') {
   await page.goto(`${FIXTURE_ROUTE}?tab=${tab}`);
-  await expect.poll(() => readSlots(page), { timeout: 5000 }).toHaveLength(expectedPlacements.length);
-
-  const slots = await readSlots(page);
-  expect(slots.map((slot) => slot.placement)).toEqual(expectedPlacements);
-  for (const slot of slots) {
-    expect(slot.slot, `${tab} ${slot.placement} slot metadata`).toMatch(/^\d{5,20}$/);
-    expect(slot.format, `${tab} ${slot.placement} format metadata`).toBeTruthy();
-    if (mode === 'no-fill' && slot.format === 'fluid') {
-      expect(slot.iframeCount, `${tab} ${slot.placement} no-fill iframe count`).toBe(0);
-      expect(slot.height, `${tab} ${slot.placement} fluid height`).toBe(0);
-      expect(slot.parentHeight, `${tab} ${slot.placement} fluid parent height`).toBe(0);
-    }
-    if (mode === 'fill') {
-      expect(slot.iframeCount, `${tab} ${slot.placement} supplied fill`).toBeGreaterThan(0);
-    }
-  }
+  await expect(page.locator('script[data-zone="12180636"]')).toHaveCount(1);
+  await expect(page.locator('script[data-zone="12180642"]')).toHaveCount(1);
+  await expect(page.locator('script[data-zone="12180636"]')).toHaveAttribute('data-loaded', 'true');
+  await expect(page.locator('script[data-zone="12180642"]')).toHaveAttribute('data-loaded', 'true');
+  await expect(page.locator('script[src*="adsbygoogle.js"]')).toHaveCount(0);
+  await expect(page.locator('[data-ad-placement]')).toHaveCount(0);
 }
 
-test.describe('deterministic AdSense release fixture', () => {
+test.describe('deterministic Monetag release fixture', () => {
   test.skip(
     process.env.E2E_ADS_RELEASE !== '1',
     'Run with test:e2e:ads-release after the production-shaped client build.',
   );
 
-  test('proves numeric Notes, Q&A, and PYQ metadata and collapses no-fill fluid slots', async ({ page }) => {
-    await installFixture(page, 'no-fill');
-    await expectFixtureTab(
-      page,
-      'notes',
-      ['chapter.notes.top', 'chapter.notes.inContent', 'chapter.notes.end', 'chapter.sidebar'],
-      'no-fill',
-    );
-    await expectFixtureTab(
-      page,
-      'qa',
-      ['chapter.qa.inContent', 'chapter.qa.end', 'chapter.sidebar'],
-      'no-fill',
-    );
-    await expectFixtureTab(
-      page,
-      'pyq',
-      ['chapter.pyq.top', 'chapter.pyq.inContent', 'chapter.sidebar'],
-      'no-fill',
-    );
+  test('loads Monetag zones without overlapping AdSense on Notes, Q&A, and PYQ', async ({ page }) => {
+    await installFixture(page);
+    await expectFixtureTab(page, 'notes');
+    await expectFixtureTab(page, 'qa');
+    await expectFixtureTab(page, 'pyq');
   });
 
-  test('detects a supplied iframe fill without interacting with the ad', async ({ page }) => {
-    await installFixture(page, 'fill');
-    await expectFixtureTab(
-      page,
-      'notes',
-      ['chapter.notes.top', 'chapter.notes.inContent', 'chapter.notes.end', 'chapter.sidebar'],
-      'fill',
-    );
+  test('honors advertising opt-out without loading either network', async ({ page }) => {
+    await installFixture(page, { adOptOut: true });
+    await page.goto(`${FIXTURE_ROUTE}?tab=notes`);
+    await expect(page.locator('[data-ad-placement]')).toHaveCount(0);
+    await expect(page.locator('script[src*="adsbygoogle.js"]')).toHaveCount(0);
+    await expect(page.locator('script[data-zone]')).toHaveCount(0);
   });
 });
 
@@ -433,7 +356,7 @@ test.describe('live production AdSense smoke', () => {
           hashedAssetUrls: [] as string[],
           hashedAssetChecks: [] as Awaited<ReturnType<typeof checkHashedAssetReferences>>,
           missingHashedAssets: [] as Awaited<ReturnType<typeof checkHashedAssetReferences>>,
-          slots: [] as Awaited<ReturnType<typeof readSlots>>,
+          monetagZones: [] as { zone: string; loaded: boolean; loadError: boolean }[],
           pageErrors: [] as string[],
           requestFailures: [] as string[],
           consoleErrors: [] as string[],
@@ -491,7 +414,13 @@ test.describe('live production AdSense smoke', () => {
             && attemptReport.missingHashedAssets.length === 0;
           const settleMs = candidateAssetsHealthy ? 3500 : 750;
           await page.waitForTimeout(Math.max(0, Math.min(settleMs, deadlineAt - Date.now())));
-          attemptReport.slots = await readSlots(page);
+          attemptReport.monetagZones = await page.locator('script[data-zone]').evaluateAll(
+            (scripts) => scripts.map((script) => ({
+              zone: script.getAttribute('data-zone') || '',
+              loaded: script.getAttribute('data-loaded') === 'true',
+              loadError: script.getAttribute('data-load-error') === 'true',
+            })),
+          );
         } catch (error) {
           attemptReport.attemptError = error instanceof Error ? error.message : String(error);
         } finally {
@@ -514,10 +443,11 @@ test.describe('live production AdSense smoke', () => {
           }
         }
 
-        const validSlots = attemptReport.slots.length > 0
-          && attemptReport.slots.every(
-            (slot) => typeof slot.slot === 'string' && /^\d{5,20}$/.test(slot.slot),
-          );
+        const validMonetagZones = ['12180636', '12180642'].every((zoneId) =>
+          attemptReport.monetagZones.some(
+            (zone) => zone.zone === zoneId && zone.loaded && !zone.loadError,
+          ),
+        );
         attemptReport.passed = attemptReport.attemptError === null
           && attemptReport.contextCloseError === null
           && diagnostics !== undefined
@@ -527,7 +457,7 @@ test.describe('live production AdSense smoke', () => {
           && attemptReport.missingHashedAssets.length === 0
           && attemptReport.staleAssets.length === 0
           && attemptReport.pageErrors.length === 0
-          && validSlots;
+          && validMonetagZones;
         console.log(`[live-ad-smoke] attempt ${attempt}: ${JSON.stringify(attemptReport)}`);
         return attemptReport;
       },

@@ -19,10 +19,7 @@ import { useShare } from '@/hooks/useShare';
 import StickyToc from '@/components/ui/StickyToc';
 import { learnArticleSchema } from '@/lib/jsonld';
 import ContinueLearning from '@/components/content/ContinueLearning';
-import AdSlot from '@/components/ads/AdSlot';
-// Quge5 multitag removed in Task #347 — AdSense is the sole monetised network.
-import useAdsenseAutoAds from '@/components/ads/useAdsenseAutoAds';
-import { adsConsentGranted } from '@/utils/adsConfig';
+import MonetagPageAds from '@/components/ads/MonetagPageAds';
 
 function buildToc(headingsJson) {
   try {
@@ -54,7 +51,6 @@ function injectHeadingIds(html) {
 }
 
 export default function LearnPage() {
-  useAdsenseAutoAds();
   const { slug } = useParams();
   const navigate = useNavigate();
   const [doc, setDoc]             = useState(null);
@@ -183,6 +179,7 @@ export default function LearnPage() {
 
   return (
     <AppLayout>
+      <MonetagPageAds />
       {doc && (
         <>
           <Helmet>
@@ -294,14 +291,8 @@ export default function LearnPage() {
             </div>
           )}
 
-          {/* Top-of-content ad — Adsterra slot, sits between the subject pill
-              and the article body. First of the maximised /learn placements
-              (Task #542). Collapses to nothing when the env var is unset. */}
-          <div className="mb-6">
-            <AdSlot placement="learn.topOfContent" />
-          </div>
-
-          {/* Main layout: content + TOC + (desktop) sidebar ad */}
+          {/* Main layout: content + table of contents. Monetag's page-level
+              In-Page Push placement is managed by MonetagPageAds above. */}
           <div className="flex gap-8 items-start">
             {/* Article */}
             <article
@@ -339,10 +330,7 @@ export default function LearnPage() {
               </div>
             </article>
 
-            {/* TOC + sidebar ad (desktop only). The sidebar slot is one of
-                the maximised /learn placements (Task #542) and is
-                deliberately gated to `lg:` so mobile never reserves the
-                600px column. */}
+            {/* Table of contents */}
             <aside className="hidden lg:flex flex-col gap-4 w-[260px] shrink-0 sticky top-24 self-start">
               <StickyToc
                 headings={toc}
@@ -351,9 +339,8 @@ export default function LearnPage() {
                 labelIcon={<List size={13} className="text-primary" />}
                 minItems={1}
               />
-              <AdSlot placement="learn.sidebar" />
             </aside>
-            {/* Mobile/tablet — TOC only (no sidebar ad to keep CLS < 0.1) */}
+            {/* Mobile/tablet table of contents */}
             <div className="lg:hidden">
               <StickyToc
                 headings={toc}
@@ -363,13 +350,6 @@ export default function LearnPage() {
                 minItems={1}
               />
             </div>
-          </div>
-
-          {/* In-content ad — Adsterra slot, sits between the article body
-              and the Important Questions section. Reserves height even
-              when disabled-but-mounted? No — disabled slots render nothing. */}
-          <div className="mt-6">
-            <AdSlot placement="learn.inContent" />
           </div>
 
           {/* Important Questions (mark-wise) */}
@@ -426,12 +406,6 @@ export default function LearnPage() {
                                       </div>
                                     </div>
                                   </div>
-                                  {/* Blueprint "reward zone" — after every 3rd Q+A pair */}
-                                  {(i + 1) % 3 === 0 && adsConsentGranted() && (
-                                    <div className="px-4 py-1">
-                                      <AdSlot placement="learn.afterQuestion" />
-                                    </div>
-                                  )}
                                 </Fragment>
                               );
                             })}
@@ -467,12 +441,6 @@ export default function LearnPage() {
                             </div>
                           </div>
                         </div>
-                        {/* Blueprint "reward zone" — after every 3rd Q+A pair */}
-                        {(i + 1) % 3 === 0 && adsConsentGranted() && (
-                          <div className="px-4 py-1">
-                            <AdSlot placement="learn.afterQuestion" />
-                          </div>
-                        )}
                       </Fragment>
                     ))
                 }
@@ -490,17 +458,6 @@ export default function LearnPage() {
                   </button>
                 )}
               </div>
-            </div>
-          )}
-
-          {/* After-PYQs ad — PropellerAds slot, sits between the Important
-              Questions block and the Flashcards block. Only mounts (and
-              therefore only reserves height) when there were questions to
-              show; rendered unconditionally is fine because <AdSlot />
-              collapses to nothing when its env var is unset. */}
-          {pyqs.length > 0 && (
-            <div className="mt-6">
-              <AdSlot placement="learn.afterPyqs" />
             </div>
           )}
 
@@ -547,16 +504,6 @@ export default function LearnPage() {
                   );
                 })}
               </div>
-            </div>
-          )}
-
-          {/* After-flashcards ad — Adsterra slot, sits between the
-              Flashcards block and the ContinueLearning rail. Mounts
-              only when there were flashcards (matches the parent
-              `flashcards.length > 0` block visually). */}
-          {flashcards.length > 0 && (
-            <div className="mt-6">
-              <AdSlot placement="learn.afterFlashcards" />
             </div>
           )}
 
@@ -623,10 +570,6 @@ export default function LearnPage() {
             );
           })()}
 
-          {/* End-of-content ad — PropellerAds slot. */}
-          <div className="mt-6">
-            <AdSlot placement="learn.endOfContent" />
-          </div>
         </div>
       </div>
     </AppLayout>

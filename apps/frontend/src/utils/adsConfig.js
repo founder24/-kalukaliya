@@ -11,20 +11,21 @@
  *   - /chat       (between completed assistant turns only)
  *   - /library    (LibraryPage)
  *   - /browser    (LibraryPage alias)
+ * Monetag replaces legacy AdSense placements only on learning pages.
  *
  * Sponsored content routes (manual per-slot units only, no auto-ads):
  *   - /learn/:slug   (LearnPage — Notes standalone view)
  *   - /pyq/:slug     (PYQReplicaPage — Question Paper standalone view)
  *   - /:board/...    (ChapterPage — Notes, Q&A, and Question Paper tabs)
  *
- * Adding/removing a network or placement is a one-file change here.
- * See ADS.md for the full list of env vars per network.
+ * See ADS.md for the AdSense placements that remain enabled elsewhere.
  */
 
 import {
   ADSENSE_PLACEMENT_ENV_KEYS,
   ADSENSE_SLOT_ID_PATTERN,
 } from './adsenseSlotConfig';
+import { MONETAG_REPLACED_AD_PLACEMENTS } from './monetagAds';
 
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
@@ -428,10 +429,9 @@ export function markAdsCrossDeviceBannerSeen() {
 //                   adsense". Brand-safe, with one network for simplicity.
 //                   single-network simplicity.
 //
-// Net result: only Google AdSense serves ads on the site. Auto Ads
-// runs page-level on /learn + /pyq via `useAdsenseAutoAds`, plus the
-// `*.adsense.*` per-slot placements stay available for ad-ops to
-// fill specific positions if the per-slot env vars are populated.
+// Monetag runs its two publisher zones on learning pages. These old
+// AdSense placements stay disabled so its slots cannot overlap Monetag.
+// Other configured AdSense placements remain unchanged.
 const DISABLED_NETWORKS = new Set([
   'propellerads',
   'adsterra',
@@ -440,6 +440,9 @@ const DISABLED_NETWORKS = new Set([
 ]);
 
 export function getAdConfig(placement) {
+  if (MONETAG_REPLACED_AD_PLACEMENTS.has(placement)) {
+    return { enabled: false, height: 0, reason: 'replaced-by-monetag' };
+  }
   const p = PLACEMENTS[placement];
   if (!p) return { enabled: false, height: 0 };
   if (DISABLED_NETWORKS.has(p.network)) return { enabled: false, height: 0 };
