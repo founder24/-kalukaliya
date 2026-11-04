@@ -560,6 +560,18 @@ jobs:
       - name: Deploy edge Worker
         run: pnpm --filter syrabit-edge exec wrangler deploy --env production
 
+      # Preserve the dashboard-provisioned Tollbit key; never copy it into
+      # GitHub, a deployment argument, or the Worker source.
+      - name: Verify existing Tollbit Worker secret binding
+        run: |
+          set -euo pipefail
+          secret_names="$(pnpm --filter syrabit-edge exec wrangler secret list --config wrangler.tollbit-production.toml --format json)"
+          printf '%s' "$secret_names" | python3 -c 'import json,sys; bindings=json.load(sys.stdin); present=any(b.get("name") == "TOLLBIT_API_KEY" and b.get("type") == "secret_text" for b in bindings); print("Tollbit secret binding present." if present else "Missing Tollbit secret binding."); sys.exit(not present)'
+
+      - name: Deploy combined Tollbit Worker
+        run: pnpm --filter syrabit-edge exec wrangler deploy --config wrangler.tollbit-production.toml
+
+
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
@@ -725,6 +737,13 @@ jobs:
       needs.deploy-frontend.result == 'success'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Verify live Tollbit public-content contract
+        run: node apps/edge/scripts/verify-tollbit.mjs "$FRONTEND_URL"
 
       - name: API Worker is live and Worker-native
         run: |

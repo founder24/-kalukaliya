@@ -1,0 +1,21 @@
+# Test-only configuration. Never deploy it after production routes are enabled:
+# it sets TOLLBIT_TEST_MODE=true and would break public requests. Use
+# wrangler.tollbit-production.toml for production deployments.
+name = "syrabit-tollbit-worker-draft"
+main = "src/tollbit/worker.ts"
+compatibility_date = "2026-11-02"
+account_id = "d66e40eac539fff1db270fddf384a5ec"
+workers_dev = true
+# Export this Worker’s trace events only after a separate account-level
+# workers_trace_events Logpush job is configured for the R2 destination.
+logpush = true
+
+[vars]
+TOLLBIT_TEST_MODE = "true"
+TOLLBIT_TEST_PUBLISHER_HOST = "syrabit.ai"
+# Current Tollbit documentation's static egress list. Refresh before relying
+# on this isolated allowlist: https://tollbit.com/static-ips.txt
+TOLLBIT_TEST_SOURCE_IPS = "52.22.183.94,3.220.109.109"
+
+# Set TOLLBIT_API_KEY only through Cloudflare's Worker secret field after the
+# isolated script exists. Never put it in this file, source control, or chat.
