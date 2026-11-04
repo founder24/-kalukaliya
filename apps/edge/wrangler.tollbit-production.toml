@@ -1,0 +1,17 @@
+# Production combined Tollbit analytics + Agent Site Worker.
+# Keep the more-specific API Worker routes intact. The Tollbit Snippet must be
+# disabled during the cutover so Agent Site requests reach this Worker.
+name = "syrabit-tollbit-worker-draft"
+main = "src/tollbit/worker.ts"
+compatibility_date = "2026-11-02"
+account_id = "d66e40eac539fff1db270fddf384a5ec"
+workers_dev = false
+logpush = true
+
+routes = [
+  { pattern = "syrabit.ai/*", zone_name = "syrabit.ai" },
+  { pattern = "www.syrabit.ai/*", zone_name = "syrabit.ai" },
+]
+
+[vars]
+TOLLBIT_TEST_MODE = "false"

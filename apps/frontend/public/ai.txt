@@ -1,7 +1,8 @@
 # Syrabit.ai — AI Bot Discovery Manifest (RFC-style /ai.txt)
-# Policy: citation-driving answer bots allowed; training-only crawlers blocked.
+# Policy: search/retrieval agents may request licensed access through Tollbit.
+# Public indexes grant discovery, not a license to retrieve page content.
+# Training-only crawlers are blocked on public study-page routes.
 # Curators: Syrabit.ai Editorial Team <founder@syrabit.ai>
-# Last updated: 2026-06-07
 
 [allow]
 PerplexityBot
@@ -9,6 +10,13 @@ Perplexity-User
 ChatGPT-User
 OAI-SearchBot
 YouBot
+Claude-SearchBot
+Claude-User
+
+[access]
+https://tollbit.syrabit.ai
+Public study content requires Tollbit authorization for configured retrieval agents.
+User-Agent matching is a routing policy, not authenticated crawler identity.
 
 [disallow]
 GPTBot
