@@ -1,0 +1,16 @@
+.study-markdown {
+  min-width: 0;
+}
+
+.study-markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
+
+.study-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}

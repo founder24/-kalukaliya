@@ -1,10 +1,7 @@
 import { useMemo, useCallback, memo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { useStrictMode, useEduAllowlist } from '@/hooks/useStrictMode';
-
-const remarkPlugins = [remarkGfm];
 
 function _hostOf(href) {
   try { return new URL(href, window.location.origin).hostname; } catch { return ''; }
@@ -155,9 +152,9 @@ export const MarkdownContent = memo(function MarkdownContent({ content, streamin
 
   return (
     <div className="md-content-light" style={{ fontSize: '0.9375rem' }}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+      <MarkdownRenderer components={components}>
         {processed}
-      </ReactMarkdown>
+      </MarkdownRenderer>
       {streaming && (
         <span
           className="inline-block rounded-full align-middle"
