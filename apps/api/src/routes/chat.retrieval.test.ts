@@ -14,6 +14,7 @@ import {
   resolvePublishedTopicTitle,
   retrieveDirectQuestionTopicId,
   resolveCurriculumScope,
+  selectedChapterMatchesScope,
   selectTopicIdForChapter,
   semanticRetrievalFilters,
   shouldBypassSemanticRetrieval,
@@ -280,6 +281,13 @@ describe('chapter-scoped chat retrieval', () => {
     ['Explain this for Class XI', '11'],
     ['HS 1st year chemistry', '11'],
     ['Class 12 Biology', '12'],
+    ['For AHSEC Class 12 Chemistry, explain electrochemistry. Do not use Class 11 Physics notes.', 'ambiguous'],
+    ['Class XI Physics, also called Class 11', '11'],
+    ['Class 12 Physics (Grade XII)', '12'],
+    ['Grade 12 Chemistry', '12'],
+    ['Std. XI Physics', '11'],
+    ['Standard 11 Physics (Grade XI)', '11'],
+    ['Grade XII Chemistry, not Standard XI Physics', 'ambiguous'],
     ['HS 2nd Year Assamese', '12'],
     ['third semester economics', 'semester-3'],
     ['Explain the chapter for Class 9', 'unsupported'],
@@ -328,6 +336,27 @@ describe('chapter-scoped chat retrieval', () => {
       explicit: true,
       unresolved: false,
     });
+  });
+
+  it('rejects the audited mixed-class prompt before querying curriculum rows', async () => {
+    const d1 = { prepare: vi.fn() };
+    await expect(resolveCurriculumScope(
+      d1 as unknown as D1Database,
+      'For AHSEC Class 12 Chemistry, explain electrochemistry. Do not use Class 11 Physics notes.',
+      'physics-ahsec-11',
+    )).resolves.toEqual({ explicit: true, unresolved: true });
+    expect(d1.prepare).not.toHaveBeenCalled();
+  });
+
+  it('verifies the selected chapter subject even when page subject metadata is omitted or forged', async () => {
+    const first = vi.fn(async () => ({ subject_id: 'physics-ahsec-11' }));
+    const bind = vi.fn(() => ({ first }));
+    const d1 = { prepare: vi.fn(() => ({ bind })) };
+    await expect(selectedChapterMatchesScope(d1 as unknown as D1Database, 'laws-of-motion', 'chemistry-12')).resolves.toBe(false);
+    await expect(selectedChapterMatchesScope(d1 as unknown as D1Database, 'laws-of-motion', 'physics-ahsec-11')).resolves.toBe(true);
+    first.mockResolvedValueOnce(null as never);
+    await expect(selectedChapterMatchesScope(d1 as unknown as D1Database, 'missing', 'physics-ahsec-11')).resolves.toBe(false);
+    expect(bind).toHaveBeenCalledWith('laws-of-motion');
   });
 
   it('disambiguates page subjects, preserves conflicting subjects, and ignores output-language mentions', async () => {

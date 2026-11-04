@@ -1587,6 +1587,7 @@ export default function ChapterPage() {
                     const definition = localized ? topic.definition_as : topic.definition;
                     if (
                       typeof slug !== 'string' ||
+                      !slug.trim() ||
                       typeof title !== 'string' ||
                       !title.trim() ||
                       (localized && (typeof definition !== 'string' || definition.trim().split(/\s+/).filter(Boolean).length < 40))

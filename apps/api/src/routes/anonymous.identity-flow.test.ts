@@ -145,6 +145,47 @@ afterAll(async () => {
 });
 
 describe('anonymous identity flow', () => {
+  it('rejects conflicting selected chapters before generation even with absent or forged subject labels', async () => {
+    const insert = [
+      "INSERT INTO boards (id, name, slug, status) VALUES ('scope-board', 'AHSEC', 'scope-ahsec', 'published')",
+      "INSERT INTO classes (id, board_id, name, slug, level, status) VALUES ('scope-class-11', 'scope-board', 'Class 11', 'class-11', '11', 'published'), ('scope-class-12', 'scope-board', 'Class 12', 'class-12', '12', 'published')",
+      "INSERT INTO streams (id, class_id, name, slug, status) VALUES ('scope-stream-11', 'scope-class-11', 'Science', 'science', 'published'), ('scope-stream-12', 'scope-class-12', 'Science', 'science', 'published')",
+      "INSERT INTO subjects (id, stream_id, name, slug, is_published) VALUES ('scope-physics-11', 'scope-stream-11', 'Physics', 'physics', 1), ('scope-chemistry-11', 'scope-stream-11', 'Chemistry', 'chemistry', 1), ('scope-chemistry-12', 'scope-stream-12', 'Chemistry', 'chemistry', 1)",
+      "INSERT INTO chapters (id, subject_id, title, slug, status) VALUES ('scope-laws', 'scope-physics-11', 'Laws of Motion', 'laws-of-motion', 'published')",
+    ];
+    try {
+      for (const sql of insert) await env.DB.prepare(sql).run();
+      const before = generationCalls;
+      const cases = [
+        { message: 'Explain Chemistry' },
+        { message: 'Grade 12 Chemistry', subject_id: 'scope-chemistry-12' },
+        { message: 'For AHSEC Class 12 Chemistry, explain electrochemistry. Do not use Class 11 Physics notes.', subject_id: 'scope-physics-11' },
+      ];
+      for (const entry of cases) {
+        const response = await workerFetch(new Request('https://api.example/api/v1/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-anon-id': ANON_ID },
+          body: JSON.stringify({ ...entry, chapter_id: 'scope-laws', lang: 'en' }),
+        }));
+        expect(response.status).toBe(422);
+        expect(await response.json()).toMatchObject({
+          error_code: 'curriculum_scope_ambiguous',
+          failure_stage: 'curriculum_scope',
+        });
+        await Promise.all(background);
+      }
+      expect(generationCalls).toBe(before);
+    } finally {
+      for (const [table, column, prefix] of [
+        ['chapters', 'id', 'scope-laws'],
+        ['subjects', 'id', 'scope-%'],
+        ['streams', 'id', 'scope-%'],
+        ['classes', 'id', 'scope-%'],
+        ['boards', 'id', 'scope-board'],
+      ]) await env.DB.prepare(`DELETE FROM ${table} WHERE ${column} LIKE ?`).bind(prefix).run();
+    }
+  });
+
   it('emits web attribution before Workers AI tokens for eligible current queries', async () => {
     const originalWebSearchFlag = env.WEB_SEARCH_ENABLED;
     env.WEB_SEARCH_ENABLED = 'true';

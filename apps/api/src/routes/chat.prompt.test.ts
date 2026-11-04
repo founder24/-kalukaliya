@@ -14,6 +14,16 @@ import {
 } from './chat';
 
 describe('student chat curriculum scope', () => {
+  it('requires consistent numerical reasoning and correct third-law pairs', () => {
+    const prompt = buildSystemPrompt({ lang: 'en', contextText: '', history: '', question: 'Explain action and reaction.' });
+    expect(prompt).toContain('formula, substitution, result and units');
+    expect(prompt).toContain('force of A on B and force of B on A');
+    expect(prompt).toContain('Never claim that they are unequal');
+    const assamese = buildSystemPrompt({ lang: 'as', contextText: '', history: '', question: 'বল কিমান?' });
+    expect(assamese).toContain('সংখ্যাগত উত্তৰত সূত্ৰ');
+    expect(assamese).toContain('দুটা বল বেলেগ বস্তুৰ ওপৰত লাগে');
+    expect(assamese).toContain('“আগেৰ”ৰ সলনি “আগৰ”');
+  });
   it('limits English answers to Assam Board and refuses other boards', () => {
     const prompt = buildSystemPrompt({
       lang: 'en',
