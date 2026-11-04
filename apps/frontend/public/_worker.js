@@ -744,9 +744,18 @@ export default {
         const contentType = response.headers.get("Content-Type") || "";
         // Guard against a Pages asset fallback that reports 200 but sends
         // index.html. A JavaScript/CSS asset is never an HTML document.
-        return response.status === 404 || /(?:x?html)/i.test(contentType)
-          ? assetNotFoundResponse(request)
-          : response;
+        if (response.status === 404 || /(?:x?html)/i.test(contentType)) {
+          return assetNotFoundResponse(request);
+        }
+        // Also clear headers on already-cached ASSETS responses, not just
+        // future uploads whose _headers now detaches Link for /assets/*.
+        const headers = new Headers(response.headers);
+        headers.delete("Link");
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
       } catch {
         return assetNotFoundResponse(request);
       }

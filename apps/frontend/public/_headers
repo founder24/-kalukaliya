@@ -32,6 +32,8 @@
 #   vite-plugins/preload-headers-inject.js  (Task #79)
 # The plugin appends a `/*` block with the correct hashed paths after each
 # `vite build` run, enabling Cloudflare to emit 103 Early Hints responses.
+# It also detaches Link on /assets/*: Pages combines matching rules, and
+# immutable asset responses must never retain an older build's preload list.
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

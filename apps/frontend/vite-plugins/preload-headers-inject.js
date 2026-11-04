@@ -26,8 +26,10 @@
 //     Link: </assets/router-Ce6RPQkI.js>; rel=preload; as=script; crossorigin
 //     Link: </assets/query-DCJWmNgi.js>; rel=preload; as=script; crossorigin
 //
-// The `/*` rule is added ONCE at the BOTTOM of `dist/_headers` (more-specific
-// path rules already present override the catch-all for their own headers).
+// Pages combines matching header rules; specificity does NOT remove a Link
+// inherited from `/*`. Immutable assets must explicitly detach it, otherwise
+// an unchanged chunk caches the entry hashes from the build that first served
+// it, and browsers preload those removed files after subsequent deployments.
 
 import fs from "fs";
 import path from "path";
@@ -115,7 +117,7 @@ export default function preloadHeadersInjectPlugin() {
             .split("\n")
             .filter(
               (l) =>
-                !l.trim().toLowerCase().startsWith("link:") &&
+                !(/^\s*link:.*\brel=preload\b/i.test(l)) &&
                 l !== "/*" &&
                 l.trim() !== "",
             )
@@ -131,6 +133,10 @@ export default function preloadHeadersInjectPlugin() {
         headers = headers.trimEnd() + "\n\n" + newBlock;
       }
 
+      // Detach the build-specific header after all additive rules. Keep HTML
+      // Early Hints and discovery links intact, but never cache them on assets.
+      headers = headers.replace(/^\/assets\/\*\n[ \t]+! Link[ \t]*(?:\n|$)/gm, "");
+      headers = headers.trimEnd() + "\n\n/assets/*\n  ! Link\n";
       fs.writeFileSync(headersPath, headers);
 
       // ── Build-time assertion ────────────────────────────────────────────────
