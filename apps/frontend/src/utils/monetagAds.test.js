@@ -1,4 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   injectMonetagZones,
   isMonetagManagedPath,
@@ -8,6 +10,21 @@ import {
 } from './monetagAds';
 
 describe('Monetag route and tag configuration', () => {
+  it('includes exact Monetag runtime hosts in CSP without wildcarding them', () => {
+    const headers = readFileSync(resolve(process.cwd(), 'public/_headers'), 'utf8');
+    const csp = headers.match(/Content-Security-Policy:\s*([^\n]+)/)?.[1] ?? '';
+    const connectSrc = csp.match(/(?:^|;\s*)connect-src\s+([^;]+)/)?.[1] ?? '';
+
+    expect(connectSrc.split(/\s+/)).toEqual(expect.arrayContaining([
+      'https://my.rtmark.net',
+      'https://255md.com',
+      'https://jhnwr.com',
+    ]));
+    expect(connectSrc).not.toContain('https://*.rtmark.net');
+    expect(connectSrc).not.toContain('https://*.255md.com');
+    expect(connectSrc).not.toContain('https://*.jhnwr.com');
+  });
+
   it.each([
     '/learn/modern-assamese-language',
     '/pyq/ahsec-class-12-physics-2025',
