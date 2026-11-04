@@ -41,6 +41,24 @@ afterEach(() => {
 
 
 describe("Pages worker crawler snapshots", () => {
+  it("strips stale preload headers from cached assets without changing cache or security metadata", async () => {
+    const response = await worker.fetch(new Request("https://syrabit.ai/assets/vendor-abc123.js"), {
+      ASSETS: { fetch: async () => new Response("export default 1;", {
+        headers: {
+          "Content-Type": "application/javascript",
+          Link: "</assets/index-removed.js>; rel=preload; as=script",
+          "Cache-Control": "public, max-age=31536000, immutable",
+          ETag: '"abc123"',
+          "Content-Security-Policy": "default-src 'self'",
+        },
+      }) },
+    });
+    expect(response.headers.has("Link")).toBe(false);
+    expect(response.headers.get("Cache-Control")).toContain("immutable");
+    expect(response.headers.get("ETag")).toBe('"abc123"');
+    expect(response.headers.get("Content-Security-Policy")).toBe("default-src 'self'");
+    expect(await response.text()).toBe("export default 1;");
+  });
   it.each([
     ["/library", "crawler", BOT_HEADERS],
     ["/browser", "crawler", BOT_HEADERS],

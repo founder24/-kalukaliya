@@ -5,6 +5,11 @@ const PRODUCTION_ROUTE = process.env.E2E_ADS_PRODUCTION_PATH
   || '/ahsec/hs-1st-year/physics/laws-of-motion';
 const MONETAG_ONCLICK = 'https://al5sm.com/tag.min.js';
 const MONETAG_IN_PAGE_PUSH = 'https://nap5k.com/tag.min.js';
+const MONETAG_RUNTIME_CONNECT_HOSTS = [
+  'https://my.rtmark.net/',
+  'https://jhnwr.com/',
+  'https://255md.com/',
+];
 
 const fixtureChapter = {
   chapter_id: 'release-ad-fixture',
@@ -65,7 +70,7 @@ async function installFixture(
       rootMargin = '0px';
       thresholds = [0];
     } as unknown as typeof IntersectionObserver;
-  });
+  }, adOptOut);
 
   await page.route(MONETAG_ONCLICK, fulfillMonetagTag);
   await page.route(MONETAG_IN_PAGE_PUSH, fulfillMonetagTag);
@@ -145,6 +150,7 @@ function attachProductionDiagnostics(page: Page) {
   const staleAssets: string[] = [];
   const consoleErrors: string[] = [];
   const requestHosts = new Set<string>();
+  const assetPreloadHeaders: { assetUrl: string; link: string; cacheStatus: string | null }[] = [];
 
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('request', (request) => requestHosts.add(new URL(request.url()).host));
@@ -155,13 +161,46 @@ function attachProductionDiagnostics(page: Page) {
     if (message.type() === 'error') consoleErrors.push(message.text());
   });
   page.on('response', (response) => {
+    // The document can be fresh while an unchanged immutable chunk carries
+    // another build's Link headers. Record the *response that advertised*
+    // the obsolete file, not just the parser initiator reported by Chromium.
+    const link = response.headers()['link'] || '';
+    if (new URL(response.url()).pathname.startsWith('/assets/') && /\brel\s*=\s*"?preload\b/i.test(link)) {
+      assetPreloadHeaders.push({
+        assetUrl: response.url(),
+        link,
+        cacheStatus: response.headers()['cf-cache-status'] || null,
+      });
+    }
     if (response.status() === 404 && new URL(response.url()).pathname.includes('/assets/')) {
       staleAssets.push(`${response.status()} ${response.url()}`);
     }
   });
 
-  return { pageErrors, requestFailures, staleAssets, consoleErrors, requestHosts };
+  return { pageErrors, requestFailures, staleAssets, consoleErrors, requestHosts, assetPreloadHeaders };
 }
+
+test('records the asset response advertising obsolete preloads even when its own URL succeeds', async ({ page }) => {
+  const diagnostics = attachProductionDiagnostics(page);
+  await page.route('https://asset-header.test/**', async (route) => {
+    const asset = new URL(route.request().url()).pathname.startsWith('/assets/');
+    await route.fulfill({
+      status: 200,
+      contentType: asset ? 'application/javascript' : 'text/html',
+      headers: asset ? {
+        Link: '</assets/removed-entry.js>; rel=preload; as=script',
+        'CF-Cache-Status': 'HIT',
+      } : {},
+      body: asset ? 'window.assetLoaded = true;' : '<script src="/assets/current.js"></script>',
+    });
+  });
+  await page.goto('https://asset-header.test/');
+  expect(diagnostics.assetPreloadHeaders).toContainEqual({
+    assetUrl: 'https://asset-header.test/assets/current.js',
+    link: '</assets/removed-entry.js>; rel=preload; as=script',
+    cacheStatus: 'HIT',
+  });
+});
 
 function extractHashedAssetReferences(html: string, documentUrl: string): string[] {
   const assets = new Set<string>();
@@ -316,7 +355,7 @@ test('does not accept a healthy document check completed after the deadline', as
   expect(result.latePassDiscarded).toBe(true);
 });
 
-test.describe('live production AdSense smoke', () => {
+test.describe('live production learning-page ads smoke', () => {
   test.skip(
     process.env.E2E_ADS_PRODUCTION !== '1',
     'Run with E2E_ADS_PRODUCTION=1 and BASE_URL=https://syrabit.ai.',
@@ -357,10 +396,12 @@ test.describe('live production AdSense smoke', () => {
           hashedAssetChecks: [] as Awaited<ReturnType<typeof checkHashedAssetReferences>>,
           missingHashedAssets: [] as Awaited<ReturnType<typeof checkHashedAssetReferences>>,
           monetagZones: [] as { zone: string; loaded: boolean; loadError: boolean }[],
+          monetagCspBlockedRequests: [] as string[],
           pageErrors: [] as string[],
           requestFailures: [] as string[],
           consoleErrors: [] as string[],
           staleAssets: [] as string[],
+          assetPreloadHeaders: [] as ReturnType<typeof attachProductionDiagnostics>['assetPreloadHeaders'],
           attemptError: null as string | null,
           contextCloseError: null as string | null,
           passed: false,
@@ -369,10 +410,6 @@ test.describe('live production AdSense smoke', () => {
         try {
           context = await browser.newContext({
             serviceWorkers: 'block',
-            extraHTTPHeaders: {
-              'Cache-Control': 'no-cache',
-              Pragma: 'no-cache',
-            },
           });
           const page = await context.newPage();
           diagnostics = attachProductionDiagnostics(page);
@@ -438,8 +475,13 @@ test.describe('live production AdSense smoke', () => {
             attemptReport.requestHosts = [...diagnostics.requestHosts];
             attemptReport.pageErrors = [...diagnostics.pageErrors];
             attemptReport.requestFailures = [...diagnostics.requestFailures];
+            attemptReport.monetagCspBlockedRequests = attemptReport.requestFailures.filter(
+              (failure) => /— (?:csp|net::ERR_BLOCKED_BY_CSP)\b/i.test(failure)
+                && MONETAG_RUNTIME_CONNECT_HOSTS.some((host) => failure.includes(host)),
+            );
             attemptReport.consoleErrors = [...diagnostics.consoleErrors];
             attemptReport.staleAssets = [...diagnostics.staleAssets];
+            attemptReport.assetPreloadHeaders = [...diagnostics.assetPreloadHeaders];
           }
         }
 
@@ -456,7 +498,9 @@ test.describe('live production AdSense smoke', () => {
           && attemptReport.hashedAssetUrls.length > 0
           && attemptReport.missingHashedAssets.length === 0
           && attemptReport.staleAssets.length === 0
+          && attemptReport.assetPreloadHeaders.length === 0
           && attemptReport.pageErrors.length === 0
+          && attemptReport.monetagCspBlockedRequests.length === 0
           && validMonetagZones;
         console.log(`[live-ad-smoke] attempt ${attempt}: ${JSON.stringify(attemptReport)}`);
         return attemptReport;

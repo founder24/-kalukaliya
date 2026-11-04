@@ -699,7 +699,7 @@ jobs:
           # This step is non-blocking for dependent release checks; the final
           # release summary still fails if propagation never converges.
           pnpm --filter @workspace/syrabit exec playwright test e2e/ads-release.spec.ts \
-            --grep "live production AdSense smoke"
+            --grep "live production learning-page ads smoke"
 
       - name: Upload live ad smoke diagnostics
         if: ${{ always() && steps.live-ad-smoke.outcome == 'failure' }}
