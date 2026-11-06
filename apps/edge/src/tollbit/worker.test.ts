@@ -340,14 +340,50 @@ describe('Tollbit Worker routing and analytics', () => {
     const headers = new Headers(logCall?.init?.headers);
     expect(headers.get('TollbitKey')).toBe('test-only-key');
     expect(headers.get('Content-Type')).toBe('application/json');
-    expect(JSON.parse(String(logCall?.init?.body))).toMatchObject({
+    const body = String(logCall?.init?.body);
+    expect(body.endsWith('\n')).toBe(true);
+    expect(JSON.parse(body)).toMatchObject({
       url: '/degree/1st-semester/ba/course',
       request_method: 'GET',
       response_status: 200,
     });
     expect(info).toHaveBeenCalledWith(
       'Tollbit analytics delivery accepted.',
+      expect.objectContaining({
+        status: 200,
+        durationMs: expect.any(Number),
+      }),
     );
+  });
+
+  it('reports a sanitized Tollbit rejection status without affecting the page', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+      (input instanceof Request ? input.url : String(input)) === 'https://log.tollbit.com/log'
+        ? new Response('private provider error', { status: 401 })
+        : new Response('page', { status: 200 }),
+    ));
+    const ctx = makeContext();
+
+    const response = await tollbitWorker.fetch(
+      new Request('https://syrabit.ai/library'),
+      { TOLLBIT_API_KEY: 'never-log-this-key' },
+      ctx,
+    );
+    await Promise.all(ctx.pending);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('page');
+    expect(warn).toHaveBeenCalledWith(
+      'Tollbit analytics delivery rejected.',
+      expect.objectContaining({
+        status: 401,
+        durationMs: expect.any(Number),
+      }),
+    );
+    const diagnostics = JSON.stringify(warn.mock.calls);
+    expect(diagnostics).not.toContain('never-log-this-key');
+    expect(diagnostics).not.toContain('private provider error');
   });
 
   it('logs eligible public HTML traffic without requiring signature headers', async () => {

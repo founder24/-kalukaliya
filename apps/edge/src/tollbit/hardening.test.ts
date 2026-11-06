@@ -168,7 +168,13 @@ describe('Tollbit analytics completeness and discovery', () => {
     expect(await (await worker.fetch(request('Mozilla/5.0'), { TOLLBIT_API_KEY: 'test-key' }, ctx)).text()).toBe('page');
     await vi.advanceTimersByTimeAsync(5000);
     await Promise.all(ctx.pending);
-    expect(console.warn).toHaveBeenCalledWith('Tollbit analytics delivery failed.');
+    expect(console.warn).toHaveBeenCalledWith(
+      'Tollbit analytics delivery timed out.',
+      expect.objectContaining({
+        status: null,
+        durationMs: expect.any(Number),
+      }),
+    );
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
