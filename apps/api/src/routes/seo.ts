@@ -467,6 +467,8 @@ Allow: /
 Crawl-delay: 0
 
 Sitemap: ${SITE_URL}/sitemap-index.xml
+Sitemap: ${SITE_URL}/sitemap-subjects.xml
+Sitemap: ${SITE_URL}/sitemap-chapters.xml
 `;
 
 seoRouter.get('/sitemap.xml', sitemapIndex);

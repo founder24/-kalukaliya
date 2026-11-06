@@ -512,6 +512,8 @@ describe('Worker-native site-operation routes', () => {
       .filter((line) => /^Content-Signal:/i.test(line));
 
     expect(response.status).toBe(200);
+    expect(body).toContain('Sitemap: https://syrabit.ai/sitemap-subjects.xml');
+    expect(body).toContain('Sitemap: https://syrabit.ai/sitemap-chapters.xml');
     expect(activeSignals).toEqual([
       'Content-Signal: search=yes, ai-input=yes, ai-train=no',
     ]);
