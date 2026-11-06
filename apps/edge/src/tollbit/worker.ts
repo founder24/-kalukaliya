@@ -352,25 +352,48 @@ async function postTollbitLog(
   entry: TollbitLogEntry,
   apiKey: string,
 ): Promise<void> {
-  const response = await boundedFetch(TOLLBIT_LOG_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      TollbitKey: apiKey,
-      'Content-Type': 'application/json',
-    },
-    // A single JSON record is a one-record NDJSON batch, matching Tollbit's
-    // documented worker endpoint without relying on isolate-local batch state.
-    body: JSON.stringify(entry),
-  }, TOLLBIT_LOG_TIMEOUT_MS);
+  const startedAt = Date.now();
+  try {
+    const response = await boundedFetch(TOLLBIT_LOG_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        TollbitKey: apiKey,
+        'Content-Type': 'application/json',
+      },
+      // Tollbit documents newline-delimited JSON records. A one-record batch
+      // ends with a newline and avoids isolate-local batching state.
+      body: `${JSON.stringify(entry)}\n`,
+    }, TOLLBIT_LOG_TIMEOUT_MS);
 
-  if (!response.ok) {
+    const status = response.status;
     await response.body?.cancel();
-    throw new Error(`Tollbit log endpoint returned HTTP ${response.status}`);
-  }
-  await response.body?.cancel();
+    const durationMs = Math.max(0, Date.now() - startedAt);
 
-  // Keep the trace useful without logging request data or credentials.
-  console.info('Tollbit analytics delivery accepted.');
+    // Keep logs limited to transport evidence; never include the key, body,
+    // URL, visitor data, or provider response text.
+    if (!response.ok) {
+      console.warn('Tollbit analytics delivery rejected.', {
+        status,
+        durationMs,
+      });
+      return;
+    }
+
+    console.info('Tollbit analytics delivery accepted.', {
+      status,
+      durationMs,
+    });
+  } catch (error) {
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    const timedOut = error instanceof Error
+      && error.message === 'Tollbit upstream timed out';
+    console.warn(
+      timedOut
+        ? 'Tollbit analytics delivery timed out.'
+        : 'Tollbit analytics transport failed.',
+      { status: null, durationMs },
+    );
+  }
 }
 
 async function boundedFetch(
@@ -482,13 +505,8 @@ export default {
     if (publicPage) {
       if (env.TOLLBIT_API_KEY) {
         const entry = buildTollbitLogEntry(request, response, new Date(), env);
-        ctx.waitUntil(
-          postTollbitLog(entry, env.TOLLBIT_API_KEY).catch(() => {
-            // Analytics delivery is best-effort and must not delay or break
-            // the student's page response. Never log payloads or credentials.
-            console.warn('Tollbit analytics delivery failed.');
-          }),
-        );
+        // Analytics is best-effort and must not delay or break the page.
+        ctx.waitUntil(postTollbitLog(entry, env.TOLLBIT_API_KEY));
       } else {
         console.warn('Tollbit analytics disabled: secret binding is missing.');
       }

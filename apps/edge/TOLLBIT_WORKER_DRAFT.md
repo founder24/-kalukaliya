@@ -53,8 +53,10 @@ in `wrangler.tollbit-draft.toml`.
 - Delivers analytics asynchronously and does not block page responses.
 - Bounds log submissions to five seconds without automatic retries that could
   duplicate records. Endpoint acceptance is not dashboard-ingestion proof.
-- Emits only a fixed success message or a fixed failure message for Tollbit
-  delivery. It never logs the API key, request headers, or analytics payload.
+- Emits the delivery outcome, provider HTTP status when available, and elapsed
+  time for Tollbit submissions. It never logs the API key, response text,
+  request headers, or analytics payload; endpoint acceptance is not proof of
+  dashboard ingestion.
 - In test mode, accepts content requests only through the `workers.dev`
   hostname and only from Tollbit's currently documented static egress IPs.
   Other requests receive 404; `GET /__tollbit_test_health` is a no-upstream
