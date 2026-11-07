@@ -1,3 +1,17 @@
+export interface AiSearchInstanceBinding {
+  search(input: {
+    query: string;
+    ai_search_options: {
+      retrieval: {
+        retrieval_type: 'hybrid';
+        max_num_results: number;
+        filters: Record<string, string>;
+        return_on_failure: false;
+      };
+    };
+  }): Promise<unknown>;
+}
+
 export interface Env {
   // D1 Database
   DB: D1Database;
@@ -14,6 +28,11 @@ export interface Env {
 
   // Workers AI
   AI: Ai;
+
+  // Optional Cloudflare AI Search instance binding. It stays unconfigured until
+  // the student-search pilot is explicitly provisioned and approved.
+  AI_SEARCH?: AiSearchInstanceBinding;
+  AI_SEARCH_STUDENT_SEARCH_ENABLED?: string;
 
   // Secrets (set via wrangler secret put)
   JWT_SECRET: string;

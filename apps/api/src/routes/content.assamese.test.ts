@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 import { Hono } from 'hono';
 import type { Env } from '../types';
@@ -198,6 +198,18 @@ async function get(pathname: string): Promise<Response> {
   return app.fetch(new Request(`http://worker${pathname}`), env);
 }
 
+async function postJson(
+  pathname: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return app.fetch(new Request(`http://worker${pathname}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+  }), env);
+}
+
 describe('Assamese public content metadata', () => {
   it('exposes only complete Q&A pairs to FAQ metadata', async () => {
     const response = await get('/api/v1/content/chapters/faq-complete/faq-jsonld');
@@ -345,6 +357,101 @@ describe('Assamese public content metadata', () => {
       total: 2,
       available: true,
     });
+  });
+
+  it('keeps student Smart Search disabled until flagged and revalidates published results', async () => {
+    const originalAiSearch = env.AI_SEARCH;
+    const originalStudentSearchEnabled = env.AI_SEARCH_STUDENT_SEARCH_ENABLED;
+    const disabledStatus = await get('/api/v1/content/smart-search/status');
+    expect(disabledStatus.status).toBe(200);
+    await expect(disabledStatus.json()).resolves.toEqual({ enabled: false });
+
+    const disabledSearch = await postJson('/api/v1/content/smart-search', {
+      query: 'motion',
+      language: 'en',
+    }, { 'CF-Connecting-IP': '198.51.100.21' });
+    expect(disabledSearch.status).toBe(503);
+
+    const indexedChapter = await env.DB.prepare(
+      `SELECT updated_at FROM chapters WHERE id = 'translated'`,
+    ).first<{ updated_at: number | null }>();
+    const search = vi.fn(async () => ({
+      chunks: [
+        {
+          item: { key: `student-search/v1/en/translated/${(indexedChapter?.updated_at ?? 0) - 1}.md` },
+          text: 'This stale revision must be filtered.',
+          score: 0.99,
+        },
+        {
+          item: { key: `student-search/v1/en/translated/${indexedChapter?.updated_at ?? 0}.md` },
+          text: 'A moving object changes its position over time.',
+          score: 0.92,
+        },
+        {
+          item: { key: 'student-search/v1/en/draft-topics/0.md' },
+          text: 'This draft must never appear in public search.',
+          score: 0.99,
+        },
+      ],
+    }));
+    env.AI_SEARCH = { search } as NonNullable<Env['AI_SEARCH']>;
+    env.AI_SEARCH_STUDENT_SEARCH_ENABLED = 'true';
+    try {
+      const enabledStatus = await get('/api/v1/content/smart-search/status');
+      await expect(enabledStatus.json()).resolves.toEqual({ enabled: true });
+
+      const invalidLanguage = await postJson('/api/v1/content/smart-search', {
+        query: 'motion',
+        language: 'fr',
+      }, { 'CF-Connecting-IP': '198.51.100.23' });
+      expect(invalidLanguage.status).toBe(400);
+
+      const tooLarge = await postJson('/api/v1/content/smart-search', {
+        query: 'x'.repeat(9_000),
+        language: 'en',
+      }, { 'CF-Connecting-IP': '198.51.100.24' });
+      expect(tooLarge.status).toBe(413);
+
+      const response = await postJson('/api/v1/content/smart-search', {
+        query: 'motion',
+        language: 'en',
+      }, { 'CF-Connecting-IP': '198.51.100.22' });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        query: 'motion',
+        total: 1,
+        results: [{
+          chapter_id: 'translated',
+          title: 'Motion',
+          url: '/ahsec/class-12/physics/motion',
+          snippet: 'A moving object changes its position over time.',
+        }],
+      });
+      expect(search).toHaveBeenCalledWith(expect.objectContaining({
+        query: 'motion',
+        ai_search_options: {
+          retrieval: expect.objectContaining({
+            retrieval_type: 'hybrid',
+            filters: { language: 'en' },
+            return_on_failure: false,
+          }),
+        },
+      }));
+
+      const withoutClientIp = await postJson('/api/v1/content/smart-search', {
+        query: 'motion',
+        language: 'en',
+      });
+      expect(withoutClientIp.status).toBe(503);
+    } finally {
+      if (originalAiSearch) env.AI_SEARCH = originalAiSearch;
+      else delete env.AI_SEARCH;
+      if (originalStudentSearchEnabled !== undefined) {
+        env.AI_SEARCH_STUDENT_SEARCH_ENABLED = originalStudentSearchEnabled;
+      } else {
+        delete env.AI_SEARCH_STUDENT_SEARCH_ENABLED;
+      }
+    }
   });
 
   it('localizes published answers and excludes drafts or navigation-only topics', async () => {

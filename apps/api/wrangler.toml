@@ -57,7 +57,7 @@ name = "syrabit-api-prod"
 # Student chat uses curriculum/RAG context and model knowledge only. Requests
 # needing verified current information fail closed rather than presenting
 # unsourced answers as current.
-vars = { ALLOWED_ORIGINS = "https://syrabit.ai,https://api.syrabit.ai", APP_ENV = "production", WEB_SEARCH_ENABLED = "false", REFERRAL_PROGRAM_RUNTIME_ENABLED = "true" }
+vars = { ALLOWED_ORIGINS = "https://syrabit.ai,https://api.syrabit.ai", APP_ENV = "production", WEB_SEARCH_ENABLED = "false", REFERRAL_PROGRAM_RUNTIME_ENABLED = "true", AI_SEARCH_STUDENT_SEARCH_ENABLED = "true" }
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -82,6 +82,10 @@ preview_id = "fd70db2acf7045d6a8d6ba4334316297"
 [[env.production.vectorize]]
 binding = "VECTORIZE"
 index_name = "syrabit-rag"
+
+[[env.production.ai_search]]
+binding = "AI_SEARCH"
+instance_name = "syrabit-student-curriculum"
 
 [env.production.ai]
 binding = "AI"

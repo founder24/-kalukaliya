@@ -1115,6 +1115,16 @@ export const searchContent = (q, { board, limit = 10 } = {}) =>
     withCredentials: false,
   });
 
+export const getStudentSearchStatus = () =>
+  axios.get(`${WORKER_API}/content/smart-search/status`, {
+    withCredentials: false,
+  }).then((response) => response.data);
+
+export const searchStudentContent = (payload) =>
+  axios.post(`${WORKER_API}/content/smart-search`, payload, {
+    withCredentials: false,
+  }).then((response) => response.data);
+
 // ── Personalized CMS ────────────────────────────────────────────────────────
 const cmsPersonalize = (body) =>
   apiClient().post('/cms/personalize', body);

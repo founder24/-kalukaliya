@@ -30,11 +30,19 @@ import { publicChapterListWhere, serializePublicChapterList } from '../services/
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
 import { resolveTopicPageContent, type TopicPageLanguage } from '../services/topic-page';
 import { faqEntriesFromJson, faqJsonLd } from '../services/faq-jsonld';
+import { enforceStudentSearchRateLimit } from '../services/student-search-rate-limit';
+import {
+  queryStudentSearch,
+  readStudentSearchChunks,
+  type StudentSearchLanguage,
+  type StudentSearchScope,
+} from '../services/student-search';
 import type { Env } from '../types';
 
 export const contentRouter = new Hono<{ Bindings: Env }>();
 
 const MAX_SEARCH_QUERY_LENGTH = 200;
+const STUDENT_SEARCH_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const COURSE_TYPE_SLUGS = ['major', 'minor', 'sec', 'vac', 'mdc', 'aec'] as const;
 type CourseTypeSlug = typeof COURSE_TYPE_SLUGS[number];
 
@@ -1348,6 +1356,171 @@ contentRouter.get('/chapters/:chapterId/flashcards', (c) => {
 // Full-text search across chapter titles and subjects using SQLite LIKE.
 // Cloud Run uses a Vertex AI Search engine; this D1 version uses title-matching
 // as a lightweight fallback. The Vectorize semantic search still handles chat.
+
+function studentSearchEnabled(env: Env): boolean {
+  return env.AI_SEARCH_STUDENT_SEARCH_ENABLED === 'true' && Boolean(env.AI_SEARCH);
+}
+
+contentRouter.get('/smart-search/status', (c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.json({ enabled: studentSearchEnabled(c.env) });
+});
+
+/**
+ * Student-facing semantic search is deliberately separate from chat RAG.
+ * It only becomes available after an AI Search binding and an explicit
+ * feature flag are configured. Results are revalidated against published D1
+ * hierarchy before any excerpt or URL is returned.
+ */
+contentRouter.post('/smart-search', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  if (!studentSearchEnabled(c.env) || !c.env.AI_SEARCH) {
+    return c.json({
+      detail: 'Student search is not configured',
+      error_code: 'student_search_disabled',
+    }, 503);
+  }
+
+  const contentLengthHeader = c.req.header('Content-Length');
+  if (contentLengthHeader !== undefined) {
+    const contentLength = Number(contentLengthHeader);
+    if (!Number.isSafeInteger(contentLength) || contentLength < 0 || contentLength > 8_192) {
+      return c.json({ detail: 'Search request is too large' }, 413);
+    }
+  }
+
+  let rawBody: string;
+  try {
+    rawBody = await c.req.text();
+  } catch {
+    return c.json({ detail: 'Invalid request body' }, 400);
+  }
+  if (new TextEncoder().encode(rawBody).byteLength > 8_192) {
+    return c.json({ detail: 'Search request is too large' }, 413);
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return c.json({ detail: 'Invalid JSON body' }, 400);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return c.json({ detail: 'Search request must be an object' }, 400);
+  }
+
+  const input = body as Record<string, unknown>;
+  const query = typeof input.query === 'string' ? input.query.normalize('NFC').trim() : '';
+  if (!query || query.length < 2) {
+    return c.json({ query, results: [], total: 0, available: true });
+  }
+  if (query.length > MAX_SEARCH_QUERY_LENGTH || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(query)) {
+    return c.json({ detail: `Search query must be 2-${MAX_SEARCH_QUERY_LENGTH} characters without control characters` }, 400);
+  }
+
+  const language: StudentSearchLanguage | null = input.language === 'en' || input.language === 'as'
+    ? input.language
+    : null;
+  if (!language) return c.json({ detail: 'language must be en or as' }, 400);
+
+  const scope: StudentSearchScope = {};
+  for (const field of ['board_slug', 'class_slug', 'stream_slug'] as const) {
+    const value = input[field];
+    if (value === undefined || value === null || value === '') continue;
+    if (
+      typeof value !== 'string'
+      || value.length > 80
+      || !STUDENT_SEARCH_SLUG_PATTERN.test(value)
+    ) {
+      return c.json({ detail: `${field} is invalid` }, 400);
+    }
+    scope[field] = value;
+  }
+
+  const rateLimitResponse = await enforceStudentSearchRateLimit(c.env.DB, c.req.raw);
+  if (rateLimitResponse) return rateLimitResponse;
+
+  try {
+    const rawResults = await queryStudentSearch(c.env.AI_SEARCH, { query, language, ...scope });
+    const chunks = readStudentSearchChunks(rawResults, language);
+    if (!chunks) {
+      return c.json({
+        detail: 'Student search is temporarily unavailable',
+        error_code: 'student_search_unavailable',
+      }, 502);
+    }
+    if (chunks.length === 0) return c.json({ query, results: [], total: 0, available: true });
+
+    const chapterIds = [...new Set(chunks.map(result => result.chapterId))];
+    const placeholders = chapterIds.map(() => '?').join(', ');
+    const where = [
+      `c.id IN (${placeholders})`,
+      `c.status = 'published'`,
+      's.is_published = 1',
+    ];
+    const binds: Array<string> = [...chapterIds];
+    if (scope.board_slug) {
+      where.push('b.slug = ?');
+      binds.push(scope.board_slug);
+    }
+    if (scope.class_slug) {
+      where.push('cl.slug = ?');
+      binds.push(scope.class_slug);
+    }
+    if (scope.stream_slug) {
+      where.push('str.slug = ?');
+      binds.push(scope.stream_slug);
+    }
+
+    const published = await c.env.DB.prepare(`
+      SELECT c.id, c.title, c.title_as, c.slug, c.updated_at,
+             b.slug AS board_slug, cl.slug AS class_slug,
+             s.slug AS subject_slug
+      FROM chapters c
+      JOIN subjects s ON s.id = c.subject_id
+      JOIN streams str ON str.id = s.stream_id
+      JOIN classes cl ON cl.id = str.class_id
+      JOIN boards b ON b.id = cl.board_id
+      WHERE ${where.join(' AND ')}
+    `).bind(...binds).all<{
+      id: string;
+      title: string;
+      title_as: string | null;
+      slug: string;
+      updated_at: number | null;
+      board_slug: string;
+      class_slug: string;
+      subject_slug: string;
+    }>();
+
+    const byId = new Map((published.results ?? []).map(row => [row.id, row]));
+    const results = chunks.flatMap((chunk) => {
+      const row = byId.get(chunk.chapterId);
+      if (!row || chunk.updatedAt !== (row.updated_at ?? 0)) return [];
+      const path = [
+        language === 'as' ? 'as' : '',
+        row.board_slug,
+        row.class_slug,
+        row.subject_slug,
+        row.slug,
+      ].filter(Boolean).map(segment => encodeURIComponent(segment)).join('/');
+      return [{
+        chapter_id: row.id,
+        title: language === 'as' ? row.title_as?.trim() || row.title : row.title,
+        snippet: chunk.snippet,
+        url: `/${path}`,
+        score: chunk.score,
+      }];
+    });
+    return c.json({ query, results, total: results.length, available: true });
+  } catch (error) {
+    console.error('[student-search] query failed');
+    return c.json({
+      detail: 'Student search is temporarily unavailable',
+      error_code: 'student_search_unavailable',
+    }, 503);
+  }
+});
 
 contentRouter.get('/search', async (c) => {
   const db = createDb(c.env.DB);
