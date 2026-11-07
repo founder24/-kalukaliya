@@ -524,10 +524,11 @@ describe('atomic quota controls', () => {
 
   it('allows exactly the anonymous limit under parallel reservations', async () => {
     const anonId = 'anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const sharedMinutePeriod = '2026-09-29T12:00';
     const results = await Promise.all(
       Array.from(
         { length: 40 },
-        () => reserveAnonQuota(env.DB, env.RATE_LIMIT_KV, anonId),
+        () => reserveAnonQuota(env.DB, env.RATE_LIMIT_KV, anonId, sharedMinutePeriod),
       ),
     );
 
@@ -535,8 +536,8 @@ describe('atomic quota controls', () => {
     expect(results.filter(result => !result.allowed)).toHaveLength(34);
 
     const row = await env.DB.prepare(
-      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ?',
-    ).bind(anonId).first<{ count: number }>();
+      'SELECT count FROM anonymous_quota_usage WHERE anon_id = ? AND period = ?',
+    ).bind(anonId, sharedMinutePeriod).first<{ count: number }>();
     expect(row?.count).toBe(6);
   });
 

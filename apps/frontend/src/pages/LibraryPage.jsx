@@ -28,6 +28,7 @@ import ScrollableFilterRow from './library/ScrollableFilterRow';
 import CmsDocsSection from './library/CmsDocsSection';
 import CmsPostsGrid from './library/CmsPostsGrid';
 import QuestionPapersSection from './library/QuestionPapersSection';
+import StudentSmartSearchPanel from './library/StudentSmartSearchPanel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AD POLICY: /library and its /browser alias are intentionally AD-FREE in the
@@ -286,6 +287,17 @@ export default function LibraryPage() {
     }
     return chips;
   }, [enrichedSubjects]);
+  const studentSearchScope = useMemo(() => {
+    if (activeFilter.startsWith('class:')) {
+      const classId = activeFilter.slice('class:'.length);
+      const selectedClass = classMap.get(classId);
+      return selectedClass?.slug ? { class_slug: selectedClass.slug } : {};
+    }
+    if (activeFilter !== 'all' && activeFilter !== 'saved') {
+      return { stream_slug: activeFilter };
+    }
+    return {};
+  }, [activeFilter, classMap]);
 
   const baseChips = contentLang === 'as' ? STREAM_CHIPS_AS : STREAM_CHIPS_EN;
   const classChips = useMemo(() => {
@@ -792,6 +804,11 @@ export default function LibraryPage() {
                 />
               ))}
             </ScrollableFilterRow>
+            <StudentSmartSearchPanel
+              language={contentLang}
+              scope={studentSearchScope}
+              hidden={activeFilter === 'saved'}
+            />
             {browserSubjects.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div
