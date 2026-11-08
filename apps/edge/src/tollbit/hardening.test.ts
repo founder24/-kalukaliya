@@ -15,6 +15,10 @@ function context() {
 }
 const request = (ua: string, headers = {}, method = 'GET', url = PAGE) =>
   new Request(url, { method, headers: { 'User-Agent': ua, ...headers } });
+const withCf = (req: Request, cf: Record<string, unknown>) => {
+  Object.defineProperty(req, 'cf', { value: cf });
+  return req;
+};
 const target = (input: RequestInfo | URL) => input instanceof Request ? input.url : String(input);
 
 beforeEach(() => {
@@ -115,6 +119,87 @@ describe('Tollbit public-content gate', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
     expect(await (await worker.fetch(request(ua), {}, context())).text()).toBe('origin');
     expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it.each(['CodeMirror/6.0', 'VSCode/1.0', 'MysteryCrawler/1.0'])(
+    'does not treat an unlisted User-Agent (%s) as bot proof', async (ua) => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
+      const response = await worker.fetch(request(ua), {}, context());
+      expect(response.status).toBe(200);
+      expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+    },
+  );
+
+  it.each([1, 2, 29])(
+    'routes an unknown agent to TollBit with Cloudflare automated score %i',
+    async (score) => {
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+        new Response('licensed path', { status: 402 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const req = withCf(request('MysteryCrawler/1.0'), {
+        botManagement: { score },
+      });
+
+      expect((await worker.fetch(req, {}, context())).status).toBe(402);
+      expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
+        PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
+      );
+    },
+  );
+
+  it.each([
+    ['score 0 means not computed', { score: 0 }],
+    ['score 30 is likely human', { score: 30 }],
+    ['score 99 is likely human', { score: 99 }],
+    ['corporate proxy is exempt', { score: 5, corporateProxy: true }],
+    ['static resource is exempt', { score: 5, staticResource: true }],
+  ])('keeps ambiguous or human-like traffic on origin: %s', async (_case, botManagement) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
+    const req = withCf(request('Mozilla/5.0'), { botManagement });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(200);
+    expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it('fails open when Bot Management score is missing or the User-Agent is blank', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
+    const noScore = withCf(request('MysteryCrawler/1.0'), { botManagement: {} });
+    const noUserAgent = withCf(
+      new Request(PAGE),
+      { botManagement: { score: 1 } },
+    );
+
+    expect((await worker.fetch(noScore, {}, context())).status).toBe(200);
+    expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+    vi.mocked(fetch).mockClear();
+    expect((await worker.fetch(noUserAgent, {}, context())).status).toBe(200);
+    expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it.each([
+    ['Cloudflare verified bot', { verifiedBot: true }],
+    ['Cloudflare signed agent', { signedAgent: true }],
+  ])('routes an unlisted %s through TollBit', async (_case, botManagement) => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response('paid path', { status: 402 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('UnlistedAgent/1.0'), { botManagement });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(402);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
+      PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
+    );
+  });
+
+  it('does not let a low bot score override the training block', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('GPTBot/1.0'), {
+      botManagement: { score: 1, verifiedBot: true },
+    });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each(['Googlebot', 'Bingbot', 'Applebot', 'DuckDuckBot'])(

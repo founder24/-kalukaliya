@@ -28,6 +28,9 @@ in `wrangler.tollbit-draft.toml`.
 - Passes requests to the publisher origin unless the request is a public GET or
   HEAD from the approved paid AI/RAG agent list, or Cloudflare marks it as a
   verified bot in the `Search Engine` category.
+- Also routes Cloudflare-verified bots, signed agents, and unlisted requests
+  with a Bot Management score of 1–29 through the Tollbit Agent Site. A
+  user-agent string alone does not identify an unlisted bot.
 - A search-engine user-agent string alone is never sufficient for free
   forwarding; the Worker requires both `request.cf.botManagement.verifiedBot`
   and `request.cf.verifiedBotCategory === "Search Engine"`.
@@ -59,6 +62,17 @@ in `wrangler.tollbit-draft.toml`.
   such as `Code` inside unrelated user-agent products. The supplied bot catalog
   is a routing list, not proof of identity; confirmed training matches still
   take precedence and are blocked.
+- For unlisted automation, the Worker uses Bot Management metadata rather than
+  generic `bot`/`crawler` words in the user-agent. Scores 1–29 are routed to
+  Tollbit only when a non-empty, bounded user-agent is present and Cloudflare
+  has not marked the request as a corporate proxy or static resource. Scores
+  30–99, score 0/not computed, missing metadata, blank/oversized user-agent,
+  corporate proxies, and static resources stay on the publisher path.
+- This is deliberately fail-open for ambiguous cases to avoid sending a
+  student's lesson request to a paid Agent Site or returning a paywall error.
+  The tradeoff is that unscored/ambiguous automation can still reach origin.
+  Cloudflare's JavaScript Detection is currently disabled, and `jsDetection`
+  is not used as proof of either a human or a bot.
 - Logs token-required JSON responses, local training denials, HEAD requests,
   and provider errors, not just successful HTML pages.
 - Delivers analytics asynchronously and does not block page responses.
@@ -107,6 +121,51 @@ in `wrangler.tollbit-draft.toml`.
 - After release, verify real verified search-crawler requests reach the Agent
   Site and review Cloudflare/Tollbit analytics separately. Synthetic
   user-agent tests prove routing logic only, not crawler identity or referrals.
+
+## Cloudflare Bot Management and unlisted automation
+
+Read-only account inspection on 2026-11-08 found:
+
+- The `syrabit.ai` zone reports the `Enterprise Website` plan.
+- The zone Bot Management API returned `using_latest_model: true`,
+  `suppress_session_score: false`, and `enable_js: false`. The zone entitlement
+  `bot_management.session_score` is enabled. Super Bot Fight Mode currently
+  allows likely automated, definitely automated, and verified-bot requests.
+- The current Cloudflare API token could not read zone subscription details
+  (HTTP 403), so these settings are evidence of Bot Management configuration,
+  not a billing-record confirmation. No live request was used to assert that a
+  score is present on every Worker invocation.
+
+Cloudflare documents these Worker request properties when Bot Management is
+available: `request.cf.botManagement.score`, `verifiedBot`, `signedAgent`,
+`staticResource`, `corporateProxy`, `jsDetection.passed`, and
+`request.cf.verifiedBotCategory`. The score values are 1 (automated), 2–29
+(likely automated), 30–99 (likely human), and 0 (not computed). References:
+
+- https://developers.cloudflare.com/bots/reference/bot-management-variables/
+- https://developers.cloudflare.com/bots/concepts/bot-score/
+- https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.bot_management.corporate_proxy/
+
+The Worker policy is:
+
+1. Known training-agent matches remain blocked first. Verified search engines
+   still use the existing Search Engine category path; the selected unverified
+   free-search claims remain blocked.
+2. Cloudflare-verified bots and signed agents go through Tollbit. Other
+   unlisted requests with scores 1–29 go through Tollbit only when they have a
+   non-empty user-agent of at most 2,048 characters and are not marked as a
+   corporate proxy or static resource.
+3. Scores 30–99, score 0 or missing, missing/oversized user-agent, corporate
+   proxy, static-resource, and unavailable Bot Management metadata fail open
+   to origin. This protects ambiguous student requests but means ambiguous
+   automation is not guaranteed to pass through Tollbit.
+4. `jsDetection.passed` is not used to override the score: it is not proof of
+   human identity, and JavaScript Detection is currently disabled.
+
+These are Worker code and fixture-test changes only. They do not change
+Cloudflare routes, WAF rules, Bot Management settings, Tollbit settings, or the
+production deployment. Fixture tests validate decision logic; only a separately
+approved release and real Cloudflare request can verify runtime score presence.
 
 ## Production verification status
 
