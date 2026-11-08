@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -22,12 +23,25 @@ SUPPORTED_ARCHIVES = (
     "darwin_arm64",
 )
 USER_AGENT = "syrabit-actionlint-updater"
+RETRYABLE_HTTP_STATUS = {500, 502, 503, 504}
+MAX_DOWNLOAD_ATTEMPTS = 4
 
 
 def download_text(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8")
+    for attempt in range(MAX_DOWNLOAD_ATTEMPTS):
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as error:
+            if error.code not in RETRYABLE_HTTP_STATUS or attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
+                raise
+        time.sleep(min(2**attempt, 8))
+
+    raise RuntimeError("Download retries exhausted")
 
 
 def latest_release() -> tuple[str, str]:

@@ -33,7 +33,9 @@ if [[ ! -x "${ACTIONLINT_BIN}" ]]; then
   url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
   archive_path="${ACTIONLINT_CACHE_DIR}/${archive}"
   echo "Downloading actionlint v${ACTIONLINT_VERSION}..."
-  curl --fail --location --silent --show-error --output "${archive_path}" "${url}"
+  curl --fail --location --silent --show-error \
+    --retry 4 --retry-all-errors --retry-delay 3 --retry-max-time 120 \
+    --output "${archive_path}" "${url}"
   if command -v sha256sum >/dev/null 2>&1; then
     echo "${checksum}  ${archive_path}" | sha256sum --check --status
   else
