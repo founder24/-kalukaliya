@@ -1,9 +1,14 @@
-// User-Agent matching selects a policy; it is not proof of crawler identity.
+// User-Agent matching selects paid/denied policy; it is not proof of identity.
+// Free Search Engine forwarding requires Cloudflare-verified request metadata.
 // Training rules take precedence over retrieval matches, including mixed UAs.
 export const TRAINING_ONLY_USER_AGENTS = [
   'GPTBot', 'ClaudeBot', 'Claude-Web', 'anthropic-ai', 'CCBot',
   'Google-Extended', 'Applebot-Extended', 'Meta-ExternalAgent',
   'Bytespider', 'Amazonbot', 'Cohere-AI', 'Diffbot',
+] as const;
+
+export const OPEN_ACCESS_SEARCH_USER_AGENTS = [
+  'Googlebot', 'Bingbot', 'Applebot', 'DuckDuckBot',
 ] as const;
 
 export const AGENT_SITE_USER_AGENTS = [

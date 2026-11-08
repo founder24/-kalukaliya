@@ -51,6 +51,124 @@ describe('Tollbit Worker routing and analytics', () => {
     );
   });
 
+  it('routes Cloudflare-verified Search Engine requests through Tollbit', async () => {
+    const request = new Request(
+      'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion',
+      {
+        headers: {
+          Accept: 'text/html',
+          'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+        },
+      },
+    );
+    Object.defineProperty(request, 'cf', {
+      value: {
+        botManagement: { verifiedBot: true },
+        verifiedBotCategory: 'Search Engine',
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      return new Response(url.startsWith('https://tollbit.syrabit.ai/')
+        ? 'Tollbit Agent Site'
+        : 'publisher origin', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const response = await tollbitWorker.fetch(request, {}, makeContext());
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('Tollbit Agent Site');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBeInstanceOf(Request);
+    expect((fetchMock.mock.calls[0]?.[0] as Request).url).toBe(
+      'https://tollbit.syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion',
+    );
+  });
+
+  it('blocks a Googlebot user-agent claim that Cloudflare did not verify', async () => {
+    const request = new Request(
+      'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion',
+      {
+        headers: {
+          'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+        },
+      },
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      new Response(input instanceof Request ? input.url : String(input), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const response = await tollbitWorker.fetch(request, {}, makeContext());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: 'unverified_search_crawler',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks a verified bot in a non-search category from free access', async () => {
+    const request = new Request(
+      'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion',
+      {
+        headers: {
+          'User-Agent': 'Googlebot/2.1 (+http://www.google.com/bot.html)',
+        },
+      },
+    );
+    Object.defineProperty(request, 'cf', {
+      value: {
+        botManagement: { verifiedBot: true },
+        verifiedBotCategory: 'AI Search',
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      new Response(input instanceof Request ? input.url : String(input), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const response = await tollbitWorker.fetch(request, {}, makeContext());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: 'unverified_search_crawler',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps training denial ahead of verified Search Engine forwarding', async () => {
+    const request = new Request(
+      'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion',
+      { headers: { 'User-Agent': 'Googlebot/2.1 GPTBot' } },
+    );
+    Object.defineProperty(request, 'cf', {
+      value: {
+        botManagement: { verifiedBot: true },
+        verifiedBotCategory: 'Search Engine',
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const response = await tollbitWorker.fetch(request, {}, makeContext());
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: 'ai_training_not_permitted',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('limits the workers.dev test endpoint to Tollbit source IPs', async () => {
     const fetchMock = vi.fn(async () => new Response('should not fetch'));
     vi.stubGlobal('fetch', fetchMock);
@@ -223,6 +341,34 @@ describe('Tollbit Worker routing and analytics', () => {
     expect(forwarded.headers.get('signature')).toBe(
       'sig1=:opaque-signature:',
     );
+  });
+
+  it('preserves verified search user-agent while stripping credentials', () => {
+    const request = new Request(
+      'https://www.syrabit.ai/degree/1st-semester/ba/course?email=student%40example.com',
+      {
+        headers: {
+          Authorization: 'Bearer private-token',
+          Cookie: 'session=private',
+          'User-Agent': 'Bingbot/2.0',
+        },
+      },
+    );
+    Object.defineProperty(request, 'cf', {
+      value: {
+        botManagement: { verifiedBot: true },
+        verifiedBotCategory: 'Search Engine',
+      },
+    });
+
+    const forwarded = makeTollbitSiteRequest(request);
+
+    expect(forwarded.url).toBe(
+      'https://tollbit.syrabit.ai/degree/1st-semester/ba/course',
+    );
+    expect(forwarded.headers.get('user-agent')).toBe('Bingbot/2.0');
+    expect(forwarded.headers.get('authorization')).toBeNull();
+    expect(forwarded.headers.get('cookie')).toBeNull();
   });
 
   it('logs standard request and geo fields without query or credential data', () => {

@@ -88,11 +88,25 @@ describe('Tollbit public-content gate', () => {
     },
   );
 
-  it.each(['Mozilla/5.0', 'Googlebot', 'Bingbot', 'tollbot/1.0'])('preserves %s origin responses', async (ua) => {
+  it.each(['Mozilla/5.0', 'tollbot/1.0'])('preserves %s origin responses', async (ua) => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
     expect(await (await worker.fetch(request(ua), {}, context())).text()).toBe('origin');
     expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
   });
+
+  it.each(['Googlebot', 'Bingbot', 'Applebot', 'DuckDuckBot'])(
+    'blocks unverified %s claims before they reach origin', async (ua) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const response = await worker.fetch(request(ua), {}, context());
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: 'unverified_search_crawler',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('fails closed without fetching the origin on provider connection failure', async () => {
     const fetchMock = vi.fn(async () => { throw new Error('private upstream detail'); });
