@@ -859,10 +859,26 @@ jobs:
         run: |
           set -euo pipefail
           bot_ua='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
-          curl -sS -D /tmp/crawler.headers -o /tmp/crawler.html --max-time 30 \
-            -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}/library"
-          grep -qi '^x-source: \(prerender\|bot-render\)' /tmp/crawler.headers
+          crawler_status="$(curl -sS -D /tmp/crawler.headers -o /tmp/crawler.html -w '%{http_code}' --max-time 30 -H 'Accept: text/html' "${FRONTEND_URL}/library")"
+          test "$crawler_status" = "200" || {
+            cat /tmp/crawler.html
+            echo "Public library returned ${crawler_status} to a normal request"
+            exit 1
+          }
+          grep -Eqi '^content-type: text/html' /tmp/crawler.headers
           grep -qi '<title' /tmp/crawler.html
+
+          # A claimed search-crawler User-Agent is not identity proof. Require
+          # the verified-bot signal at Cloudflare before routing through TollBit.
+          unverified_status="$(curl -sS -D /tmp/unverified-crawler.headers -o /tmp/unverified-crawler.json -w '%{http_code}' --max-time 30 -A "$bot_ua" -H 'Accept: text/html' "${FRONTEND_URL}/library")"
+          test "$unverified_status" = "403" || {
+            cat /tmp/unverified-crawler.json
+            echo "Unverified Googlebot claim returned ${unverified_status}; expected 403"
+            exit 1
+          }
+          grep -Fqx '{"error":"unverified_search_crawler"}' /tmp/unverified-crawler.json
+          grep -qi '^cache-control: no-store' /tmp/unverified-crawler.headers
+          grep -qi '^x-robots-tag: noindex' /tmp/unverified-crawler.headers
           for path in sitemap-index.xml feed.xml feed/notes.xml feed.json llms.txt llms-full.txt; do
             headers="/tmp/${path//\//-}.headers"
             output="/tmp/${path//\//-}.body"
