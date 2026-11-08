@@ -140,7 +140,9 @@ describe('Tollbit public-content gate', () => {
         botManagement: { score },
       });
 
-      expect((await worker.fetch(req, {}, context())).status).toBe(402);
+      expect((await worker.fetch(req, {
+        TOLLBIT_BOT_SCORE_MODE: 'enforce',
+      }, context())).status).toBe(402);
       expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
         PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
       );
@@ -157,7 +159,9 @@ describe('Tollbit public-content gate', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
     const req = withCf(request('Mozilla/5.0'), { botManagement });
 
-    expect((await worker.fetch(req, {}, context())).status).toBe(200);
+    expect((await worker.fetch(req, {
+      TOLLBIT_BOT_SCORE_MODE: 'enforce',
+    }, context())).status).toBe(200);
     expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
   });
 
@@ -169,11 +173,49 @@ describe('Tollbit public-content gate', () => {
       { botManagement: { score: 1 } },
     );
 
-    expect((await worker.fetch(noScore, {}, context())).status).toBe(200);
+    expect((await worker.fetch(noScore, {
+      TOLLBIT_BOT_SCORE_MODE: 'enforce',
+    }, context())).status).toBe(200);
     expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
     vi.mocked(fetch).mockClear();
-    expect((await worker.fetch(noUserAgent, {}, context())).status).toBe(200);
+    expect((await worker.fetch(noUserAgent, {
+      TOLLBIT_BOT_SCORE_MODE: 'enforce',
+    }, context())).status).toBe(200);
     expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it('keeps score-based routing disabled unless explicitly set to enforce', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response('origin'));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('MysteryCrawler/1.0'), {
+      botManagement: { score: 5 },
+    });
+    vi.mocked(console.info).mockClear();
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(200);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(PAGE);
+    expect(console.info).not.toHaveBeenCalled();
+  });
+
+  it('shadow mode logs only a score bucket and keeps the request on origin', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response('origin'));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('MysteryCrawler/1.0'), {
+      botManagement: { score: 5 },
+    });
+    vi.mocked(console.info).mockClear();
+
+    expect((await worker.fetch(req, {
+      TOLLBIT_BOT_SCORE_MODE: 'shadow',
+    }, context())).status).toBe(200);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(PAGE);
+    expect(console.info).toHaveBeenCalledWith('tollbit_bot_score_shadow', {
+      score_bucket: 'likely_automated',
+    });
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls))
+      .not.toContain('MysteryCrawler');
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls))
+      .not.toContain(PAGE);
   });
 
   it.each([

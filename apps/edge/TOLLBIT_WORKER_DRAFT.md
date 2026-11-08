@@ -28,9 +28,14 @@ in `wrangler.tollbit-draft.toml`.
 - Passes requests to the publisher origin unless the request is a public GET or
   HEAD from the approved paid AI/RAG agent list, or Cloudflare marks it as a
   verified bot in the `Search Engine` category.
-- Also routes Cloudflare-verified bots, signed agents, and unlisted requests
-  with a Bot Management score of 1–29 through the Tollbit Agent Site. A
-  user-agent string alone does not identify an unlisted bot.
+- Cloudflare-verified bots and signed agents route through Tollbit. Unlisted
+  requests with Bot Management scores of 1–29 route through Tollbit only when
+  `TOLLBIT_BOT_SCORE_MODE=enforce`; a user-agent string alone never identifies
+  an unlisted bot.
+- Score-based routing defaults to disabled. `shadow` mode logs only an
+  automated/likely-automated score bucket and continues serving origin;
+  `enforce` routes qualifying requests to Tollbit. Missing or invalid mode
+  values do not enforce the score rule.
 - Blocks requests Cloudflare verifies in the `AI Crawler` category before paid
   agent routing; Cloudflare defines that category as content collection for
   model training. Verified `AI Search` and user-directed agents remain paid.
@@ -66,11 +71,16 @@ in `wrangler.tollbit-draft.toml`.
   is a routing list, not proof of identity; confirmed training matches still
   take precedence and are blocked.
 - For unlisted automation, the Worker uses Bot Management metadata rather than
-  generic `bot`/`crawler` words in the user-agent. Scores 1–29 are routed to
-  Tollbit only when a non-empty, bounded user-agent is present and Cloudflare
-  has not marked the request as a corporate proxy or static resource. Scores
-  30–99, score 0/not computed, missing metadata, blank/oversized user-agent,
-  corporate proxies, and static resources stay on the publisher path.
+  generic `bot`/`crawler` words in the user-agent. In `enforce` mode, scores
+  1–29 are routed to Tollbit only when a non-empty, bounded user-agent is
+  present and Cloudflare has not marked the request as a corporate proxy or
+  static resource. Scores 30–99, score 0/not computed, missing metadata,
+  blank/oversized user-agent, corporate proxies, and static resources stay on
+  the publisher path.
+- `shadow` mode records only `automated` or `likely_automated` as a score
+  bucket—no URL, user-agent, IP, or exact score—and leaves the request on
+  origin. The mode is a Worker variable and is not set in production by this
+  change.
 - This is deliberately fail-open for ambiguous cases to avoid sending a
   student's lesson request to a paid Agent Site or returning a paywall error.
   The tradeoff is that unscored/ambiguous automation can still reach origin.
@@ -118,9 +128,10 @@ in `wrangler.tollbit-draft.toml`.
   (Googlebot, Bingbot, Applebot, or DuckDuckBot) but lacking that verified
   signal receives a non-cacheable 403 instead of falling through to origin.
   Training denials take precedence; AI/RAG matching remains unchanged.
-- This does not classify arbitrary unknown automation. Do not describe
-  user-agent checks as covering unknown bots; any broader bot-management
-  threshold or fail-closed policy requires separate testing.
+- Outside `enforce` mode, or when Cloudflare signals are missing or ambiguous,
+  arbitrary automation is not guaranteed to route through Tollbit. Do not
+  describe user-agent checks as covering unknown bots; any stricter
+  fail-closed policy requires separate student-access testing.
 - After release, verify real verified search-crawler requests reach the Agent
   Site and review Cloudflare/Tollbit analytics separately. Synthetic
   user-agent tests prove routing logic only, not crawler identity or referrals.
@@ -155,10 +166,11 @@ The Worker policy is:
    requests remain blocked first. Verified search engines still use the
    existing Search Engine category path; the selected unverified free-search
    claims remain blocked.
-2. Cloudflare-verified bots and signed agents go through Tollbit. Other
-   unlisted requests with scores 1–29 go through Tollbit only when they have a
-   non-empty user-agent of at most 2,048 characters and are not marked as a
-   corporate proxy or static resource.
+2. Cloudflare-verified bots and signed agents go through Tollbit. Unlisted
+   requests with scores 1–29 are disabled by default; `shadow` records only a
+   score bucket and serves origin, while `enforce` routes them through Tollbit
+   only when they have a non-empty user-agent of at most 2,048 characters and
+   are not marked as a corporate proxy or static resource.
 3. Scores 30–99, score 0 or missing, missing/oversized user-agent, corporate
    proxy, static-resource, and unavailable Bot Management metadata fail open
    to origin. This protects ambiguous student requests but means ambiguous
@@ -168,8 +180,9 @@ The Worker policy is:
 
 These are Worker code and fixture-test changes only. They do not change
 Cloudflare routes, WAF rules, Bot Management settings, Tollbit settings, or the
-production deployment. Fixture tests validate decision logic; only a separately
-approved release and real Cloudflare request can verify runtime score presence.
+production deployment or set `TOLLBIT_BOT_SCORE_MODE`. Fixture tests validate
+decision logic; only a separately approved release and real Cloudflare request
+can verify runtime score presence.
 
 ## Production verification status
 

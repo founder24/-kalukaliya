@@ -49,6 +49,7 @@ const PRIVATE_CONTENT_ROOTS = new Set([
 
 export interface TollbitWorkerEnv {
   TOLLBIT_API_KEY?: string;
+  TOLLBIT_BOT_SCORE_MODE?: string;
   TOLLBIT_TEST_MODE?: string;
   TOLLBIT_TEST_PUBLISHER_HOST?: string;
   TOLLBIT_TEST_SOURCE_IPS?: string;
@@ -234,6 +235,22 @@ function isLikelyAutomatedRequest(request: Request): boolean {
     && score <= LIKELY_AUTOMATED_BOT_SCORE_MAX;
 }
 
+function isUnlistedLikelyAutomatedRequest(request: Request): boolean {
+  const userAgent = request.headers.get('user-agent');
+  return matchedAgentToken(userAgent) === null
+    && !matchesAgent(userAgent, OPEN_ACCESS_SEARCH_USER_AGENTS)
+    && !matchesAgent(userAgent, TRAINING_ONLY_USER_AGENTS)
+    && !isCloudflareTrainingAgent(request)
+    && !isCloudflareIdentifiedAgent(request)
+    && isLikelyAutomatedRequest(request);
+}
+
+function botScoreMode(env: TollbitWorkerEnv): 'disabled' | 'shadow' | 'enforce' {
+  if (env.TOLLBIT_BOT_SCORE_MODE === 'shadow') return 'shadow';
+  if (env.TOLLBIT_BOT_SCORE_MODE === 'enforce') return 'enforce';
+  return 'disabled';
+}
+
 function isVerifiedSearchEngineRequest(request: Request): boolean {
   const cf = cloudflareMetadata(request);
 
@@ -277,7 +294,10 @@ function isAgentSiteRequest(
   // an explicit safe header allowlist even on credentialed public requests.
   return matchedAgentToken(request.headers.get('user-agent')) !== null
     || isCloudflareIdentifiedAgent(request)
-    || isLikelyAutomatedRequest(request);
+    || (
+      botScoreMode(env) === 'enforce'
+      && isUnlistedLikelyAutomatedRequest(request)
+    );
 }
 
 function tollbitSiteUrl(
@@ -304,7 +324,10 @@ export function makeTollbitSiteRequest(
   const userAgent = request.headers.get('user-agent');
   const agentToken = matchedAgentToken(userAgent);
   const cloudflareRoutedAgent = isCloudflareIdentifiedAgent(request)
-    || isLikelyAutomatedRequest(request);
+    || (
+      botScoreMode(env) === 'enforce'
+      && isUnlistedLikelyAutomatedRequest(request)
+    );
   if (!agentToken && !cloudflareRoutedAgent) {
     throw new TypeError('No approved Tollbit agent matched.');
   }
@@ -539,6 +562,7 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const testMode = env.TOLLBIT_TEST_MODE === 'true';
+    const scoreMode = botScoreMode(env);
     if (testMode) {
       const url = new URL(request.url);
       if (!isWorkersDevHost(request)) {
@@ -568,6 +592,16 @@ export default {
     let response: Response;
 
     const publicPage = isPublicPageRequest(request, env);
+    if (
+      publicPage
+      && scoreMode === 'shadow'
+      && isUnlistedLikelyAutomatedRequest(request)
+    ) {
+      const score = cloudflareMetadata(request)?.botManagement?.score;
+      console.info('tollbit_bot_score_shadow', {
+        score_bucket: score === 1 ? 'automated' : 'likely_automated',
+      });
+    }
     if (
       publicPage
       && (
