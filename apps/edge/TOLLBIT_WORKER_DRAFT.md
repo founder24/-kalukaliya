@@ -26,7 +26,11 @@ in `wrangler.tollbit-draft.toml`.
 - Hardening changes in this branch require review and a protected release.
   Their source presence does not prove the deployed Worker has changed.
 - Passes requests to the publisher origin unless the request is a public GET or
-  HEAD from the approved Agent Site user-agent list.
+  HEAD from the approved paid AI/RAG agent list, or Cloudflare marks it as a
+  verified bot in the `Search Engine` category.
+- A search-engine user-agent string alone is never sufficient for free
+  forwarding; the Worker requires both `request.cf.botManagement.verifiedBot`
+  and `request.cf.verifiedBotCategory === "Search Engine"`.
 - Public-content routes include `/`, `/home`, Library, and recognized English
   and Assamese curriculum routes. Discovery files and private/API routes are
   not paywalled by this Worker.
@@ -61,6 +65,41 @@ in `wrangler.tollbit-draft.toml`.
   hostname and only from Tollbit's currently documented static egress IPs.
   Other requests receive 404; `GET /__tollbit_test_health` is a no-upstream
   health check. Test requests map to the fixed `syrabit.ai` origin.
+
+## Verified search-engine rollout
+
+- Keep the existing `syrabit.ai/*` and `www.syrabit.ai/*` Worker routes. Do not
+  add a WAF Allow/Skip rule or enable the `tollbit_ai_forward` Snippet.
+- Before the protected release, add or verify this Cloudflare custom rule with
+  the **Log** action only. It is observability, not a forwarding or bypass rule:
+
+  ```text
+  http.host in {"syrabit.ai" "www.syrabit.ai"}
+  and cf.client.bot
+  and cf.verified_bot_category eq "Search Engine"
+  and http.request.method in {"GET" "HEAD"}
+  and (
+    http.request.uri.path in {"/" "/home" "/home/" "/library" "/as/library"}
+    or http.request.uri.path matches "^/(as/)?(ahsec|degree)(/|$)"
+  )
+  ```
+
+- This repository does not apply Cloudflare zone rules or change Tollbit
+  settings. In Tollbit, configure Open Access for specific traditional search
+  crawlers (Googlebot, Bingbot, Applebot, and DuckDuckBot) on public curriculum
+  paths only. Do not use the broad `google` group. Keep AI Search/RAG paid,
+  training crawlers blocked, and uncertain bots paid.
+- The Worker routes Cloudflare-verified Search Engine requests through the
+  Agent Site. A request claiming one of the selected free search crawlers
+  (Googlebot, Bingbot, Applebot, or DuckDuckBot) but lacking that verified
+  signal receives a non-cacheable 403 instead of falling through to origin.
+  Training denials take precedence; AI/RAG matching remains unchanged.
+- This does not classify arbitrary unknown automation. Do not describe
+  user-agent checks as covering unknown bots; any broader bot-management
+  threshold or fail-closed policy requires separate testing.
+- After release, verify real verified search-crawler requests reach the Agent
+  Site and review Cloudflare/Tollbit analytics separately. Synthetic
+  user-agent tests prove routing logic only, not crawler identity or referrals.
 
 ## Production verification status
 

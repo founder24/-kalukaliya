@@ -1,4 +1,9 @@
-import { AGENT_SITE_USER_AGENTS, TRAINING_ONLY_USER_AGENTS, matchesAgent } from './policy';
+import {
+  AGENT_SITE_USER_AGENTS,
+  OPEN_ACCESS_SEARCH_USER_AGENTS,
+  TRAINING_ONLY_USER_AGENTS,
+  matchesAgent,
+} from './policy';
 
 const TOLLBIT_LOG_ENDPOINT = 'https://log.tollbit.com/log';
 export const TOLLBIT_FETCH_TIMEOUT_MS = 8000;
@@ -181,6 +186,29 @@ function matchedAgentToken(userAgent: string | null): string | null {
   ) ?? null;
 }
 
+function isVerifiedSearchEngineRequest(request: Request): boolean {
+  const cf = (request as Request & {
+    cf?: {
+      botManagement?: {
+        verifiedBot?: boolean;
+      };
+      verifiedBotCategory?: string;
+    };
+  }).cf;
+
+  // User-Agent text is spoofable. Free search forwarding requires Cloudflare
+  // to verify the bot and classify it specifically as a Search Engine.
+  return cf?.botManagement?.verifiedBot === true
+    && cf.verifiedBotCategory === 'Search Engine';
+}
+
+function isUnverifiedOpenAccessSearchClaim(request: Request): boolean {
+  return matchesAgent(
+    request.headers.get('user-agent'),
+    OPEN_ACCESS_SEARCH_USER_AGENTS,
+  ) && !isVerifiedSearchEngineRequest(request);
+}
+
 function isAgentSiteRequest(
   request: Request,
   env: TollbitWorkerEnv = {},
@@ -188,7 +216,8 @@ function isAgentSiteRequest(
   if (!isPublicPageRequest(request, env)) return false;
   // Credential presence must not bypass the gate. makeTollbitSiteRequest uses
   // an explicit safe header allowlist even on credentialed public requests.
-  return matchedAgentToken(request.headers.get('user-agent')) !== null;
+  return matchedAgentToken(request.headers.get('user-agent')) !== null
+    || isVerifiedSearchEngineRequest(request);
 }
 
 function tollbitSiteUrl(
@@ -212,13 +241,18 @@ export function makeTollbitSiteRequest(
   env: TollbitWorkerEnv = {},
 ): Request {
   const headers = new Headers();
-  const agentToken = matchedAgentToken(request.headers.get('user-agent'));
-  if (!agentToken) throw new TypeError('No approved Tollbit agent matched.');
   const userAgent = request.headers.get('user-agent');
+  const agentToken = matchedAgentToken(userAgent);
+  const verifiedSearchEngine = isVerifiedSearchEngineRequest(request);
+  if (!agentToken && !verifiedSearchEngine) {
+    throw new TypeError('No approved Tollbit agent matched.');
+  }
   if (userAgent && userAgent.length <= 2048) {
     headers.set('User-Agent', userAgent);
-  } else {
+  } else if (agentToken) {
     headers.set('User-Agent', agentToken);
+  } else {
+    throw new TypeError('Verified search request has no usable user-agent.');
   }
 
   const accept = request.headers.get('accept');
@@ -479,6 +513,10 @@ export default {
     const publicPage = isPublicPageRequest(request, env);
     if (publicPage && matchesAgent(request.headers.get('user-agent'), TRAINING_ONLY_USER_AGENTS)) {
       response = policyResponse(request, 403, 'ai_training_not_permitted');
+    } else if (publicPage && isUnverifiedOpenAccessSearchClaim(request)) {
+      // A claimed free search bot that Cloudflare cannot verify must not fall
+      // through to origin and bypass Tollbit's Open Access decision.
+      response = policyResponse(request, 403, 'unverified_search_crawler');
     } else if (isAgentSiteRequest(request, env)) {
       try {
         const upstream = await boundedFetch(makeTollbitSiteRequest(request, env));
