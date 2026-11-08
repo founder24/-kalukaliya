@@ -1,5 +1,6 @@
 import {
   AGENT_SITE_USER_AGENTS,
+  LIKELY_AUTOMATED_BOT_SCORE_MAX,
   OPEN_ACCESS_SEARCH_USER_AGENTS,
   TRAINING_ONLY_USER_AGENTS,
   matchesAgent,
@@ -12,6 +13,19 @@ const MAX_SIGNATURE_HEADER_LENGTH = 8192;
 const SIGNATURE_HEADERS = ['signature', 'signature-agent', 'signature-input'] as const;
 const SITE_HOSTS = new Set(['syrabit.ai', 'www.syrabit.ai']);
 const TOLLBIT_TEST_HEALTH_PATH = '/__tollbit_test_health';
+
+type CloudflareBotManagement = {
+  score?: number;
+  verifiedBot?: boolean;
+  signedAgent?: boolean;
+  staticResource?: boolean;
+  corporateProxy?: boolean;
+};
+
+type CloudflareRequestMetadata = {
+  botManagement?: CloudflareBotManagement;
+  verifiedBotCategory?: string;
+};
 
 const PRIVATE_CONTENT_ROOTS = new Set([
   'account',
@@ -35,6 +49,7 @@ const PRIVATE_CONTENT_ROOTS = new Set([
 
 export interface TollbitWorkerEnv {
   TOLLBIT_API_KEY?: string;
+  TOLLBIT_BOT_SCORE_MODE?: string;
   TOLLBIT_TEST_MODE?: string;
   TOLLBIT_TEST_PUBLISHER_HOST?: string;
   TOLLBIT_TEST_SOURCE_IPS?: string;
@@ -182,26 +197,73 @@ export function isPublicTollbitContentPath(pathname: string): boolean {
 
 function matchedAgentToken(userAgent: string | null): string | null {
   if (!userAgent || userAgent.length > 2048) return null;
-  const normalized = userAgent.toLowerCase();
   return AGENT_SITE_USER_AGENTS.find((agent) =>
-    normalized.includes(agent.toLowerCase()),
+    matchesAgent(userAgent, [agent]),
   ) ?? null;
 }
 
+function cloudflareMetadata(request: Request): CloudflareRequestMetadata | undefined {
+  return (request as Request & { cf?: CloudflareRequestMetadata }).cf;
+}
+
+function isCloudflareIdentifiedAgent(request: Request): boolean {
+  const botManagement = cloudflareMetadata(request)?.botManagement;
+  return botManagement?.verifiedBot === true
+    || botManagement?.signedAgent === true;
+}
+
+function isLikelyAutomatedRequest(request: Request): boolean {
+  const userAgent = request.headers.get('user-agent');
+  const botManagement = cloudflareMetadata(request)?.botManagement;
+
+  // Missing/unusable metadata is ambiguous. Keep ordinary study access open,
+  // and avoid the known low-score false positives for blank UAs and proxies.
+  if (
+    !userAgent?.trim()
+    || userAgent.length > 2048
+    || !botManagement
+    || botManagement.staticResource === true
+    || botManagement.corporateProxy === true
+  ) {
+    return false;
+  }
+
+  const score = botManagement.score;
+  return typeof score === 'number'
+    && Number.isInteger(score)
+    && score >= 1
+    && score <= LIKELY_AUTOMATED_BOT_SCORE_MAX;
+}
+
+function isUnlistedLikelyAutomatedRequest(request: Request): boolean {
+  const userAgent = request.headers.get('user-agent');
+  return matchedAgentToken(userAgent) === null
+    && !matchesAgent(userAgent, OPEN_ACCESS_SEARCH_USER_AGENTS)
+    && !matchesAgent(userAgent, TRAINING_ONLY_USER_AGENTS)
+    && !isCloudflareTrainingAgent(request)
+    && !isCloudflareIdentifiedAgent(request)
+    && isLikelyAutomatedRequest(request);
+}
+
+function botScoreMode(env: TollbitWorkerEnv): 'disabled' | 'shadow' | 'enforce' {
+  if (env.TOLLBIT_BOT_SCORE_MODE === 'shadow') return 'shadow';
+  if (env.TOLLBIT_BOT_SCORE_MODE === 'enforce') return 'enforce';
+  return 'disabled';
+}
+
 function isVerifiedSearchEngineRequest(request: Request): boolean {
-  const cf = (request as Request & {
-    cf?: {
-      botManagement?: {
-        verifiedBot?: boolean;
-      };
-      verifiedBotCategory?: string;
-    };
-  }).cf;
+  const cf = cloudflareMetadata(request);
 
   // User-Agent text is spoofable. Free search forwarding requires Cloudflare
   // to verify the bot and classify it specifically as a Search Engine.
   return cf?.botManagement?.verifiedBot === true
     && cf.verifiedBotCategory === 'Search Engine';
+}
+
+function isCloudflareTrainingAgent(request: Request): boolean {
+  // Cloudflare's verified-bot legacy category defines AI Crawler as content
+  // collection used for training; keep it ahead of paid-agent routing.
+  return cloudflareMetadata(request)?.verifiedBotCategory === 'AI Crawler';
 }
 
 function safeSignatureHeader(request: Request, name: string): string | null {
@@ -231,7 +293,11 @@ function isAgentSiteRequest(
   // Credential presence must not bypass the gate. makeTollbitSiteRequest uses
   // an explicit safe header allowlist even on credentialed public requests.
   return matchedAgentToken(request.headers.get('user-agent')) !== null
-    || isVerifiedSearchEngineRequest(request);
+    || isCloudflareIdentifiedAgent(request)
+    || (
+      botScoreMode(env) === 'enforce'
+      && isUnlistedLikelyAutomatedRequest(request)
+    );
 }
 
 function tollbitSiteUrl(
@@ -257,8 +323,12 @@ export function makeTollbitSiteRequest(
   const headers = new Headers();
   const userAgent = request.headers.get('user-agent');
   const agentToken = matchedAgentToken(userAgent);
-  const verifiedSearchEngine = isVerifiedSearchEngineRequest(request);
-  if (!agentToken && !verifiedSearchEngine) {
+  const cloudflareRoutedAgent = isCloudflareIdentifiedAgent(request)
+    || (
+      botScoreMode(env) === 'enforce'
+      && isUnlistedLikelyAutomatedRequest(request)
+    );
+  if (!agentToken && !cloudflareRoutedAgent) {
     throw new TypeError('No approved Tollbit agent matched.');
   }
   if (userAgent && userAgent.length <= 2048) {
@@ -266,7 +336,7 @@ export function makeTollbitSiteRequest(
   } else if (agentToken) {
     headers.set('User-Agent', agentToken);
   } else {
-    throw new TypeError('Verified search request has no usable user-agent.');
+    throw new TypeError('Approved Agent Site request has no usable user-agent.');
   }
 
   const accept = request.headers.get('accept');
@@ -492,6 +562,7 @@ export default {
     ctx: ExecutionContext,
   ): Promise<Response> {
     const testMode = env.TOLLBIT_TEST_MODE === 'true';
+    const scoreMode = botScoreMode(env);
     if (testMode) {
       const url = new URL(request.url);
       if (!isWorkersDevHost(request)) {
@@ -521,7 +592,23 @@ export default {
     let response: Response;
 
     const publicPage = isPublicPageRequest(request, env);
-    if (publicPage && matchesAgent(request.headers.get('user-agent'), TRAINING_ONLY_USER_AGENTS)) {
+    if (
+      publicPage
+      && scoreMode === 'shadow'
+      && isUnlistedLikelyAutomatedRequest(request)
+    ) {
+      const score = cloudflareMetadata(request)?.botManagement?.score;
+      console.info('tollbit_bot_score_shadow', {
+        score_bucket: score === 1 ? 'automated' : 'likely_automated',
+      });
+    }
+    if (
+      publicPage
+      && (
+        matchesAgent(request.headers.get('user-agent'), TRAINING_ONLY_USER_AGENTS)
+        || isCloudflareTrainingAgent(request)
+      )
+    ) {
       response = policyResponse(request, 403, 'ai_training_not_permitted');
     } else if (publicPage && isUnverifiedOpenAccessSearchClaim(request)) {
       // A claimed free search bot that Cloudflare cannot verify must not fall

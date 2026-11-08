@@ -11,6 +11,9 @@ export const OPEN_ACCESS_SEARCH_USER_AGENTS = [
   'Googlebot', 'Bingbot', 'Applebot', 'DuckDuckBot',
 ] as const;
 
+// Cloudflare classifies scores 1-29 as automated or likely automated.
+export const LIKELY_AUTOMATED_BOT_SCORE_MAX = 29;
+
 export const AGENT_SITE_USER_AGENTS = [
   'AgentNativeSearchBot', 'AI2Bot', 'AionBot', 'AIWebIndex',
   'Amzn-SearchBot', 'Amzn-User', 'atevesearchsourceurldiscovery',

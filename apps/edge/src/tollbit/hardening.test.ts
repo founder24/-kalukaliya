@@ -15,6 +15,10 @@ function context() {
 }
 const request = (ua: string, headers = {}, method = 'GET', url = PAGE) =>
   new Request(url, { method, headers: { 'User-Agent': ua, ...headers } });
+const withCf = (req: Request, cf: Record<string, unknown>) => {
+  Object.defineProperty(req, 'cf', { value: cf });
+  return req;
+};
 const target = (input: RequestInfo | URL) => input instanceof Request ? input.url : String(input);
 
 beforeEach(() => {
@@ -115,6 +119,156 @@ describe('Tollbit public-content gate', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
     expect(await (await worker.fetch(request(ua), {}, context())).text()).toBe('origin');
     expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it.each(['CodeMirror/6.0', 'VSCode/1.0', 'MysteryCrawler/1.0'])(
+    'does not treat an unlisted User-Agent (%s) as bot proof', async (ua) => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
+      const response = await worker.fetch(request(ua), {}, context());
+      expect(response.status).toBe(200);
+      expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+    },
+  );
+
+  it.each([1, 2, 29])(
+    'routes an unknown agent to TollBit with Cloudflare automated score %i',
+    async (score) => {
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+        new Response('licensed path', { status: 402 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const req = withCf(request('MysteryCrawler/1.0'), {
+        botManagement: { score },
+      });
+
+      expect((await worker.fetch(req, {
+        TOLLBIT_BOT_SCORE_MODE: 'enforce',
+      }, context())).status).toBe(402);
+      expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
+        PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
+      );
+    },
+  );
+
+  it.each([
+    ['score 0 means not computed', { score: 0 }],
+    ['score 30 is likely human', { score: 30 }],
+    ['score 99 is likely human', { score: 99 }],
+    ['corporate proxy is exempt', { score: 5, corporateProxy: true }],
+    ['static resource is exempt', { score: 5, staticResource: true }],
+  ])('keeps ambiguous or human-like traffic on origin: %s', async (_case, botManagement) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
+    const req = withCf(request('Mozilla/5.0'), { botManagement });
+
+    expect((await worker.fetch(req, {
+      TOLLBIT_BOT_SCORE_MODE: 'enforce',
+    }, context())).status).toBe(200);
+    expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it('fails open when Bot Management score is missing or the User-Agent is blank', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('origin')));
+    const noScore = withCf(request('MysteryCrawler/1.0'), { botManagement: {} });
+    const noUserAgent = withCf(
+      new Request(PAGE),
+      { botManagement: { score: 1 } },
+    );
+
+    expect((await worker.fetch(noScore, {
+      TOLLBIT_BOT_SCORE_MODE: 'enforce',
+    }, context())).status).toBe(200);
+    expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+    vi.mocked(fetch).mockClear();
+    expect((await worker.fetch(noUserAgent, {
+      TOLLBIT_BOT_SCORE_MODE: 'enforce',
+    }, context())).status).toBe(200);
+    expect(target(vi.mocked(fetch).mock.calls[0]![0])).toBe(PAGE);
+  });
+
+  it('keeps score-based routing disabled unless explicitly set to enforce', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response('origin'));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('MysteryCrawler/1.0'), {
+      botManagement: { score: 5 },
+    });
+    vi.mocked(console.info).mockClear();
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(200);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(PAGE);
+    expect(console.info).not.toHaveBeenCalled();
+  });
+
+  it('shadow mode logs only a score bucket and keeps the request on origin', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response('origin'));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('MysteryCrawler/1.0'), {
+      botManagement: { score: 5 },
+    });
+    vi.mocked(console.info).mockClear();
+
+    expect((await worker.fetch(req, {
+      TOLLBIT_BOT_SCORE_MODE: 'shadow',
+    }, context())).status).toBe(200);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(PAGE);
+    expect(console.info).toHaveBeenCalledWith('tollbit_bot_score_shadow', {
+      score_bucket: 'likely_automated',
+    });
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls))
+      .not.toContain('MysteryCrawler');
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls))
+      .not.toContain(PAGE);
+  });
+
+  it.each([
+    ['Cloudflare verified bot', { verifiedBot: true }],
+    ['Cloudflare signed agent', { signedAgent: true }],
+  ])('routes an unlisted %s through TollBit', async (_case, botManagement) => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response('paid path', { status: 402 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('UnlistedAgent/1.0'), { botManagement });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(402);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
+      PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
+    );
+  });
+
+  it('does not let a low bot score override the training block', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('GPTBot/1.0'), {
+      botManagement: { score: 1, verifiedBot: true },
+    });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks Cloudflare-verified AI Crawler category before Agent Site routing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('UnlistedAgent/1.0'), {
+      botManagement: { score: 1, verifiedBot: true },
+      verifiedBotCategory: 'AI Crawler',
+    });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Cloudflare-verified AI Search on the paid Agent Site path', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response('paid path', { status: 402 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('UnlistedSearchBot/1.0'), {
+      botManagement: { verifiedBot: true },
+      verifiedBotCategory: 'AI Search',
+    });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(402);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
+      PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
+    );
   });
 
   it.each(['Googlebot', 'Bingbot', 'Applebot', 'DuckDuckBot'])(
