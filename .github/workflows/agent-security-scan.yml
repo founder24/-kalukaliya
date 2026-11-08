@@ -43,7 +43,8 @@ jobs:
       - name: Install gitleaks
         run: |
           GITLEAKS_VERSION="8.18.4"
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+          curl -sSfL --retry 4 --retry-all-errors --retry-delay 3 --retry-max-time 120 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | tar -xz -C /usr/local/bin gitleaks
 
       - name: Run gitleaks secret detection
