@@ -30,12 +30,29 @@ esac
 
 if [[ ! -x "${ACTIONLINT_BIN}" ]]; then
   mkdir -p "${ACTIONLINT_CACHE_DIR}"
-  url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+  release_api_url="https://api.github.com/repos/rhysd/actionlint/releases/tags/v${ACTIONLINT_VERSION}"
+  asset_api_url="$(
+    curl --fail --location --silent --show-error \
+      --retry 4 --retry-all-errors --retry-delay 3 --retry-max-time 120 \
+      --header "User-Agent: syrabit-actionlint-checker" \
+      "${release_api_url}" \
+      | python3 -c '
+import json, sys
+archive = sys.argv[1]
+release = json.load(sys.stdin)
+asset = next((item for item in release.get("assets", []) if item.get("name") == archive), None)
+if asset is None or not asset.get("url"):
+    raise SystemExit(f"Release metadata missing asset: {archive}")
+print(asset["url"])
+' "${archive}"
+  )"
   archive_path="${ACTIONLINT_CACHE_DIR}/${archive}"
   echo "Downloading actionlint v${ACTIONLINT_VERSION}..."
   curl --fail --location --silent --show-error \
     --retry 4 --retry-all-errors --retry-delay 3 --retry-max-time 120 \
-    --output "${archive_path}" "${url}"
+    --header "User-Agent: syrabit-actionlint-checker" \
+    --header "Accept: application/octet-stream" \
+    --output "${archive_path}" "${asset_api_url}"
   if command -v sha256sum >/dev/null 2>&1; then
     echo "${checksum}  ${archive_path}" | sha256sum --check --status
   else
