@@ -52,6 +52,13 @@ in `wrangler.tollbit-draft.toml`.
   the `TollbitKey` secret binding. Logs include the standard IP, geographic,
   user-agent, response, referrer, and signature fields. Page query strings,
   cookies, authorization values, and identity headers are not included.
+- The owner-selected analytics scope is every public-page request, including
+  ordinary visitor requests, not only recognized crawlers. Signature fields
+  are capped at 8 KiB and rejected if they contain control characters.
+- Agent matching uses token boundaries to avoid matching generic substrings
+  such as `Code` inside unrelated user-agent products. The supplied bot catalog
+  is a routing list, not proof of identity; confirmed training matches still
+  take precedence and are blocked.
 - Logs token-required JSON responses, local training denials, HEAD requests,
   and provider errors, not just successful HTML pages.
 - Delivers analytics asynchronously and does not block page responses.

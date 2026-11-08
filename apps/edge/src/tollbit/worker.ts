@@ -8,6 +8,8 @@ import {
 const TOLLBIT_LOG_ENDPOINT = 'https://log.tollbit.com/log';
 export const TOLLBIT_FETCH_TIMEOUT_MS = 8000;
 const TOLLBIT_LOG_TIMEOUT_MS = 5000;
+const MAX_SIGNATURE_HEADER_LENGTH = 8192;
+const SIGNATURE_HEADERS = ['signature', 'signature-agent', 'signature-input'] as const;
 const SITE_HOSTS = new Set(['syrabit.ai', 'www.syrabit.ai']);
 const TOLLBIT_TEST_HEALTH_PATH = '/__tollbit_test_health';
 
@@ -202,6 +204,18 @@ function isVerifiedSearchEngineRequest(request: Request): boolean {
     && cf.verifiedBotCategory === 'Search Engine';
 }
 
+function safeSignatureHeader(request: Request, name: string): string | null {
+  const value = request.headers.get(name);
+  if (
+    !value
+    || value.length > MAX_SIGNATURE_HEADER_LENGTH
+    || /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    return null;
+  }
+  return value;
+}
+
 function isUnverifiedOpenAccessSearchClaim(request: Request): boolean {
   return matchesAgent(
     request.headers.get('user-agent'),
@@ -266,13 +280,9 @@ export function makeTollbitSiteRequest(
 
   // Tollbit uses these signed-request headers for Agent Site attribution.
   // Forward them, but never forward cookies, authorization, or user IDs.
-  for (const name of ['signature', 'signature-agent', 'signature-input']) {
-    const value = request.headers.get(name);
-    if (
-      value
-      && value.length <= 8192
-      && !/[\u0000-\u001f\u007f]/u.test(value)
-    ) {
+  for (const name of SIGNATURE_HEADERS) {
+    const value = safeSignatureHeader(request, name);
+    if (value) {
       headers.set(name, value);
     }
   }
@@ -372,9 +382,9 @@ export function buildTollbitLogEntry(
 
   // Tollbit's documented Cloudflare integration uses these signature headers
   // for request attribution. Do not forward cookies or authorization headers.
-  const signature = request.headers.get('signature');
-  const signatureAgent = request.headers.get('signature-agent');
-  const signatureInput = request.headers.get('signature-input');
+  const signature = safeSignatureHeader(request, 'signature');
+  const signatureAgent = safeSignatureHeader(request, 'signature-agent');
+  const signatureInput = safeSignatureHeader(request, 'signature-input');
   if (signature) entry.signature = signature;
   if (signatureAgent) entry.signature_agent = signatureAgent;
   if (signatureInput) entry.signature_input = signatureInput;

@@ -32,7 +32,7 @@ function mockFetch(fault = '') {
 }
 
 describe('read-only Tollbit live contract checker', () => {
-  it('checks routes and discovery without claiming provider confirmation', async () => {
+  it('checks synthetic routes without claiming real provider confirmation', async () => {
     const result = await verifyTollbit(origin, mockFetch());
     expect(result.subjects).toBe(1);
     expect(result.results.length).toBeGreaterThan(12);

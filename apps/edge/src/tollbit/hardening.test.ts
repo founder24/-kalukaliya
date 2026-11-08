@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker, { isPublicTollbitContentPath, TOLLBIT_FETCH_TIMEOUT_MS } from './worker';
-import { AGENT_SITE_USER_AGENTS, TRAINING_ONLY_USER_AGENTS } from './policy';
+import {
+  AGENT_SITE_USER_AGENTS,
+  matchesAgent,
+  TRAINING_ONLY_USER_AGENTS,
+} from './policy';
 
 const PAGE = 'https://syrabit.ai/ahsec/hs-1st-year/physics/laws-of-motion';
 const LOG = 'https://log.tollbit.com/log';
@@ -24,6 +28,25 @@ afterEach(() => {
 });
 
 describe('Tollbit public-content gate', () => {
+  it('matches supplied agent tokens without matching generic substrings', () => {
+    expect(matchesAgent(
+      'Mozilla/5.0 (compatible; DeepSeekBot/1.0)',
+      AGENT_SITE_USER_AGENTS,
+    )).toBe(true);
+    expect(matchesAgent(
+      'Mozilla/5.0 (CodeMirror/6.0)',
+      AGENT_SITE_USER_AGENTS,
+    )).toBe(false);
+    expect(matchesAgent(
+      'Mozilla/5.0 (VSCode/1.0)',
+      AGENT_SITE_USER_AGENTS,
+    )).toBe(false);
+    expect(matchesAgent(
+      'Mozilla/5.0 (compatible; GPTBot/1.0)',
+      TRAINING_ONLY_USER_AGENTS,
+    )).toBe(true);
+  });
+
   it.each(AGENT_SITE_USER_AGENTS)('gates retrieval agent %s', async (ua) => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response('token required', { status: 402 }));
     vi.stubGlobal('fetch', fetchMock);

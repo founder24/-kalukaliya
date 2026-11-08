@@ -306,6 +306,8 @@ describe('Tollbit Worker routing and analytics', () => {
   });
 
   it('forwards attribution signatures but strips credentials and query data', () => {
+    // These values exercise header handling only; they are not real TollBit
+    // signatures and cannot prove Agent Site attribution.
     const request = new Request(
       'https://www.syrabit.ai/degree/1st-semester/ba/course?email=student%40example.com',
       {
@@ -341,6 +343,31 @@ describe('Tollbit Worker routing and analytics', () => {
     expect(forwarded.headers.get('signature')).toBe(
       'sig1=:opaque-signature:',
     );
+  });
+
+  it('omits oversized attribution signature fields from forwarding and logs', () => {
+    const oversized = 'x'.repeat(8193);
+    const request = new Request(
+      'https://syrabit.ai/degree/1st-semester/ba/course',
+      {
+        headers: {
+          'User-Agent': 'OAI-SearchBot/1.0',
+          Signature: oversized,
+          'Signature-Agent': 'https://agent.example',
+          'Signature-Input': oversized,
+        },
+      },
+    );
+
+    const forwarded = makeTollbitSiteRequest(request);
+    const entry = buildTollbitLogEntry(request, new Response(null, { status: 200 }));
+
+    expect(forwarded.headers.get('signature')).toBeNull();
+    expect(forwarded.headers.get('signature-input')).toBeNull();
+    expect(forwarded.headers.get('signature-agent')).toBe('https://agent.example');
+    expect(entry).not.toHaveProperty('signature');
+    expect(entry).not.toHaveProperty('signature_input');
+    expect(entry.signature_agent).toBe('https://agent.example');
   });
 
   it('preserves verified search user-agent while stripping credentials', () => {
