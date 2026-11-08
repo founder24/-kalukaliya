@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -22,15 +23,28 @@ SUPPORTED_ARCHIVES = (
     "darwin_arm64",
 )
 USER_AGENT = "syrabit-actionlint-updater"
+RETRYABLE_HTTP_STATUS = {500, 502, 503, 504}
+MAX_DOWNLOAD_ATTEMPTS = 4
 
 
 def download_text(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8")
+    for attempt in range(MAX_DOWNLOAD_ATTEMPTS):
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as error:
+            if error.code not in RETRYABLE_HTTP_STATUS or attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
+                raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
+                raise
+        time.sleep(min(2**attempt, 8))
+
+    raise RuntimeError("Download retries exhausted")
 
 
-def latest_release() -> tuple[str, str]:
+def latest_release() -> tuple[str, dict[str, str]]:
     release = json.loads(
         download_text(f"https://api.github.com/repos/{REPOSITORY}/releases/latest")
     )
@@ -39,27 +53,23 @@ def latest_release() -> tuple[str, str]:
         raise ValueError(f"Unexpected actionlint release tag: {tag!r}")
 
     version = tag.removeprefix("v")
-    expected_asset = f"actionlint_{version}_checksums.txt"
-    for asset in release["assets"]:
-        if asset["name"] == expected_asset:
-            return version, asset["browser_download_url"]
-    raise ValueError(f"Release {tag} does not contain {expected_asset}")
+    asset_digests = {
+        asset["name"]: asset["digest"]
+        for asset in release.get("assets", [])
+        if isinstance(asset.get("name"), str) and isinstance(asset.get("digest"), str)
+    }
+    return version, asset_digests
 
 
-def release_checksums(version: str, checksum_url: str) -> dict[str, str]:
-    available: dict[str, str] = {}
-    for line in download_text(checksum_url).splitlines():
-        match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
-        if match:
-            available[match.group(2)] = match.group(1)
-
+def release_checksums(version: str, asset_digests: dict[str, str]) -> dict[str, str]:
     checksums: dict[str, str] = {}
     for platform in SUPPORTED_ARCHIVES:
         archive = f"actionlint_{version}_{platform}.tar.gz"
-        try:
-            checksums[platform] = available[archive]
-        except KeyError as error:
-            raise ValueError(f"Release checksums do not contain {archive}") from error
+        digest = asset_digests.get(archive, "")
+        match = re.fullmatch(r"sha256:([0-9a-f]{64})", digest)
+        if not match:
+            raise ValueError(f"Release metadata does not contain a SHA-256 digest for {archive}")
+        checksums[platform] = match.group(1)
     return checksums
 
 
@@ -122,8 +132,8 @@ def main() -> int:
 
     checker = CHECKER.read_text()
     current = pinned_version(checker)
-    latest, checksum_url = latest_release()
-    checksums = release_checksums(latest, checksum_url)
+    latest, asset_digests = latest_release()
+    checksums = release_checksums(latest, asset_digests)
     candidate = updated_checker(checker, latest, checksums)
 
     if args.update:

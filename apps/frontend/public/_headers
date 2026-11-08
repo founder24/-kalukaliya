@@ -78,10 +78,10 @@
 
 /ai.txt
   Content-Type: text/plain; charset=utf-8
-  Cache-Control: public, max-age=3600, no-transform
+  Cache-Control: public, max-age=300, no-transform
 
 /robots.txt
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=300, s-maxage=300, no-transform
 
 /sitemap*.xml
   Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
@@ -99,11 +99,11 @@
   Content-Type: application/feed+json; charset=utf-8
 
 /llms.txt
-  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Cache-Control: public, max-age=300, s-maxage=600, stale-while-revalidate=300
   Content-Type: text/plain; charset=utf-8
 
 /llms-full.txt
-  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600
+  Cache-Control: public, max-age=300, s-maxage=600, stale-while-revalidate=300
   Content-Type: text/plain; charset=utf-8
 
 /.well-known/*

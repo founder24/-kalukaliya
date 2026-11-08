@@ -277,7 +277,7 @@ function buildPolicyResult(staticRobotsPath) {
   });
   const normalizeSignal = (text) =>
     text.match(/^Content-Signal:\s*(.+)$/im)?.[1]?.replace(/\s+/g, "").toLowerCase() ?? null;
-  const expectedSignal = "search=yes,ai-input=yes,ai-train=no";
+  const expectedSignal = "ai-input=no,ai-train=no";
   checks.push({
     agent: "Content-Signal",
     expected: expectedSignal,

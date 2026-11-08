@@ -155,9 +155,9 @@ if (!fs.existsSync(robotsPath)) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /^Content-Signal:/i.test(line))
-    .join("\n") !== "Content-Signal: search=yes, ai-input=yes, ai-train=no"
+    .join("\n") !== "Content-Signal: ai-input=no, ai-train=no"
 ) {
-  fail("robots.txt must contain one active Content-Signal directive with the documented policy");
+  fail("robots.txt must deny AI input and training without granting global search permission");
 }
 
 const apiCatalogPath = path.join(distDir, ".well-known", "api-catalog");

@@ -20,6 +20,29 @@ describe('Pages worker route fallbacks', () => {
     expect(response.headers.get('x-robots-tag')).toBe('noindex, nofollow');
   });
 
+  it.each([
+    { pathname: '/robots.txt', edgeTtl: 300, cacheControl: 'max-age=300' },
+    { pathname: '/llms.txt', edgeTtl: 600, cacheControl: 'max-age=300, s-maxage=600' },
+    { pathname: '/llms-full.txt', edgeTtl: 600, cacheControl: 'max-age=300, s-maxage=600' },
+    { pathname: '/tollbit/subjects.json', edgeTtl: 600, cacheControl: 'max-age=300, s-maxage=600' },
+  ])('keeps $pathname discovery data on a short edge cache', async ({ pathname, edgeTtl, cacheControl }) => {
+    const upstreamFetch = vi.fn(async () => new Response('discovery artifact', { status: 200 }));
+    vi.stubGlobal('fetch', upstreamFetch);
+
+    const response = await pagesWorker.fetch(
+      new Request(`https://syrabit.ai${pathname}`),
+      {
+        SEO_BACKEND_URL: 'https://api.syrabit.ai',
+        BACKEND_BOT_URL: 'https://api.syrabit.ai',
+        ASSETS: { fetch: async () => new Response('missing', { status: 404 }) },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain(cacheControl);
+    expect(upstreamFetch.mock.calls[0][1].cf.cacheTtl).toBe(edgeTtl);
+  });
+
   it('keeps authenticated API traffic on the first-party API origin', async () => {
     const apiFetch = vi.fn(async () => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', apiFetch);
