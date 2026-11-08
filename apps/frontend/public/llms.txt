@@ -7,7 +7,7 @@ Coverage and available languages vary by subject and chapter. The live library a
 ## Discover published content
 
 - Library: https://syrabit.ai/library
-- Full content index: https://syrabit.ai/llms-full.txt
+- Published chapter URL index (links only): https://syrabit.ai/llms-full.txt
 - Tollbit subject directory (JSON): https://syrabit.ai/tollbit/subjects.json
 - Sitemap index: https://syrabit.ai/sitemap-index.xml
 - Robots policy: https://syrabit.ai/robots.txt
@@ -15,6 +15,8 @@ Coverage and available languages vary by subject and chapter. The live library a
 
 ## Content and citations
 
+- Public indexes and subject directories provide URL discovery only; listing a URL does not grant page-content rights.
+- AI Search/RAG use of full study content requires a paid Tollbit license; model training is not permitted.
 - Pages may contain study notes, questions, previous-year questions, or topic material where published; section coverage is not uniform.
 - English and Assamese content are published per page and section. Do not assume a complete translation or answer set unless that page provides it.
 - Topic pages are listed for indexing only when they meet the current publication and language-completeness requirements.

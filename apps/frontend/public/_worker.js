@@ -133,6 +133,11 @@ async function sitemapProxy(request, env, url) {
   const backendPath = backendPathForSeo(url.pathname);
   const backendUrl = backend + backendPath + url.search;
   const isXml = /\.xml$/i.test(url.pathname);
+  const isRobots = url.pathname.toLowerCase() === "/robots.txt";
+  const isPolicyIndex = /^\/llms(?:-full)?\.txt$/i.test(url.pathname);
+  const isTollbitDirectory = /^\/tollbit\/subjects\.json$/i.test(url.pathname);
+  const useShortCache = isRobots || isPolicyIndex || isTollbitDirectory;
+  const edgeCacheTtl = isRobots ? 300 : (useShortCache ? 600 : 3600);
   try {
     const resp = await fetch(backendUrl, {
       method: request.method,
@@ -142,7 +147,7 @@ async function sitemapProxy(request, env, url) {
         "X-Forwarded-For": request.headers.get("CF-Connecting-IP") || "",
         "X-Sitemap-Proxy": "1",
       },
-      cf: { cacheTtl: 3600, cacheEverything: true },
+      cf: { cacheTtl: edgeCacheTtl, cacheEverything: true },
     });
     if (resp.status === 200) {
       const headers = new Headers(resp.headers);
@@ -155,7 +160,13 @@ async function sitemapProxy(request, env, url) {
       const isTxt = /\.txt$/i.test(url.pathname);
       headers.set(
         "Cache-Control",
-        isTxt
+        isRobots
+          ? "public, max-age=300, s-maxage=300, no-transform"
+          : isPolicyIndex
+            ? "public, max-age=300, s-maxage=600, stale-while-revalidate=300, no-transform"
+            : isTollbitDirectory
+              ? "public, max-age=300, s-maxage=600, stale-while-revalidate=300"
+              : isTxt
           ? "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600, no-transform"
           : "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600",
       );

@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { api } from './index';
 import { sanitizeAnalyticsPayload } from './operations';
 import type { Env } from '../types';
@@ -370,13 +371,15 @@ describe('Worker-native site-operation routes', () => {
     const llmsText = await llms.text();
     expect(llmsText).toContain('Sitemap index: https://syrabit.ai/sitemap-index.xml');
     expect(llmsText).toContain('Tollbit subject directory (JSON): https://syrabit.ai/tollbit/subjects.json');
-    expect(llmsText).toContain('Total published chapters: 1');
+    expect(llmsText).toContain('Unique indexable chapter pages: 1');
+    expect(llmsText).toContain('AI Search/RAG use of full study content requires a paid Tollbit license.');
     expect(llmsText).toContain('section coverage is not uniform');
     expect(llmsText).not.toContain('FAQPage');
     await expect(fullIndex.text()).resolves.toContain('[Newton’s Laws](https://syrabit.ai/ahsec/class-12/physics/newtons-laws)');
     expect(subjectDirectory.headers.get('Content-Type')).toContain('application/json');
     await expect(subjectDirectory.json()).resolves.toMatchObject({
       schema_version: '1.0',
+      access_note: 'Listing a URL supports discovery only. AI Search/RAG content access requires a paid Tollbit license; model training is not permitted.',
       subject_count: 1,
       subject_sitemap_count: 1,
       chapter_page_count: 1,
@@ -515,8 +518,18 @@ describe('Worker-native site-operation routes', () => {
     expect(body).toContain('Sitemap: https://syrabit.ai/sitemap-subjects.xml');
     expect(body).toContain('Sitemap: https://syrabit.ai/sitemap-chapters.xml');
     expect(activeSignals).toEqual([
-      'Content-Signal: search=yes, ai-input=yes, ai-train=no',
+      'Content-Signal: ai-input=no, ai-train=no',
     ]);
+    expect(body).not.toMatch(/^Content-Signal:.*search=yes/m);
+
+    const staticRobots = readFileSync(
+      new URL('../../../frontend/public/robots.txt', import.meta.url),
+      'utf8',
+    );
+    const activeDirectives = (robots: string) => robots.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'));
+    expect(activeDirectives(body)).toEqual(activeDirectives(staticRobots));
   });
 
   it('emits canonical, unique sitemap URLs and omits empty topic maps', async () => {
@@ -538,16 +551,18 @@ describe('Worker-native site-operation routes', () => {
     }) as unknown as Env;
 
     const env = envWithRows(duplicateRows);
-    const [staticMap, chapterMap, topicMap, index] = await Promise.all([
+    const [staticMap, chapterMap, topicMap, index, fullIndex] = await Promise.all([
       api.fetch(request('/api/v1/seo/sitemap-static.xml'), env),
       api.fetch(request('/api/v1/seo/sitemap-chapters.xml'), env),
       api.fetch(request('/api/v1/seo/sitemap-topics.xml'), env),
       api.fetch(request('/api/v1/seo/sitemap.xml'), env),
+      api.fetch(request('/api/v1/seo/llms-full.txt'), env),
     ]);
     const staticXml = await staticMap.text();
     const chapterXml = await chapterMap.text();
     const topicXml = await topicMap.text();
     const indexXml = await index.text();
+    const fullIndexText = await fullIndex.text();
 
     expect(staticXml).toContain('https://syrabit.ai/library');
     expect(staticXml).toContain('https://syrabit.ai/home');
@@ -558,6 +573,15 @@ describe('Worker-native site-operation routes', () => {
     expect(staticXml).not.toContain('https://syrabit.ai/pricing');
     expect((chapterXml.match(/<loc>/g) ?? []).length).toBe(1);
     expect(chapterXml).not.toContain('empty-notes');
+    const chapterUrls = [...chapterXml.matchAll(/<loc>([^<]+)<\/loc>/g)]
+      .map((match) => match[1])
+      .sort();
+    const llmsUrls = [...fullIndexText.matchAll(/\]\((https:\/\/[^)]+)\)/g)]
+      .map((match) => match[1])
+      .sort();
+    expect(fullIndexText).toContain('URLs only; this file does not contain chapter text.');
+    expect(llmsUrls).toEqual(chapterUrls);
+    expect(new Set(llmsUrls).size).toBe(llmsUrls.length);
     expect((topicXml.match(/<loc>/g) ?? []).length).toBe(1);
     expect((indexXml.match(/sitemap-topics\.xml/g) ?? []).length).toBe(1);
 

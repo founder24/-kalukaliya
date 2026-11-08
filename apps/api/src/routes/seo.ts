@@ -50,6 +50,12 @@ type PublishedSubjectCard = {
   classSlug: string;
 };
 
+type IndexableChapterPage = {
+  title: string;
+  url: string;
+  updatedAt: number | null;
+};
+
 function xml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -94,6 +100,29 @@ function hasCompleteAssameseChapterPage(row: ContentUrl): boolean {
   const englishFaqs = faqEntriesFromJson(row.qaEn, 'en');
   const assameseFaqs = faqEntriesFromJson(row.qaAs, 'as');
   return assameseFaqs.length >= 5 && englishFaqs.length === assameseFaqs.length;
+}
+
+function indexableChapterPages(rows: ContentUrl[]): IndexableChapterPage[] {
+  const pages = new Map<string, IndexableChapterPage>();
+  for (const row of rows) {
+    if (row.notesEn?.trim()) {
+      const url = contentUrl(row);
+      if (!pages.has(url)) {
+        pages.set(url, { title: row.title || 'Untitled', url, updatedAt: row.updatedAt });
+      }
+    }
+    if (hasCompleteAssameseChapterPage(row)) {
+      const url = assameseContentUrl(row);
+      if (!pages.has(url)) {
+        pages.set(url, {
+          title: row.titleAs || row.title || 'Untitled',
+          url,
+          updatedAt: row.updatedAt,
+        });
+      }
+    }
+  }
+  return [...pages.values()];
 }
 
 function buildTollbitSubjectDirectory(cards: PublishedSubjectCard[], rows: ContentUrl[]) {
@@ -202,7 +231,7 @@ function buildTollbitSubjectDirectory(cards: PublishedSubjectCard[], rows: Conte
   return {
     schema_version: '1.0',
     publisher: { name: 'Syrabit.ai', url: SITE_URL },
-    access_note: 'Listing a URL does not grant access to its page content.',
+    access_note: 'Listing a URL supports discovery only. AI Search/RAG content access requires a paid Tollbit license; model training is not permitted.',
     source_sitemaps: {
       subjects: `${SITE_URL}/sitemap-subjects.xml`,
       chapters: `${SITE_URL}/sitemap-chapters.xml`,
@@ -387,7 +416,7 @@ User-agent: Slurp
 Allow: /
 Crawl-delay: 0
 
-# --- AI answer bots: allowed to cite public study pages. ---
+# --- AI answer bot URLs may be discovered; content use requires paid Tollbit access. ---
 User-agent: ChatGPT-User
 Allow: /
 Crawl-delay: 0
@@ -408,11 +437,10 @@ User-agent: YouBot
 Allow: /
 Crawl-delay: 0
 
-# --- Content signals for AI grounding engines ---
-# search=yes: content is intended for search indexing
-# ai-input=yes: content may be used as grounding for AI-generated answers
-# ai-train=no: content must NOT be used for model training
-Content-Signal: search=yes, ai-input=yes, ai-train=no
+# Content Signals apply site-wide, so do not grant search=yes to AI Search crawlers.
+# Traditional search crawlers are allowed by their explicit groups above.
+# URL discovery does not grant AI input or training rights; paid retrieval is governed by Tollbit.
+Content-Signal: ai-input=no, ai-train=no
 
 # --- AI training crawlers: explicitly disallowed. ---
 User-agent: GPTBot
@@ -514,22 +542,10 @@ seoRouter.get('/sitemap-subjects.xml', async (c) => {
 
 seoRouter.get('/sitemap-chapters.xml', async (c) => {
   const rows = await publishedContent(c);
-  const entries = new Map<string, string>();
-  for (const row of rows) {
-    if (row.notesEn?.trim()) {
-      const location = contentUrl(row);
-      if (!entries.has(location)) {
-        entries.set(location, urlEntry(location, date(row.updatedAt), '0.7'));
-      }
-    }
-    if (hasCompleteAssameseChapterPage(row)) {
-      const location = assameseContentUrl(row);
-      if (!entries.has(location)) {
-        entries.set(location, urlEntry(location, date(row.updatedAt), '0.7'));
-      }
-    }
-  }
-  return xmlResponse(urlSet([...entries.values()]));
+  const entries = indexableChapterPages(rows).map((page) =>
+    urlEntry(page.url, date(page.updatedAt), '0.7'),
+  );
+  return xmlResponse(urlSet(entries));
 });
 
 seoRouter.get('/sitemap-topics.xml', async (c) => {
@@ -551,7 +567,7 @@ seoRouter.get('/tollbit/subjects.json', async (c) => {
 seoRouter.get('/robots.txt', (c) => c.text(
   ROBOTS_TXT,
   200,
-  { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
+  { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=300, s-maxage=300, no-transform' },
 ));
 
 function rss(items: ContentUrl[], title = 'Syrabit.ai - Study Notes & Exam Prep', selfUrl = `${SITE_URL}/feed.xml`): string {
@@ -622,23 +638,29 @@ seoRouter.get('/feed.json', async (c) => {
 });
 
 seoRouter.get('/llms.txt', async (c) => {
-  const count = (await publishedContent(c)).length;
+  const pages = indexableChapterPages(await publishedContent(c));
   return c.text(`# Syrabit.ai
 
 > Public educational library for students in Assam, with AHSEC, SEBA, and published undergraduate Degree/FYUGP materials.
 
 Coverage and available languages vary by subject and chapter. The live library and content index are the source of truth for what is currently published.
 
-Total published chapters: ${count}
+Unique indexable chapter pages: ${pages.length}
 
 ## Discover published content
 
 - Library: ${SITE_URL}/library
-- Full content index: ${SITE_URL}/llms-full.txt
+- Published chapter URL index (links only): ${SITE_URL}/llms-full.txt
 - Tollbit subject directory (JSON): ${SITE_URL}/tollbit/subjects.json
 - Sitemap index: ${SITE_URL}/sitemap-index.xml
 - Robots policy: ${SITE_URL}/robots.txt
 - AI usage notes: ${SITE_URL}/ai.txt
+
+## Access and use
+
+- Public indexes and subject directories provide URL discovery only; listing a URL does not grant page-content rights.
+- AI Search/RAG use of full study content requires a paid Tollbit license.
+- Model training is not permitted.
 
 ## Content and citations
 
@@ -654,18 +676,22 @@ Total published chapters: ${count}
 - ${SITE_URL}/technology
 - ${SITE_URL}/about
 
-`, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=600' });
+`, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=300, s-maxage=600' });
 });
 
 seoRouter.get('/llms-full.txt', async (c) => {
-  const rows = await publishedContent(c);
-  const lines = rows.map((row) => `- [${row.title || 'Untitled'}](${contentUrl(row)})`);
-  return c.text(`# Syrabit.ai — Full Content Index
+  const pages = indexableChapterPages(await publishedContent(c))
+    .sort((a, b) => a.url.localeCompare(b.url, 'en'));
+  const lines = pages.map((page) => `- [${page.title}](${page.url})`);
+  return c.text(`# Syrabit.ai — Published Chapter URL Index
 
-Total indexed chapters: ${rows.length}
+URLs only; this file does not contain chapter text. The subject directory and this index support discovery, not content authorization.
+
+Unique canonical chapter pages: ${pages.length}
+AI Search/RAG access to full study content requires a paid Tollbit license. Model training is not permitted.
 
 ${lines.join('\n')}
-`, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=600, s-maxage=600' });
+`, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=300, s-maxage=600' });
 });
 
 seoRouter.get('/health', async (c) => {

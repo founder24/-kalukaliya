@@ -15,7 +15,7 @@ Claude-User
 
 [access]
 https://tollbit.syrabit.ai
-Public study content requires Tollbit authorization for configured retrieval agents.
+AI Search/RAG use of full study content requires a paid Tollbit license.
 User-Agent matching is a routing policy, not authenticated crawler identity.
 
 [disallow]

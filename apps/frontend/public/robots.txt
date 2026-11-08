@@ -45,11 +45,9 @@ User-agent: Slurp
 Allow: /
 Crawl-delay: 0
 
-# --- AI ANSWER bots (cite sources, drive referral traffic): allowed. ---
-# Task #287 policy: invite citation-driving LLM crawlers so AHSEC HS1/HS2
-# notes appear in Perplexity / ChatGPT browse / OpenAI SearchGPT answers.
-# Training-only crawlers (GPTBot, ClaudeBot, Google-Extended, etc.) remain
-# disallowed below — we want citations, not silent corpus ingestion.
+# --- AI answer bots may discover URLs; content retrieval requires paid Tollbit access. ---
+# Public discovery does not grant AI Search/RAG permission to retrieve page content.
+# Training crawlers confirmed by the publisher remain disallowed below.
 # Task #9: Crawl-delay: 0 — verified-bot fast path (≥60K RPM bucket)
 # is the real ceiling; the polite default (~1 RPS) would needlessly
 # slow citation pickup.
@@ -69,13 +67,14 @@ User-agent: Perplexity-User
 Allow: /
 Crawl-delay: 0
 
-# --- Content signals for AI grounding engines ---
-# Explicitly grant permission for AI search/answer engines to use site content
-# as grounding input for generated answers (GEO/AEO signal).
-# search=yes: content is intended for search indexing
-# ai-input=yes: content may be used as grounding for AI-generated answers
-# ai-train=no: content must NOT be used for model training
-Content-Signal: search=yes, ai-input=yes, ai-train=no
+User-agent: YouBot
+Allow: /
+Crawl-delay: 0
+
+# Content signals are site-wide. Do not grant search=yes globally because that
+# also applies to AI Search crawlers; traditional search crawlers are allowed above.
+# AI input requires paid Tollbit access, and model training is not permitted.
+Content-Signal: ai-input=no, ai-train=no
 
 # --- AI training crawlers: explicitly disallowed. ---
 # Mirrors `_AI_BOT_NAMES` in artifacts/syrabit-backend/cf_bot_report.py
@@ -116,11 +115,6 @@ Disallow: /
 
 User-agent: Amazonbot
 Disallow: /
-
-User-agent: YouBot
-Allow: /
-# YouBot is You.com's search/answer engine — cites sources, drives referral
-# traffic. No longer classified as an AI training crawler.
 
 User-agent: Cohere-AI
 Disallow: /
