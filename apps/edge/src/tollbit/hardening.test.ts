@@ -202,6 +202,33 @@ describe('Tollbit public-content gate', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('blocks Cloudflare-verified AI Crawler category before Agent Site routing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('UnlistedAgent/1.0'), {
+      botManagement: { score: 1, verifiedBot: true },
+      verifiedBotCategory: 'AI Crawler',
+    });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps Cloudflare-verified AI Search on the paid Agent Site path', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      new Response('paid path', { status: 402 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const req = withCf(request('UnlistedSearchBot/1.0'), {
+      botManagement: { verifiedBot: true },
+      verifiedBotCategory: 'AI Search',
+    });
+
+    expect((await worker.fetch(req, {}, context())).status).toBe(402);
+    expect(target(fetchMock.mock.calls[0]![0]!)).toBe(
+      PAGE.replace('syrabit.ai', 'tollbit.syrabit.ai'),
+    );
+  });
+
   it.each(['Googlebot', 'Bingbot', 'Applebot', 'DuckDuckBot'])(
     'blocks unverified %s claims before they reach origin', async (ua) => {
       const fetchMock = vi.fn();

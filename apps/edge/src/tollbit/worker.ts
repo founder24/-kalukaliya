@@ -243,6 +243,12 @@ function isVerifiedSearchEngineRequest(request: Request): boolean {
     && cf.verifiedBotCategory === 'Search Engine';
 }
 
+function isCloudflareTrainingAgent(request: Request): boolean {
+  // Cloudflare's verified-bot legacy category defines AI Crawler as content
+  // collection used for training; keep it ahead of paid-agent routing.
+  return cloudflareMetadata(request)?.verifiedBotCategory === 'AI Crawler';
+}
+
 function safeSignatureHeader(request: Request, name: string): string | null {
   const value = request.headers.get(name);
   if (
@@ -562,7 +568,13 @@ export default {
     let response: Response;
 
     const publicPage = isPublicPageRequest(request, env);
-    if (publicPage && matchesAgent(request.headers.get('user-agent'), TRAINING_ONLY_USER_AGENTS)) {
+    if (
+      publicPage
+      && (
+        matchesAgent(request.headers.get('user-agent'), TRAINING_ONLY_USER_AGENTS)
+        || isCloudflareTrainingAgent(request)
+      )
+    ) {
       response = policyResponse(request, 403, 'ai_training_not_permitted');
     } else if (publicPage && isUnverifiedOpenAccessSearchClaim(request)) {
       // A claimed free search bot that Cloudflare cannot verify must not fall

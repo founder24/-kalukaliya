@@ -31,6 +31,9 @@ in `wrangler.tollbit-draft.toml`.
 - Also routes Cloudflare-verified bots, signed agents, and unlisted requests
   with a Bot Management score of 1–29 through the Tollbit Agent Site. A
   user-agent string alone does not identify an unlisted bot.
+- Blocks requests Cloudflare verifies in the `AI Crawler` category before paid
+  agent routing; Cloudflare defines that category as content collection for
+  model training. Verified `AI Search` and user-directed agents remain paid.
 - A search-engine user-agent string alone is never sufficient for free
   forwarding; the Worker requires both `request.cf.botManagement.verifiedBot`
   and `request.cf.verifiedBotCategory === "Search Engine"`.
@@ -148,9 +151,10 @@ available: `request.cf.botManagement.score`, `verifiedBot`, `signedAgent`,
 
 The Worker policy is:
 
-1. Known training-agent matches remain blocked first. Verified search engines
-   still use the existing Search Engine category path; the selected unverified
-   free-search claims remain blocked.
+1. Known training-agent matches and Cloudflare-verified `AI Crawler` category
+   requests remain blocked first. Verified search engines still use the
+   existing Search Engine category path; the selected unverified free-search
+   claims remain blocked.
 2. Cloudflare-verified bots and signed agents go through Tollbit. Other
    unlisted requests with scores 1–29 go through Tollbit only when they have a
    non-empty user-agent of at most 2,048 characters and are not marked as a
