@@ -42,9 +42,11 @@ in `wrangler.tollbit-draft.toml`.
 - A search-engine user-agent string alone is never sufficient for free
   forwarding; the Worker requires both `request.cf.botManagement.verifiedBot`
   and `request.cf.verifiedBotCategory === "Search Engine"`.
-- Public-content routes include `/`, `/home`, Library, and recognized English
-  and Assamese curriculum routes. Discovery files and private/API routes are
-  not paywalled by this Worker.
+- TollBit content routing remains limited to `/`, `/home`, Library, and the
+  currently recognized AHSEC/Degree curriculum routes. This is intentionally
+  separate from the broader public-page analytics matcher: legal, marketing,
+  subject-directory, Learn, PYQ, and other public pages are not made paid
+  content merely because their requests are measured.
 - Blocks robots-disallowed training agent names with a local, non-cacheable
   403 on public-content routes. Training matches take precedence over retrieval
   names. This is declared-UA policy enforcement, not proof of crawler identity.
@@ -60,9 +62,16 @@ in `wrangler.tollbit-draft.toml`.
   within eight seconds or attempts a redirect. Never serves origin content as
   an outage fallback for gated bots. Ordinary visitors retain origin routing.
 - Sends eligible public page outcomes to `https://log.tollbit.com/log` using
-  the `TollbitKey` secret binding. Logs include the standard IP, geographic,
-  user-agent, response, referrer, and signature fields. Page query strings,
-  cookies, authorization values, and identity headers are not included.
+  the `TollbitKey` secret binding. Analytics eligibility includes the
+  informational routes (`/terms`, `/privacy`, `/about`, `/technology`,
+  `/status`, `/exam-routine`), Library/browser/curriculum pages, subject,
+  Learn, and PYQ pages, plus known AHSEC, SEBA, Degree, CBSE, and ICSE route
+  shapes. It excludes authentication/onboarding, payment redirects, private
+  tools, APIs, assets, discovery files, and unknown routes. This matcher does
+  not expand Tollbit content routing.
+- Logs include the standard IP, geographic, user-agent, response, referrer,
+  and signature fields. Page query strings, cookies, authorization values, and
+  identity headers are not included.
 - The owner-selected analytics scope is every public-page request, including
   ordinary visitor requests, not only recognized crawlers. Signature fields
   are capped at 8 KiB and rejected if they contain control characters.

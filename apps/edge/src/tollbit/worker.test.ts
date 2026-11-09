@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import tollbitWorker, {
+  isPublicTollbitAnalyticsPath,
   buildTollbitLogEntry,
   isPublicTollbitContentPath,
   makeTollbitSiteRequest,
@@ -274,6 +275,87 @@ describe('Tollbit Worker routing and analytics', () => {
     expect(isPublicTollbitContentPath('/unknown/path')).toBe(false);
     expect(isPublicTollbitContentPath('/degree/%2e%2e/admin')).toBe(false);
     expect(isPublicTollbitContentPath('/degree/%2Fstaff')).toBe(false);
+  });
+
+  it('recognizes public page paths for analytics separately from paid content routes', () => {
+    for (const path of [
+      '/',
+      '/terms/',
+      '/privacy',
+      '/about',
+      '/technology',
+      '/status',
+      '/exam-routine',
+      '/browser',
+      '/browse',
+      '/browser-tabs',
+      '/curriculum',
+      '/subject/physics',
+      '/learn/newtons-laws',
+      '/pyq/ahsec-class-12-physics-2025',
+      '/seba/class-10/science',
+      '/as/seba/class-12/physics/newtons-laws',
+      '/cbse/class-10/maths/quadratic-equations/mcqs',
+      '/degree/1st-semester/ba/course',
+    ]) {
+      expect(isPublicTollbitAnalyticsPath(path), path).toBe(true);
+    }
+
+    for (const path of [
+      '/login',
+      '/signup',
+      '/reset-password',
+      '/onboarding',
+      '/payment/success',
+      '/profile/referrals',
+      '/chat',
+      '/cms/user/private-post',
+      '/api/health',
+      '/assets/app.js',
+      '/robots.txt',
+      '/llms.txt',
+      '/sitemap-index.xml',
+      '/unknown/path',
+      '/degree/%2e%2e/admin',
+      '/degree/%2Fstaff',
+    ]) {
+      expect(isPublicTollbitAnalyticsPath(path), path).toBe(false);
+    }
+  });
+
+  it('logs public informational pages without routing them through paid access', async () => {
+    const fetchCalls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      fetchCalls.push(url);
+      return url === 'https://log.tollbit.com/log'
+        ? new Response(null, { status: 204 })
+        : new Response('public page', { status: 200 });
+    }));
+    const ctx = makeContext();
+
+    const response = await tollbitWorker.fetch(
+      new Request('https://syrabit.ai/about', {
+        headers: { 'User-Agent': 'ChatGPT-User' },
+      }),
+      { TOLLBIT_API_KEY: 'test-only-key' },
+      ctx,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchCalls).toEqual([
+      'https://syrabit.ai/about',
+      'https://log.tollbit.com/log',
+    ]);
+    await Promise.all(ctx.pending);
+    const entry = JSON.parse(String(
+      (vi.mocked(fetch).mock.calls[1]?.[1] as RequestInit | undefined)?.body,
+    ));
+    expect(entry).toMatchObject({
+      host: 'syrabit.ai',
+      url: '/about',
+      response_status: 200,
+    });
   });
 
   it('does not proxy private or non-GET requests', async () => {

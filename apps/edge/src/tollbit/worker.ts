@@ -47,6 +47,34 @@ const PRIVATE_CONTENT_ROOTS = new Set([
   'subscribe',
 ]);
 
+// Public informational and student-facing pages whose requests may be sent to
+// Tollbit analytics. This list intentionally does not determine paid routing:
+// legal/marketing pages should be measurable without becoming paywalled.
+const PUBLIC_ANALYTICS_STATIC_PATHS = new Set([
+  '/',
+  '/home',
+  '/terms',
+  '/privacy',
+  '/about',
+  '/technology',
+  '/status',
+  '/exam-routine',
+  '/library',
+  '/as/library',
+  '/browser',
+  '/browse',
+  '/browser-tabs',
+  '/curriculum',
+]);
+
+const PUBLIC_CURRICULUM_BOARDS = new Set([
+  'ahsec',
+  'seba',
+  'degree',
+  'cbse',
+  'icse',
+]);
+
 export interface TollbitWorkerEnv {
   TOLLBIT_API_KEY?: string;
   TOLLBIT_BOT_SCORE_MODE?: string;
@@ -108,11 +136,10 @@ function publisherHostForRequest(
   return SITE_HOSTS.has(requestedHost) ? requestedHost : null;
 }
 
-function isPublicPageRequest(
+function isEligiblePublisherPageRequest(
   request: Request,
   env: TollbitWorkerEnv = {},
 ): boolean {
-  const url = new URL(request.url);
   const host = publisherHostForRequest(request, env);
   const method = request.method.toUpperCase();
 
@@ -123,25 +150,37 @@ function isPublicPageRequest(
   ) {
     return false;
   }
-  if (method !== 'GET' && method !== 'HEAD') return false;
-  return isPublicTollbitContentPath(url.pathname);
+  return method === 'GET' || method === 'HEAD';
 }
 
-export function isPublicTollbitContentPath(pathname: string): boolean {
+function isTollbitContentRequest(
+  request: Request,
+  env: TollbitWorkerEnv = {},
+): boolean {
+  return isEligiblePublisherPageRequest(request, env)
+    && isPublicTollbitContentPath(new URL(request.url).pathname);
+}
+
+function isTollbitAnalyticsRequest(
+  request: Request,
+  env: TollbitWorkerEnv = {},
+): boolean {
+  return isEligiblePublisherPageRequest(request, env)
+    && isPublicTollbitAnalyticsPath(new URL(request.url).pathname);
+}
+
+function safeDecodedPathSegments(pathname: string): string[] | null {
   if (
     typeof pathname !== 'string'
     || !pathname.startsWith('/')
     || pathname.includes('//')
   ) {
-    return false;
+    return null;
   }
-  // Forward the homepage itself; relying on the publisher's bot renderer here
-  // previously produced a 503 instead of Tollbit's token-required response.
-  if (pathname === '/' || pathname === '/home' || pathname === '/home/') return true;
 
   const rawSegments = pathname.split('/').slice(1);
   if (rawSegments[rawSegments.length - 1] === '') rawSegments.pop();
-  if (rawSegments.some((segment) => !segment)) return false;
+  if (rawSegments.some((segment) => !segment)) return null;
 
   let segments: string[];
   try {
@@ -149,7 +188,7 @@ export function isPublicTollbitContentPath(pathname: string): boolean {
       decodeURIComponent(segment).normalize('NFC'),
     );
   } catch {
-    return false;
+    return null;
   }
 
   if (
@@ -162,10 +201,20 @@ export function isPublicTollbitContentPath(pathname: string): boolean {
       || !/^[\p{L}\p{N}][\p{L}\p{M}\p{N}_-]*$/u.test(segment),
     )
   ) {
-    return false;
+    return null;
   }
 
-  const normalized = segments.map((segment) => segment.toLowerCase());
+  return segments.map((segment) => segment.toLowerCase());
+}
+
+export function isPublicTollbitContentPath(pathname: string): boolean {
+  // Forward the homepage itself; relying on the publisher's bot renderer here
+  // previously produced a 503 instead of Tollbit's token-required response.
+  const normalized = safeDecodedPathSegments(pathname);
+  if (!normalized) return false;
+  if (normalized.length === 0) return true;
+  if (normalized.length === 1 && normalized[0] === 'home') return true;
+
   const contentSegments = normalized[0] === 'as'
     ? normalized.slice(1)
     : normalized;
@@ -193,6 +242,36 @@ export function isPublicTollbitContentPath(pathname: string): boolean {
       || (route.length === 6 && route[4] === 'topic');
   }
   return false;
+}
+
+export function isPublicTollbitAnalyticsPath(pathname: string): boolean {
+  const segments = safeDecodedPathSegments(pathname);
+  if (!segments) return false;
+
+  const pageSegments = segments[0] === 'as' ? segments.slice(1) : segments;
+  const normalizedPath = pageSegments.length
+    ? `/${pageSegments.join('/')}`
+    : '/';
+  if (
+    PUBLIC_ANALYTICS_STATIC_PATHS.has(normalizedPath)
+    || PUBLIC_ANALYTICS_STATIC_PATHS.has(`/${segments.join('/')}`)
+  ) {
+    return true;
+  }
+
+  if (
+    pageSegments.length === 2
+    && ['subject', 'learn', 'pyq'].includes(pageSegments[0]!)
+  ) {
+    return true;
+  }
+
+  // Public curriculum routes share the frontend's board/class/subject,
+  // chapter, legacy-page, and topic URL shapes. Keep this allowlist separate
+  // from Tollbit content gating so newly measured routes are not paywalled.
+  return PUBLIC_CURRICULUM_BOARDS.has(pageSegments[0] ?? '')
+    && pageSegments.length >= 3
+    && pageSegments.length <= 7;
 }
 
 function matchedAgentToken(userAgent: string | null): string | null {
@@ -289,7 +368,7 @@ function isAgentSiteRequest(
   request: Request,
   env: TollbitWorkerEnv = {},
 ): boolean {
-  if (!isPublicPageRequest(request, env)) return false;
+  if (!isTollbitContentRequest(request, env)) return false;
   // Credential presence must not bypass the gate. makeTollbitSiteRequest uses
   // an explicit safe header allowlist even on credentialed public requests.
   return matchedAgentToken(request.headers.get('user-agent')) !== null
@@ -585,15 +664,16 @@ export default {
       }
     }
 
-    if (!isPublicPageRequest(request, env) && testMode) {
+    if (!isTollbitContentRequest(request, env) && testMode) {
       return new Response(null, { status: 404 });
     }
 
     let response: Response;
 
-    const publicPage = isPublicPageRequest(request, env);
+    const tollbitContentRequest = isTollbitContentRequest(request, env);
+    const tollbitAnalyticsRequest = isTollbitAnalyticsRequest(request, env);
     if (
-      publicPage
+      tollbitContentRequest
       && scoreMode === 'shadow'
       && isUnlistedLikelyAutomatedRequest(request)
     ) {
@@ -603,14 +683,14 @@ export default {
       });
     }
     if (
-      publicPage
+      tollbitContentRequest
       && (
         matchesAgent(request.headers.get('user-agent'), TRAINING_ONLY_USER_AGENTS)
         || isCloudflareTrainingAgent(request)
       )
     ) {
       response = policyResponse(request, 403, 'ai_training_not_permitted');
-    } else if (publicPage && isUnverifiedOpenAccessSearchClaim(request)) {
+    } else if (tollbitContentRequest && isUnverifiedOpenAccessSearchClaim(request)) {
       // A claimed free search bot that Cloudflare cannot verify must not fall
       // through to origin and bypass Tollbit's Open Access decision.
       response = policyResponse(request, 403, 'unverified_search_crawler');
@@ -637,7 +717,7 @@ export default {
 
     // Eligibility is a page-route decision, not a response MIME decision:
     // token-denied JSON, training blocks and upstream failures count too.
-    if (publicPage) {
+    if (tollbitAnalyticsRequest) {
       if (env.TOLLBIT_API_KEY) {
         const entry = buildTollbitLogEntry(request, response, new Date(), env);
         // Analytics is best-effort and must not delay or break the page.
