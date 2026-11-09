@@ -541,6 +541,26 @@ async function fetchChapterPublishedTopics(chapterId, language = "en") {
   }
 }
 
+async function fetchChapterTopicPage(chapterId, topicSlug, language = "en") {
+  if (!chapterId || !topicSlug) return null;
+  const languageQuery = language === "as" ? "?lang=as" : "";
+  const url = `${BACKEND.replace(/\/$/, "")}/api/v1/content/chapters/${encodeURIComponent(chapterId)}/topics/${encodeURIComponent(topicSlug)}/page${languageQuery}`;
+  try {
+    const payload = await fetchJson(url);
+    const topic = payload?.topic;
+    if (
+      !topic ||
+      typeof topic.notes !== "string" ||
+      !topic.notes.trim() ||
+      !Array.isArray(topic.questions) ||
+      topic.questions.length === 0
+    ) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // Topical-mapping (Task: topical mapping + topical authority) —
 // bake the related-topic graph (siblings + cross-chapter) into the
 // chapter preload so SSR / curl-no-JS already ships the full
@@ -1320,7 +1340,7 @@ async function main() {
         }
         for (const topic of publishedTopics || []) {
           const locales = [
-            { path: `${chapterUrl}/topic/${topic.topic_slug}`, title: topic.title, definition: topic.definition },
+            { path: `${chapterUrl}/topic/${topic.topic_slug}`, slug: topic.topic_slug, language: "en", title: topic.title, definition: topic.definition },
           ];
           if (
             topic.title_as?.trim() &&
@@ -1329,6 +1349,8 @@ async function main() {
           ) {
             locales.push({
               path: `/as${chapterUrl}/topic/${topic.topic_slug_as}`,
+              slug: topic.topic_slug_as,
+              language: "as",
               title: topic.title_as,
               definition: topic.definition_as,
             });
@@ -1340,13 +1362,30 @@ async function main() {
               )
             ) continue;
             try {
-              const topicTitle = localized.title || topic.title;
+              const topicPageResponse = await fetchChapterTopicPage(
+                chapterPayload.chapter_id,
+                localized.slug,
+                localized.language,
+              );
+              if (!topicPageResponse) {
+                throw new Error("topic page is listed in the sitemap but the complete API payload is unavailable");
+              }
+              const topicPage = topicPageResponse.topic;
+              const topicPreload = {
+                ...preload,
+                data: { ...preload.data, topic_page: topicPageResponse },
+              };
+              const inlineTopicScripts = [
+                `<script>window.__CHAPTER_PRELOAD__=${JSON.stringify(topicPreload).replace(/</g, "\\u003c")};</script>`,
+              ];
+              const topicTitle = topicPage.title || localized.title || topic.title;
+              const topicDescription = topicPage.notes || localized.definition || topicTitle;
               if (topic.topic_slug === "government-spending-multiplier") {
                 assertGovernmentSpendingMultiplierDefinition(localized.definition);
               }
               const topicLanguage = localized.path.startsWith("/as/") ? "as" : "en";
               const topicSchema = topicPageSchema({
-                topic: { title: topicTitle, description: localized.definition },
+                topic: { title: topicTitle, description: topicDescription },
                 chapter: {
                   subject_name: subjName,
                   board_name: bName,
@@ -1359,20 +1398,18 @@ async function main() {
               });
               const topicHtml = await renderOne(renderRoute, htmlTemplate, {
                 url: localized.path,
-                seed: { chapterPreload: preload },
+                seed: { chapterPreload: topicPreload },
                 hydrateKind: "chapter",
-                inlineScripts: inlineChapterScripts,
+                inlineScripts: inlineTopicScripts,
                 head: {
                   title: `${topicTitle} — ${chapterTitle}`,
-                  description: (localized.definition || topicTitle).slice(0, 280),
+                  description: topicDescription.slice(0, 280),
                   canonical: `https://syrabit.ai${localized.path}`,
                   ogImageAlt: `${topicTitle} — ${chapterTitle} | Syrabit.ai`,
                   language: topicLanguage,
-                  alternateUrl: localized.path.startsWith("/as/")
-                    ? `https://syrabit.ai${localized.path.slice(3)}`
-                    : (topic.title_as?.trim() && topic.definition_as?.trim().split(/\s+/).filter(Boolean).length >= 40 && topic.topic_slug_as?.trim()
-                      ? `https://syrabit.ai/as${chapterUrl}/topic/${topic.topic_slug_as}`
-                      : null),
+                  alternateUrl: topicPageResponse.alternate_slug
+                    ? `https://syrabit.ai${topicLanguage === "as" ? "" : "/as"}${chapterUrl}/topic/${encodeURIComponent(topicPageResponse.alternate_slug.trim())}`
+                    : null,
                 },
               });
               writeRoute(localized.path, injectJsonLdIntoHead(topicHtml, topicSchema));
