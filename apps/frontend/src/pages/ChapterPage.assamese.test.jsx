@@ -465,3 +465,4 @@ describe('ChapterPage — standalone topic pages', () => {
   });
 
 });
+});
