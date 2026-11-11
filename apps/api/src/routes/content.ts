@@ -28,7 +28,7 @@ import { createDb } from '../db/client';
 import { boards, classes, streams, subjects, chapters } from '../db/schema';
 import { publicChapterListWhere, serializePublicChapterList } from '../services/public-chapter-list';
 import { completeAssameseTopic, indexablePublishedTopics } from '../services/published-topics';
-import { resolveTopicPageContent, type TopicPageLanguage } from '../services/topic-page';
+import { completeTopicPageLanguages, resolveTopicPageContent, type TopicPageLanguage } from '../services/topic-page';
 import { faqEntriesFromJson, faqJsonLd } from '../services/faq-jsonld';
 import { enforceStudentSearchRateLimit } from '../services/student-search-rate-limit';
 import {
@@ -360,6 +360,8 @@ contentRouter.get('/subjects/:subjectId/topic-index', async (c) => {
     chapterSlug: chapters.slug,
     chapterNumber: chapters.chapterNumber,
     publishedTopics: chapters.publishedTopics,
+    qaEn: chapters.qaEn,
+    qaAs: chapters.qaAs,
   }).from(chapters)
     .innerJoin(subjects, eq(chapters.subjectId, subjects.id))
     .innerJoin(streams, eq(subjects.streamId, streams.id))
@@ -381,11 +383,15 @@ contentRouter.get('/subjects/:subjectId/topic-index', async (c) => {
       .filter(Boolean).join('/');
     const chapterUrl = `/${subjectPath}/${row.chapterSlug}`;
     const rawTopics = safeParse<unknown[]>(row.publishedTopics) ?? [];
-    const topics = indexablePublishedTopics(rawTopics).map((topic) => {
+    const qaEn = safeParse<unknown[]>(row.qaEn) ?? [];
+    const qaAs = safeParse<unknown[]>(row.qaAs) ?? [];
+    const topics = indexablePublishedTopics(rawTopics).flatMap<Record<string, unknown>>((topic) => {
       const slug = String(topic.topic_slug);
       const topicId = String(topic.topic_id ?? topic.id ?? slug);
       const chapterUrlAs = `/as/${row.boardSlug}/${row.classSlug}/${row.subjectSlug}/${row.chapterSlug}`;
+      const completeLanguages = completeTopicPageLanguages(topic, qaEn, qaAs);
       if (topic.language === 'Assamese') {
+        if (!completeLanguages.includes('as') || !completeAssameseTopic(topic)) return [];
         return {
           topic_id: topicId,
           language: 'Assamese',
@@ -396,19 +402,31 @@ contentRouter.get('/subjects/:subjectId/topic-index', async (c) => {
           deep_link_path_as: `${chapterUrlAs}/topic/${encodeURIComponent(slug)}`,
         };
       }
-      return {
+      if (!completeLanguages.includes('en')) {
+        if (!completeLanguages.includes('as') || !completeAssameseTopic(topic)) return [];
+        return [{
+          topic_id: topicId,
+          language: 'Assamese',
+          title_as: topic.title_as,
+          topic_slug_as: topic.topic_slug_as,
+          definition_as: topic.definition_as ?? topic.content_as,
+          chapter_url_as: chapterUrlAs,
+          deep_link_path_as: `${chapterUrlAs}/topic/${encodeURIComponent(String(topic.topic_slug_as))}`,
+        }];
+      }
+      return [{
         topic_id: topicId,
         topic_slug: slug,
         title: topic.title,
         deep_link_path: `${chapterUrl}/topic/${encodeURIComponent(slug)}`,
-        ...(completeAssameseTopic(topic) ? {
+        ...(completeLanguages.includes('as') && completeAssameseTopic(topic) ? {
           title_as: topic.title_as,
           topic_slug_as: topic.topic_slug_as,
           definition_as: topic.definition_as ?? topic.content_as,
           chapter_url_as: chapterUrlAs,
           deep_link_path_as: `${chapterUrlAs}/topic/${encodeURIComponent(String(topic.topic_slug_as))}`,
         } : {}),
-      };
+      }];
     });
     if (topics.length === 0) continue;
     totalTopics += topics.length;

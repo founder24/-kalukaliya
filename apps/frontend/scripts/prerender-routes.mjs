@@ -548,12 +548,25 @@ async function fetchChapterTopicPage(chapterId, topicSlug, language = "en") {
   try {
     const payload = await fetchJson(url);
     const topic = payload?.topic;
+    const returnedSlug = language === "as"
+      ? topic?.topic_slug_as || topic?.topic_slug
+      : topic?.topic_slug || topic?.slug;
     if (
       !topic ||
+      String(payload?.chapter_id || "") !== String(chapterId) ||
+      topic.language !== language ||
+      returnedSlug !== topicSlug ||
       typeof topic.notes !== "string" ||
       !topic.notes.trim() ||
       !Array.isArray(topic.questions) ||
-      topic.questions.length === 0
+      topic.questions.length === 0 ||
+      !topic.questions.some((question) =>
+        question &&
+        typeof question.question === "string" &&
+        question.question.trim() &&
+        ((typeof question.solution === "string" && question.solution.trim()) ||
+          (typeof question.answer === "string" && question.answer.trim()))
+      )
     ) return null;
     return payload;
   } catch {
