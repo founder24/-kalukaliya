@@ -143,10 +143,11 @@ beforeAll(async () => {
     `),
     env.DB.prepare(`
       INSERT INTO chapters (
-        id, subject_id, title, slug, status, published_topics
+        id, subject_id, title, slug, status, published_topics, qa_en
       ) VALUES (
         'indexed', 'index-subject', 'Indexed Topics', 'indexed-topics', 'published',
-        '[{"title":"Energy","slug":"energy","definition_status":"ok","definition":"Energy is the capacity to do work or cause change. It appears in kinetic, potential, thermal, chemical, and electrical forms. Energy can transfer between objects or transform from one form to another. In an isolated system the total energy remains conserved, helping explain physical processes."},{"title":"Missing slug"},{"name":"Named topic","slug":"named-topic","definition_status":"ok","definition":"A clear topic definition identifies the central concept and explains why it matters. It gives students enough context to connect the idea with its chapter, subject, and class. This reviewed example also demonstrates how canonical topic links are formed while navigation-only records remain outside the public index."}]'
+        '[{"topic_id":"energy","title":"Energy","topic_slug":"energy","definition_status":"ok","definition":"Energy is the capacity to do work or cause change. It appears in kinetic, potential, thermal, chemical, and electrical forms. Energy can transfer between objects or transform from one form to another. In an isolated system the total energy remains conserved, helping explain physical processes.","notes_en":"Approved notes explain energy forms, transfers, and conservation with clear examples.","notes_status_en":"approved"},{"title":"Missing slug"},{"topic_id":"named-topic","title":"Named topic","topic_slug":"named-topic","definition_status":"ok","definition":"A clear topic definition identifies the central concept and explains why it matters. It gives students enough context to connect the idea with its chapter, subject, and class. This reviewed example also demonstrates how canonical topic links are formed while navigation-only records remain outside the public index.","notes_en":"Approved notes explain the concept and connect it to its chapter and curriculum.","notes_status_en":"approved"},{"topic_id":"unreviewed","title":"Unreviewed","topic_slug":"unreviewed","definition_status":"ok","definition":"This long definition is present for navigation but has no approved topic notes and no explicitly linked complete question. It must stay out of the standalone index until editorial review publishes the required material."}]',
+        '[{"question":"What is energy?","answer":"Energy is the capacity to do work.","topic_id":"energy"},{"question":"What is the named topic?","solution":"It is a reviewed example concept.","topic_slug":"named-topic"}]'
       )
     `),
     env.DB.prepare(`
@@ -499,18 +500,10 @@ describe('Assamese public content metadata', () => {
       }>;
     };
     expect(payload.subject_id).toBe('subject');
-    expect(payload.total_topics).toBe(2);
+    expect(payload.total_topics).toBe(0);
+    expect(payload.chapters).toEqual([]);
 
-    const motion = payload.chapters.find((chapter) => chapter.chapter_id === 'translated');
-    expect(motion).toMatchObject({
-      chapter_url: '/ahsec/class-12/physics/motion',
-    });
-    expect(motion?.topics[0]).toMatchObject({
-      topic_slug: 'velocity',
-      deep_link_path: '/ahsec/class-12/physics/motion/topic/velocity',
-    });
 
-    expect(payload.chapters.some((chapter) => chapter.chapter_id === 'draft-topics')).toBe(false);
 
     const indexedResponse = await get('/api/v1/content/subjects/index-subject/topic-index');
     expect(indexedResponse.status).toBe(200);
@@ -522,6 +515,7 @@ describe('Assamese public content metadata', () => {
       total_topics: number;
     };
     expect(indexedPayload.total_topics).toBe(2);
+    expect(indexedPayload.chapters[0]?.topics.map(topic => topic.topic_slug)).toEqual(['energy', 'named-topic']);
     expect(indexedPayload.chapters[0]).toMatchObject({
       chapter_url: '/ahsec/class-12/index-subject/indexed-topics',
       topics: [

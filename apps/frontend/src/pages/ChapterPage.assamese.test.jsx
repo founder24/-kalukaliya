@@ -17,6 +17,8 @@ import React from 'react';
 
 const mockSetSearchParams = vi.fn();
 let mockSearchParams = new URLSearchParams();
+let mockTopicSlug = null;
+let mockPathname = '/ahsec/class-11/english/prose';
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({
@@ -24,8 +26,9 @@ vi.mock('react-router-dom', () => ({
     classSlug:   'class-11',
     subjectSlug: 'english',
     chapterSlug: 'prose',
+    topicSlug: mockTopicSlug,
   }),
-  useLocation: () => ({ pathname: '/ahsec/class-11/english/prose' }),
+  useLocation: () => ({ pathname: mockPathname }),
   useSearchParams: () => [mockSearchParams, mockSetSearchParams],
   Link: ({ children, to }) => <a href={to}>{children}</a>,
 }));
@@ -168,6 +171,8 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   delete window.__CHAPTER_PRELOAD__;
   mockSearchParams = new URLSearchParams();
+  mockTopicSlug = null;
+  mockPathname = '/ahsec/class-11/english/prose';
   mockSetSearchParams.mockReset();
   mockSwitchLang.mockReset();
   mockApiGet.mockResolvedValue({ data: {} });
@@ -333,4 +338,131 @@ describe('ChapterPage — has_assamese=false reader tab', () => {
     });
     expect(mockSwitchLang).toHaveBeenCalledWith('as');
   });
+
+describe('ChapterPage — standalone topic pages', () => {
+  it('loads the complete English page contract and renders notes with linked answers', async () => {
+    mockTopicSlug = 'conservation-of-energy';
+    mockPathname = '/ahsec/class-11/english/prose/topic/conservation-of-energy';
+    mockApiGet.mockImplementation((path) => path ===
+      '/content/chapters/ch-prose-1/topics/conservation-of-energy/page'
+      ? Promise.resolve({
+        data: {
+          chapter_id: 'ch-prose-1',
+          topic: {
+            topic_slug: 'conservation-of-energy',
+            language: 'en',
+            title: 'Conservation of Energy',
+            notes: 'Energy remains constant.',
+            questions: [{
+              question: 'What is conserved?',
+              solution: 'Total energy is conserved.',
+            }],
+          },
+          alternate_slug: null,
+        },
+      })
+      : Promise.resolve({ data: {} }));
+    seedPreload(makeChapter({
+      published_topics: [{
+        topic_slug: 'conservation-of-energy',
+        title: 'Conservation of Energy',
+        definition: 'Energy remains constant.',
+        topic_page_available_en: true,
+      }],
+    }));
+
+    render(<ChapterPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Conservation of Energy' })).toBeTruthy();
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/content/chapters/ch-prose-1/topics/conservation-of-energy/page',
+    );
+    expect(screen.getByText('Energy remains constant.')).toBeTruthy();
+    expect(screen.getByText('What is conserved?')).toBeTruthy();
+    expect(screen.getByText('Total energy is conserved.')).toBeTruthy();
+  });
+
+  it('requests the Assamese page contract with lang=as', async () => {
+    mockTopicSlug = 'নিউটনৰ-প্ৰথম-নিয়ম';
+    mockPathname = '/as/ahsec/class-11/english/prose/topic/নিউটনৰ-প্ৰথম-নিয়ম';
+    mockApiGet.mockImplementation((path) => path ===
+      '/content/chapters/ch-prose-1/topics/%E0%A6%A8%E0%A6%BF%E0%A6%89%E0%A6%9F%E0%A6%A8%E0%A7%B0-%E0%A6%AA%E0%A7%8D%E0%A7%B0%E0%A6%A5%E0%A6%AE-%E0%A6%A8%E0%A6%BF%E0%A6%AF%E0%A6%BC%E0%A6%AE/page?lang=as'
+      ? Promise.resolve({
+        data: {
+          chapter_id: 'ch-prose-1',
+          topic: {
+            topic_slug_as: 'নিউটনৰ-প্ৰথম-নিয়ম',
+            language: 'as',
+            title: 'নিউটনৰ প্ৰথম নিয়ম',
+            notes: 'এই নিয়মে জড়তাৰ কথা কয়।',
+            questions: [{
+              question: 'জড়তা কি?',
+              solution: 'জড়তা হৈছে গতিৰ অৱস্থা সলনিৰ বিৰোধিতা।',
+            }],
+          },
+          alternate_slug: 'newtons-first-law',
+        },
+      })
+      : Promise.resolve({ data: {} }));
+    seedPreload(makeChapter());
+
+    render(<ChapterPage />);
+
+    expect(await screen.findByRole('heading', { name: 'নিউটনৰ প্ৰথম নিয়ম' })).toBeTruthy();
+    expect(mockApiGet).toHaveBeenCalledWith(
+      '/content/chapters/ch-prose-1/topics/%E0%A6%A8%E0%A6%BF%E0%A6%89%E0%A6%9F%E0%A6%A8%E0%A7%B0-%E0%A6%AA%E0%A7%8D%E0%A7%B0%E0%A6%A5%E0%A6%AE-%E0%A6%A8%E0%A6%BF%E0%A6%AF%E0%A6%BC%E0%A6%AE/page?lang=as',
+    );
+    expect(screen.getByText('এই নিয়মে জড়তাৰ কথা কয়।')).toBeTruthy();
+  });
+
+  it('keeps incomplete topics as chapter anchors instead of standalone links', async () => {
+    seedPreload(makeChapter({
+      published_topics: [{
+        topic_slug: 'types-of-services',
+        title: 'Types of Services',
+        definition: 'A published topic definition.',
+        topic_page_available_en: false,
+      }],
+    }));
+
+    const { container } = render(<ChapterPage />);
+    const link = container.querySelector('[data-chapter-topic-links] a');
+
+    expect(link?.getAttribute('href')).toBe(
+      '/ahsec/class-11/english/prose#topic-types-of-services',
+    );
+    expect(link?.getAttribute('href')).not.toContain('/topic/');
+  });
+
+  it('links to the standalone page when the API marks it available', async () => {
+    seedPreload(makeChapter({
+      published_topics: [{
+        topic_slug: 'types-of-services',
+        title: 'Types of Services',
+        definition: 'A published topic definition.',
+        topic_page_available_en: true,
+      }],
+    }));
+
+    const { container } = render(<ChapterPage />);
+    const link = container.querySelector('[data-chapter-topic-links] a');
+
+    expect(link?.getAttribute('href')).toBe(
+      '/ahsec/class-11/english/prose/topic/types-of-services',
+    );
+  });
+
+  it('shows a real not-found state when the resolver rejects an incomplete topic', async () => {
+    mockTopicSlug = 'unreviewed-topic';
+    mockPathname = '/ahsec/class-11/english/prose/topic/unreviewed-topic';
+    mockApiGet.mockRejectedValue({ response: { status: 404 } });
+    seedPreload(makeChapter());
+
+    render(<ChapterPage />);
+
+    expect(await screen.findByTestId('topic-not-found')).toBeTruthy();
+    expect(screen.getByText(/not published for this language/i)).toBeTruthy();
+  });
+
+});
 });
