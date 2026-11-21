@@ -15,6 +15,7 @@ google-cloud-storage
 gunicorn
 ddgs
 httpx
+brotli>=1.2.1
 jinja2
 markdown
 multidict>=6.9.1,<7
@@ -38,7 +39,7 @@ starlette>=1.3.1
 tenacity
 urllib3>=2.8.0
 uvicorn
-pypdf>=6.19.0
+pypdf>=6.21.2
 pypdfium2>=5.13.0
 
 # Pinned directly (not otherwise a direct dependency) to force a resolved
